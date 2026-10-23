@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+:root { font-family: Inter, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; --bg: #111315; --bg-canvas: #111315; --panel: #181b1f; --panel-raised: #20242a; --panel-elevated: #272c33; --line: #30353d; --line-soft: #282d34; --muted: #a4acb8; --text: #f2f4f7; --text-secondary: #a4acb8; --text-dim: #818b98; --accent: #a6f36b; --audio: #9c8ae8; --warning: #e6ad4c; --error: #f06a6a; --violet: #a88cff; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 980px; min-height: 100vh; }
+button, input, textarea { font: inherit; }
+button { color: inherit; }
+::selection { background: #b4f36b55; }
+
+/* Fit the desktop editor into resizable browser and HiDPI windows. */
+body{min-width:0;}
