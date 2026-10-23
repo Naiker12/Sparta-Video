@@ -14,7 +14,7 @@ type EditorState = {
   selectClip: (id: string) => void; selectMedia: (id: string) => void; setPlayhead: (time: number) => void
   setZoom: (zoom: number) => void; setPlaying: (playing: boolean) => void; addAssets: (assets: MediaItem[]) => void
   addMedia: (asset: MediaItem, at?: number, trackId?: string) => string; updateClip: (clipId: string, changes: Partial<Clip>) => void
-  moveClip: (clipId: string, start: number, duration?: number) => void; splitClip: (clipId: string, time: number) => void
+  moveClip: (clipId: string, start: number, duration?: number) => void; moveClipToNewTrack: (clipId: string) => void; splitClip: (clipId: string, time: number) => void
   deleteClip: (clipId: string) => void; addMarker: (time: number) => void; removeMarker: (markerId: string) => void; toggleSnap: () => void; addTrack: (kind: 'video' | 'audio') => void
   toggleMute: (id: string) => void; toggleLock: (id: string) => void; undo: () => void; redo: () => void
 }
@@ -125,6 +125,17 @@ export const useEditorStore = create<EditorState>()(persist((set) => ({
     if (!owner || state.lockedTracks.includes(owner.id)) return state
     const tracks = copyTracks(state.tracks).map((track) => ({ ...track, clips: track.clips.map((clip) => clip.id === clipId ? { ...clip, start: Math.max(0, start), ...(duration === undefined ? {} : { duration: Math.max(1 / state.sequence.frameRate, duration) }) } : clip) }))
     return JSON.stringify(tracks) === JSON.stringify(state.tracks) ? state : commit(state, { tracks })
+  }),
+  moveClipToNewTrack: (clipId) => set((state) => {
+    const source = state.tracks.find((track) => track.clips.some((clip) => clip.id === clipId))
+    const clip = source?.clips.find((item) => item.id === clipId)
+    if (!source || !clip || state.lockedTracks.includes(source.id)) return state
+    const prefix = source.kind === 'video' ? 'v' : 'a'
+    let number = state.tracks.filter((track) => track.kind === source.kind).length + 1
+    while (state.tracks.some((track) => track.id === `${prefix}${number}`)) number += 1
+    const newTrack: Track = { id: `${prefix}${number}`, name: `${source.kind === 'video' ? 'Video' : 'Audio'} ${String(number).padStart(2, '0')}`, kind: source.kind, clips: [clip] }
+    const tracks = copyTracks(state.tracks).map((track) => track.id === source.id ? { ...track, clips: track.clips.filter((item) => item.id !== clipId) } : track)
+    return { ...commit(state, { tracks: [...tracks, newTrack] }), selectedClipId: clipId }
   }),
   splitClip: (clipId, time) => set((state) => {
     const track = state.tracks.find((item) => item.clips.some((clip) => clip.id === clipId))

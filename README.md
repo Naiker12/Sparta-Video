@@ -2,7 +2,7 @@
 
 Prototipo local de un editor de vídeo de escritorio para Windows, construido con React, TypeScript y Vite. Permite modificar una secuencia estructurada de demostración, sincroniza el monitor ilustrativo, el inspector y la línea de tiempo, mantiene deshacer/rehacer de las operaciones integradas y guarda parte del modelo en el navegador.
 
-**Todavía no** decodifica medios importados, reproduce vídeo/audio real, compone la secuencia, genera un archivo final ni conecta un proveedor de IA. La importación actual cataloga metadatos y no conserva el archivo fuente. Consulta la [guía funcional](GUIA_UI.md), el [inventario de interfaz y componentes](docs/INVENTARIO_UI.md) para revisar qué está conectado y qué sigue simulado, y la [especificación de producto](docs/PRODUCT-SPEC.md) para conocer las fases y sus criterios.
+**Todavía no** decodifica medios importados, reproduce vídeo/audio real, compone la secuencia, genera un archivo final ni conecta un proveedor de IA. La importación actual cataloga metadatos y no conserva el archivo fuente. El inventario completo, las interacciones, la arquitectura y el plan de evolución de la interfaz están consolidados en [docs/INTERFAZ_Y_ARQUITECTURA.md](docs/INTERFAZ_Y_ARQUITECTURA.md).
 
 La paleta base se define con variables de diseño semánticas. El estado de guardado refleja el resultado real del almacenamiento local; si el navegador no permite guardar la distribución de paneles, esta se conserva solo durante la sesión actual.
 
@@ -46,6 +46,4 @@ npm test
 - `src/features/editor/timecode.ts`: conversión y presentación temporal según la frecuencia de cuadros.
 - `src/features/editor/services/`: contratos validados y proveedores simulados sustituibles.
 - `src/features/editor/components/`: biblioteca, monitor, inspector, línea de tiempo, asistente, diálogos y controles.
-- `GUIA_UI.md`: acciones y límites por control.
-- `docs/INVENTARIO_UI.md`: mapa detallado de la interfaz, componentes, bibliotecas y funciones conectadas o pendientes.
-- `docs/PRODUCT-SPEC.md`: principios, contratos, estado, fases y criterios de salida.
+- `docs/INTERFAZ_Y_ARQUITECTURA.md`: documento maestro único de interfaz, estado funcional, estructura, librerías, requisitos del editor de vídeo con IA, arquitectura objetivo, referencias y fases.
