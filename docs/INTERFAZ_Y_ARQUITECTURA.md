@@ -24,7 +24,7 @@ El objetivo de producto es un **editor de vídeo con IA** (interpretación basad
 | Inspector | `InspectorPanel.tsx` | Pestañas Clip/Audio/Movimiento, transformación, opacidad, mezcla, volumen, fundidos y datos de keyframes | Guarda valores en el modelo; no procesa imagen/sonido. Los keyframes no se interpolan. |
 | Línea de tiempo | `TimelinePanel.tsx` | Selección, movimiento, recorte, Razor, pistas, marcadores, snapping, zoom, scroll sincronizado y expansión | Cambia datos de muestra; no sincroniza ni compone medios. |
 | Asistente | `AssistantPanel.tsx` | Borrador, sugerencias y envío a respuesta de demostración | No hay proveedor conectado; no aplica propuestas. Adjuntos/proveedor no están conectados. |
-| Preferencias | `PreferencesSheet.tsx` | Shell lateral redimensionable con navegación General/Apariencia/Atajos; animación, snapping, layout y atajos consultables | Tema oscuro único; escala de interfaz no implementada. El panel responsive se apila en móvil. |
+| Preferencias | `PreferencesSheet.tsx` | Drawer lateral redimensionable con navegación General/Apariencia/Atajos; animación, snapping, layout y atajos consultables | Tema oscuro único; escala de interfaz no implementada. Mantiene el formato lateral en ventanas estrechas y deja visible parte del editor. |
 | Exportación | `ExportDialog.tsx` | Opciones de muestra, progreso cancelable y resultado dentro del diálogo | No crea archivo ni usa códec. |
 
 ### 2.1 Interacciones que ya están conectadas
@@ -45,7 +45,9 @@ Las etiquetas de estado de producto deben corresponder a hechos observables: **C
 
 ### 2.3 Shell de Preferencias
 
-El panel de Preferencias usa una cabecera estable, navegación por categorías y una superficie de contenido independiente. Se mejoró respecto a la referencia para ofrecer más ancho de lectura, separar cada ajuste como tarjeta y mostrar un control de redimensionado reconocible en vez de una línea de borde continua. En pantallas pequeñas se convierte en una vista completa con categorías horizontales. Mantiene las mismas acciones existentes; la escala de interfaz sigue deshabilitada y el tema disponible continúa siendo Sparta oscuro.
+El panel de Preferencias es un drawer anclado a la derecha, no una ventana de pantalla completa. Su ancho inicial compacto es 460 px, se puede ajustar entre 360 y 560 px, y conserva una franja del editor detrás incluso en ventanas pequeñas. La navegación por categorías permanece a la izquierda; el contenido agrupa cada ajuste en filas compactas con descripción y control alineado, para dar prioridad a la lectura sin desperdiciar espacio. Se mantiene una cabecera estable, cierre accesible y estados existentes. En viewports de hasta 640 px se reduce el ancho y la navegación; debajo de 390 px se compactan las etiquetas. Estas decisiones responsive son una inferencia de diseño para respetar el flujo lateral pedido y evitar el drawer a pantalla completa. La escala sigue deshabilitada y el único tema disponible es Sparta oscuro.
+
+**Referencias consultadas:** [Preferencias de Adobe Premiere](https://helpx.adobe.com/premiere/desktop/get-started/preferences-and-settings/general-preferences.html) organiza ajustes en categorías; [administrar espacios de trabajo de Premiere](https://helpx.adobe.com/premiere/desktop/get-started/tour-the-workspace/manage-workspaces.html) documenta la restauración del espacio; el [patrón de diálogo modal WAI-ARIA](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) orienta cierre, foco y teclado, y [WCAG 2.2: foco no oculto](https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum) advierte que el foco no quede totalmente tapado. Las referencias aportan patrones, mientras que el ancho y comportamiento exactos son decisiones de diseño de Sparta.
 
 ## 3. Arquitectura existente
 
@@ -257,7 +259,7 @@ Las referencias siguientes sirven para derivar prácticas de interacción y crit
 
 ## 11. Seguimiento de implementación
 
-Integrado en el prototipo: escala tipográfica y tokens iniciales; biblioteca con filtros/estados más honestos; monitor ilustrativo con transporte y controles; inspector con propiedades; línea de tiempo con regla adaptativa, snapping, guía, etiquetas de gesto, marcadores, scroll sincronizado y atajos; exportación demo en diálogo; menús/diálogos Base UI; paneles redimensionables; docs en español. Preferencias se organizó como shell: drawer más ancho, navegación lateral, controles presentados en tarjetas, asa de redimensionado identificable y categorías horizontales en ventanas pequeñas.
+Integrado en el prototipo: escala tipográfica y tokens iniciales; biblioteca con filtros/estados más honestos; monitor ilustrativo con transporte y controles; inspector con propiedades; línea de tiempo con regla adaptativa, snapping, guía, etiquetas de gesto, marcadores, scroll sincronizado y atajos; exportación demo en diálogo; menús/diálogos Base UI; paneles redimensionables; docs en español. Preferencias usa un drawer lateral compacto y redimensionable, categorías laterales, filas de ajustes densas, y una adaptación estrecha que evita cubrir toda la pantalla.
 
 Pendiente: terminar división de `App.css`; auditoría WCAG completa y lector de pantalla; revisión visual capturada por tamaños; foco y gestos alternativos en cada control; acceso portable a proyecto/medios; decodificación, composición/audio y render reales; proveedor de IA con privacidad y revisión de operaciones. En el prototipo el timecode secundario del monitor se elevó al token semántico de texto para dar más margen de contraste.
 
