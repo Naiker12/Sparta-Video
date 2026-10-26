@@ -1,6 +1,6 @@
 # Sparta Video — interfaz, arquitectura y plan del editor con IA
 
-**Actualizado:** 23 de octubre de 2026  
+**Actualizado:** 26 de octubre de 2026
 **Alcance:** documento maestro único de la interfaz: inventario real, estructura del código, arquitectura objetivo, investigación de referencias y trabajo pendiente.  
 **Estado actual:** prototipo local de edición estructural. No es todavía un editor audiovisual real.
 
@@ -8,9 +8,9 @@
 
 ## 1. Resumen
 
-Sparta Video tiene una interfaz de escritorio con biblioteca, monitor, inspector, asistente y línea de tiempo multipista. React presenta el estado; Zustand mantiene el modelo de demostración y el historial; los contratos TypeScript/Zod definen entradas para servicios simulados. La UI ya permite organizar clips y editar algunos valores del modelo.
+Sparta Video tiene una interfaz de escritorio con biblioteca, monitor, inspector, asistente y línea de tiempo multipista. React presenta el estado; Zustand mantiene el proyecto y su historial reversible. Los proyectos nuevos parten vacíos. La UI permite organizar clips y editar algunos valores estructurales.
 
-La aplicación **no conserva los archivos importados, no decodifica ni reproduce vídeo/audio, no compone una secuencia real, no exporta un archivo y no conecta un proveedor de IA**. El monitor y las ondas son ilustraciones. No se deben presentar como funciones reales.
+El asistente ya conecta chat con modelos de texto compatibles, guarda conversaciones localmente por proyecto y envía un resumen del proyecto junto con el historial reciente. El panel de audio genera voz y efectos con ElevenLabs. La aplicación **todavía no conserva los archivos importados, decodifica ni reproduce vídeo/audio, compone una secuencia real ni exporta un archivo**. El asistente propone y explica; no aplica cambios en la línea de tiempo.
 
 El objetivo de producto es un **editor de vídeo con IA** (interpretación basada en el contexto de Sparta Video): edición multipista no destructiva, medios recuperables, reproducción y exportación reales, y asistencia de IA que propone cambios revisables. El asistente no debe alterar el proyecto sin aprobación explícita.
 
@@ -20,12 +20,12 @@ El objetivo de producto es un **editor de vídeo con IA** (interpretación basad
 | --- | --- | --- | --- |
 | Barra superior | `src/App.tsx` | Proyecto, ajustes de secuencia, deshacer/rehacer, estado de guardado, preferencias, asistente y exportación | El estado de guardado corresponde al almacenamiento del navegador. El avatar es decorativo; duplicar proyecto está deshabilitado. |
 | Biblioteca | `MediaLibraryPanel.tsx` | Buscar, filtrar vídeo/audio/imagen, ordenar, lista/cuadrícula, seleccionar, importar fichas y arrastrarlas | La ficha conserva metadatos básicos, no el archivo ni una ruta recuperable. Miniaturas no provienen del medio. |
-| Monitor | `PreviewMonitor.tsx` | Reloj de muestra, scrub, controles de cuadro, bucle, guías, zoom y pantalla completa | Muestra ilustración, no el cuadro actual de la secuencia. La calidad solo cambia su etiqueta. |
+| Monitor | `PreviewMonitor.tsx` | Reloj, navegación temporal, guías, zoom y pantalla completa | Muestra estado vacío y límites de reproducción; el motor de medios no está conectado. |
 | Inspector | `InspectorPanel.tsx` | Pestañas Clip/Audio/Movimiento, transformación, opacidad, mezcla, volumen, fundidos y datos de keyframes | Guarda valores en el modelo; no procesa imagen/sonido. Los keyframes no se interpolan. |
 | Línea de tiempo | `TimelinePanel.tsx` | Selección, movimiento, recorte, Razor, pistas, marcadores, snapping, zoom, scroll sincronizado y expansión | Cambia datos de muestra; no sincroniza ni compone medios. |
-| Asistente | `AssistantPanel.tsx` | Borrador, sugerencias y envío a respuesta de demostración | No hay proveedor conectado; no aplica propuestas. Adjuntos/proveedor no están conectados. |
-| Preferencias | `PreferencesSheet.tsx` | Drawer lateral redimensionable con navegación General/Apariencia/Atajos; animación, snapping, layout y atajos consultables | Tema oscuro único; escala de interfaz no implementada. Mantiene el formato lateral en ventanas estrechas y deja visible parte del editor. |
-| Exportación | `ExportDialog.tsx` | Opciones de muestra, progreso cancelable y resultado dentro del diálogo | No crea archivo ni usa códec. |
+| Asistente | `AssistantPanel.tsx`, `services/ai-chat.ts` | Chat real al modelo seleccionado; historial local por proyecto; contexto estructural de secuencia, pistas, clips y medios; profundidad breve/equilibrada/profunda; chat de planeación y edición | El nivel de profundidad ajusta instrucciones; todavía no cambia parámetros de razonamiento de forma uniforme en todos los proveedores. No aplica propuestas ni admite adjuntos. |
+| Preferencias | `PreferencesSheet.tsx`, `AIProviderSettings.tsx` | Drawer lateral; perfiles IA, catálogos, capacidades y asignaciones por tarea | Perfiles/modelos quedan en `localStorage`. Tauri guarda claves en el llavero de Windows. El chat usa el catálogo de texto; generación de imagen y vídeo pendiente. |
+| Exportación | `src/App.tsx` | Acción deshabilitada hasta conectar el motor de render | No hay diálogo ni exportación simulada. |
 
 ### 2.1 Interacciones que ya están conectadas
 
@@ -34,12 +34,12 @@ El objetivo de producto es un **editor de vídeo con IA** (interpretación basad
 - **Línea de tiempo:** arrastrar el cuerpo mueve clips; las asas del clip seleccionado recortan. Ajuste al cuadro y, dentro de 8 px, alineación visual con cabezal, marcador o borde de otro clip. Durante el gesto se ve inicio, duración y delta. Un clip puede seleccionarse para usar flechas; `Alt + flechas` recorta el borde derecho, `Ctrl + Alt + flechas` el izquierdo; `Shift` usa un paso de un segundo. En la región de pistas las flechas mueven el cabezal.
 - **Razor:** `C` activa la herramienta; clic sobre el clip divide en el punto indicado si ambas partes son válidas. `V` vuelve a selección.
 - **Marcadores:** `M` añade en el cabezal; clic navega al tiempo; foco + Supr/Retroceso o clic derecho elimina. `[` y `]` navegan entre marcadores.
-- **Atajos globales:** `Space` reproduce/pausa la simulación; `Ctrl/Cmd+Z` y `Ctrl/Cmd+Shift+Z` deshacen/rehacen; `Ctrl/Cmd+K` busca medios. El contexto de entrada y controles interactivos evita capturas globales accidentales.
+- **Atajos globales:** `Space` queda reservado para reproducción cuando se integre el motor; `Ctrl/Cmd+Z` y `Ctrl/Cmd+Shift+Z` deshacen/rehacen; `Ctrl/Cmd+K` busca medios. El contexto de entrada y controles interactivos evita capturas globales accidentales.
 - **Scroll:** biblioteca, asistente, preferencias y línea de tiempo tienen áreas internas. Pistas y controles de pista comparten el desplazamiento vertical; la regla queda fija. No se debe necesitar el scroll vertical de página para editar.
 
 ### 2.2 Estados que la interfaz debe comunicar
 
-La biblioteca distingue `demo`, `catalog-only`, `ready`, `processing`, `missing`, `error` y estado desconocido. `processing` es visual de muestra; no representa una tarea ejecutándose. Relocalizar un medio está deshabilitado porque todavía no existe una referencia durable. Importar no equivale a guardar el archivo fuente.
+La biblioteca distingue `catalog-only`, `ready`, `processing`, `missing`, `error` y estado desconocido. Los proyectos nuevos empiezan sin medios ni clips precargados. Relocalizar un medio está deshabilitado porque todavía no existe una referencia durable. Importar no equivale a guardar el archivo fuente.
 
 Las etiquetas de estado de producto deben corresponder a hechos observables: **Conectado**, **Demostración**, **Pendiente**, **Deshabilitado** o **Error**. El éxito de un mock nunca debe leerse como éxito de decodificación, guardado portable, IA aplicada o exportación.
 
@@ -57,7 +57,11 @@ flowchart LR
   Panels --> Store[Zustand: modelo, acciones e historial]
   Store --> Browser[(localStorage: persistencia parcial)]
   Panels --> Contracts[Contratos TS + esquemas Zod]
-  Contracts --> Mocks[Servicios de demostración]
+  Panels --> ProviderCatalog[Catálogo y chat de modelos]
+  ProviderCatalog --> TauriCommands[Comandos Tauri en Rust]
+  TauriCommands --> CredentialVault[Llavero de Windows]
+  TauriCommands --> ProviderHTTP[Catálogo, chat y generación de audio]
+  Panels --> ChatMemory[(Historial local por proyecto)]
   Panels --> BaseUI[Base UI: menús y diálogos]
   Panels --> Icons[Lucide React]
   App --> Layout[Paneles redimensionables]
@@ -74,23 +78,35 @@ src/
 │   ├── tokens.css                       # variables visuales semánticas
 │   └── editor-polish.css                # refinamientos de interacción/paneles
 └── features/editor/
-    ├── model.ts                         # tipos y datos iniciales de demostración
+├── model.ts                         # tipos de secuencia, clip y medio
     ├── editor-store.ts                  # estado, acciones, historial y persistencia parcial
     ├── timecode.ts                      # conversión temporal y regla
     ├── components/
     │   ├── MediaLibraryPanel.tsx        # biblioteca y catálogo
-    │   ├── PreviewMonitor.tsx            # monitor ilustrativo
+    │   ├── PreviewMonitor.tsx            # estado vacío, encuadre y navegación temporal
     │   ├── InspectorPanel.tsx            # propiedades del elemento seleccionado
     │   ├── TimelinePanel.tsx             # timeline, pistas y gestos
-    │   ├── AssistantPanel.tsx            # asistente de demostración
+    │   ├── AssistantPanel.tsx            # chat con historial local por proyecto
+    │   ├── AIProviderSettings.tsx         # perfiles, capacidades y ruteo por tarea
     │   ├── PreferencesSheet.tsx          # preferencias y lista de atajos
-    │   ├── ExportDialog.tsx              # diálogo y resultado simulado
     │   ├── RenameProjectDialog.tsx       # cambio de nombre
     │   ├── ActionMenu.tsx / controls.tsx # primitivas de interacción reutilizables
     └── services/
         ├── contracts.ts                 # contratos/esquemas de servicios
-        └── mock-services.ts              # implementaciones falsas
+        ├── ai-preferences.ts            # preferencias de modelo expuestas al asistente
+        ├── ai-provider-registry.ts      # perfiles, validación y carga de catálogos
+        ├── ai-chat.ts                   # chat y contexto del proyecto
+        ├── media-catalog.ts             # validación de fichas de medios
+        ├── audio-generation.ts          # generación de voz y efectos
+        └── ai-provider-registry.ts      # perfiles, validación y carga de catálogos
+src-tauri/
+├── src/lib.rs                           # comandos nativos: catálogo y credenciales
+├── src/main.rs                          # entrada de escritorio
+├── capabilities/default.json            # permisos IPC mínimos
+└── tauri.conf.json                      # ventana, CSP y empaquetado Windows
 ```
+
+El catálogo consulta los endpoints de proveedores soportados. El chat de escritorio se ejecuta en Rust/Tauri y mantiene las claves en `keyring`; implementa formatos de chat compatibles con OpenAI, Anthropic y Gemini. El historial se conserva localmente en el perfil del proyecto y las últimas interacciones, junto a un resumen sin rutas locales, se envían al proveedor seleccionado al responder. El navegador ofrece llamadas directas de sesión, sujetas a CORS.
 
 ### 3.2 Dependencias presentes
 
@@ -171,7 +187,7 @@ No están presentes/conectados FFmpeg, demuxer/decodificador, motor de audio, re
 
 - Presets claros y editables, destino, códec/contenedor, resolución, fps, audio, rango de render y estimaciones.
 - Encolar render fuera del hilo de UI; progreso por etapa, pausa/cancelación si el motor lo permite, recuperación y mensajes accionables.
-- Confirmar archivo creado, ruta, propiedades inspeccionadas y reproducción verificable. Hasta entonces, mantener la demo identificada.
+- Confirmar archivo creado, ruta, propiedades inspeccionadas y reproducción verificable. Hasta entonces, mantener la exportación deshabilitada y explicar el requisito pendiente.
 
 ## 7. Arquitectura objetivo e integración
 
@@ -189,8 +205,9 @@ flowchart TB
 ```
 
 - Mantener componentes visuales sin lógica de códecs o llamadas de IA. El store coordina estado de interfaz; reglas de tiempo y edición viven en dominio comprobable.
+- El puente Tauri consulta catálogos de OpenAI, Anthropic, Gemini, OpenRouter, Groq, Mistral, DeepSeek, ElevenLabs y APIs compatibles. Guarda claves en el llavero de Windows. El panel Audio ya usa ElevenLabs para cargar voces, generar narración y efectos sonoros, previsualizar y descargar MP3; aún no inserta el resultado en el proyecto. Las llamadas genéricas de generación de texto, imagen y vídeo siguen pendientes. React no escribe claves en `localStorage`, el proyecto o logs; en la vista web la clave de sesión permanece solo en memoria.
 - Definir puertos con contrato para `ProjectRepository`, `MediaIngestService`, `ThumbnailService`, `PlaybackEngine`, `AudioEngine`, `RenderService` y `AIProvider`.
-- Cada tarea larga informa progreso, cancelación, resultado y errores tipados. Proveedores demo y reales implementan el mismo puerto.
+- Cada tarea larga informa progreso, cancelación, resultado y errores tipados. Adaptadores de prueba y de producción implementan el mismo puerto.
 - Aplicar operaciones de IA y gestos de edición como un comando validado, reversible y agrupado; la UI recibe el resultado del comando y no simula que se aplicó antes de confirmarlo.
 - Evaluar WebCodecs, FFmpeg/WASM o un proceso nativo con prototipos de formatos objetivo; después decidir empaquetado de escritorio (Tauri/Electron u otro) según soporte, rendimiento, licencias, tamaño, seguridad y acceso a archivos.
 
@@ -259,7 +276,7 @@ Las referencias siguientes sirven para derivar prácticas de interacción y crit
 
 ## 11. Seguimiento de implementación
 
-Integrado en el prototipo: escala tipográfica y tokens iniciales; biblioteca con filtros/estados más honestos; monitor ilustrativo con transporte y controles; inspector con propiedades; línea de tiempo con regla adaptativa, snapping, guía, etiquetas de gesto, marcadores, scroll sincronizado y atajos; exportación demo en diálogo; menús/diálogos Base UI; paneles redimensionables; docs en español. Preferencias usa un drawer lateral compacto y redimensionable, categorías laterales, filas de ajustes densas, y una adaptación estrecha que evita cubrir toda la pantalla.
+Integrado: proyectos nuevos vacíos; migración que limpia el proyecto costero precargado; chat con proveedor, historial por proyecto y resumen contextual; selector de modelo y profundidad de análisis; catálogo de medios; panel de voz/efectos con ElevenLabs; monitor sin imagen inventada y exportación deshabilitada hasta conectar el renderizador. Preferencias usa un drawer lateral compacto y redimensionable, categorías laterales, filas de ajustes densas y adaptación estrecha.
 
 Pendiente: terminar división de `App.css`; auditoría WCAG completa y lector de pantalla; revisión visual capturada por tamaños; foco y gestos alternativos en cada control; acceso portable a proyecto/medios; decodificación, composición/audio y render reales; proveedor de IA con privacidad y revisión de operaciones. En el prototipo el timecode secundario del monitor se elevó al token semántico de texto para dar más margen de contraste.
 

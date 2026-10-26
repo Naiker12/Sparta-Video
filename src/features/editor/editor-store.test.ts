@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getProjectSaveStatus, useEditorStore } from './editor-store'
-import { demoMedia, demoTracks } from './model'
+import { demoMedia, demoTracks } from './editor-store.fixtures'
 
 describe('editor project operations', () => {
   afterEach(() => vi.restoreAllMocks())

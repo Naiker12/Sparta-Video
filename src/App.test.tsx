@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { useEditorStore } from './features/editor/editor-store'
-import { demoMedia, demoTracks } from './features/editor/model'
+import { demoMedia, demoTracks } from './features/editor/editor-store.fixtures'
 
 describe('Sparta Video editor preview', () => {
   beforeEach(() => useEditorStore.setState({ projectName: 'Coastal film', sequence: { width: 1920, height: 1080, frameRate: 24 }, tracks: demoTracks, assets: demoMedia, markers: [], selectedClipId: 'c2', selectedMediaId: null, snapToFrames: true, activeTool: 'select', playhead: 8.8, zoom: 1, playing: false, mutedTracks: [], lockedTracks: [], past: [], future: [] }))
@@ -15,35 +15,21 @@ describe('Sparta Video editor preview', () => {
     expect(screen.getAllByText('coastline_drone_04.mp4').length).toBeGreaterThan(1)
   })
 
-  it('can submit a simulated assistant prompt', async () => {
+  it('does not fabricate an assistant answer when a text model is not configured', () => {
     render(<App />)
-    fireEvent.change(screen.getByLabelText('Message Sparta AI'), { target: { value: 'Make it cinematic' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
-    expect(await screen.findByText('Mock proposal · review only')).toBeInTheDocument()
-    expect(screen.getByText('0 project changes · none applied')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Message for Sparta AI'), { target: { value: 'Make it cinematic' } })
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
+    expect(screen.queryByText(/propuesta de muestra|mock proposal/i)).not.toBeInTheDocument()
   })
 
-  it('advances playback by the active sequence frame rate', () => {
-    vi.useFakeTimers()
-    const { unmount } = render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
-    act(() => { vi.advanceTimersByTime(1000) })
-    expect(useEditorStore.getState().playhead).toBeCloseTo(9.8)
-    unmount()
-    vi.useRealTimers()
+  it('keeps playback disabled until a media engine is available', () => {
+    render(<App />)
+    expect(screen.getByRole('button', { name: 'Playback unavailable' })).toBeDisabled()
   })
 
-  it('runs the export demo through a cancellable service and states that no file was created', async () => {
+  it('does not present a simulated export as a real action', () => {
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Export preview' }))
-    expect(await screen.findByText(/no se creó ningún archivo/i, {}, { timeout: 2500 })).toBeInTheDocument()
-  })
-
-  it('closes the export dialog with Escape even when its filename field has focus', () => {
-    render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
-    fireEvent.keyDown(screen.getByLabelText('Nombre del archivo'), { key: 'Escape' })
+    expect(screen.getByRole('button', { name: 'Export unavailable' })).toBeDisabled()
     expect(screen.queryByRole('dialog', { name: 'Export video' })).not.toBeInTheDocument()
   })
 
@@ -81,7 +67,7 @@ describe('Sparta Video editor preview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Inspector options' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy clip name' }))
     expect(writeText).toHaveBeenCalledWith('coastline_drone_04.mp4')
-    expect(await screen.findByText('Nombre del clip copiado.')).toBeInTheDocument()
+    expect(await screen.findByText(/Nombre del clip copiado\.|Clip name copied\./)).toBeInTheDocument()
   })
 
   it('does not expose a disabled status action in the footer', () => {
