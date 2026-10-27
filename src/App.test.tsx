@@ -175,4 +175,21 @@ describe('Sparta Video editor preview', () => {
     expect(useEditorStore.getState().playhead).toBeCloseTo(Math.round((224 / 31) * 24) / 24)
     fireEvent.pointerUp(window)
   })
+
+  it('enables export and opens export dialog when ready media is present on the timeline', () => {
+    useEditorStore.setState((state) => ({
+      ...state,
+      assets: state.assets.map((asset, i) => i === 0 ? { ...asset, status: 'ready' as const } : asset),
+    }))
+    render(<App />)
+    const exportButton = screen.getByRole('button', { name: 'Export video' })
+    expect(exportButton).toBeEnabled()
+
+    fireEvent.click(exportButton)
+    expect(screen.getByRole('dialog', { name: 'Export video sequence' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /1080p Full HD/i })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Export video sequence' })).not.toBeInTheDocument()
+  })
 })

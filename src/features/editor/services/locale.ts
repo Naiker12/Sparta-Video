@@ -4,7 +4,9 @@ export type Language = 'es' | 'en'
 const STORAGE_KEY = 'sparta-video-language'
 const read = (): Language => {
   try {
-    const isTest = (typeof (globalThis as any).process !== 'undefined' && (globalThis as any).process?.env?.NODE_ENV === 'test') || (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test')
+    const proc = (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } }).process
+    const meta = import.meta as unknown as { env?: { MODE?: string } }
+    const isTest = proc?.env?.NODE_ENV === 'test' || meta?.env?.MODE === 'test'
     const stored = window.localStorage.getItem(STORAGE_KEY)
     if (stored === 'en' || stored === 'es') return stored
     return isTest ? 'en' : 'es'

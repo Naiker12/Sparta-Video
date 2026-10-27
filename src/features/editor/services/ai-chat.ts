@@ -24,7 +24,7 @@ export async function sendAIChat(input: {
   const base = profile.baseUrl.replace(/\/+$/, '')
   const modeInstruction = mode === 'create'
     ? 'Ayuda a planear un video nuevo. Entrega ideas concretas para guion, escenas y recursos; no afirmes que generaste medios ni que cambiaste el proyecto.'
-    : 'Ayuda a analizar y mejorar la edición actual. Propón acciones concretas, pero no afirmes que modificaste el proyecto.'
+    : 'Ayuda a analizar y mejorar la edición actual. Si propones cambios concretos (como añadir marcadores, ajustar volumen, dividir clips o añadir pistas), incluye al final un bloque ```json con formato: { "title": "...", "summary": "...", "operations": [ { "type": "add_marker", "time": 0, "label": "..." }, { "type": "set_clip_volume", "clipId": "c1", "volume": 80 }, { "type": "split_clip", "clipId": "c1", "time": 5 } ] } para que la persona pueda aplicarlos directamente con un clic.'
   const depthInstruction = depth === 'deep'
     ? 'Haz un análisis cuidadoso y profundo. Comprueba supuestos, señala riesgos y termina con una recomendación concreta. Expón una explicación breve, no razonamiento interno privado.'
     : depth === 'concise'
@@ -34,13 +34,17 @@ export async function sendAIChat(input: {
   const url = profile.kind === 'anthropic'
     ? `${base}/messages`
     : profile.kind === 'gemini'
-      ? `${base}/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`
+      ? `${base}/models/${encodeURIComponent(modelId)}:generateContent`
       : `${base}/chat/completions`
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (profile.kind === 'anthropic') {
     headers['x-api-key'] = apiKey
     headers['anthropic-version'] = '2023-06-01'
-  } else if (profile.kind !== 'gemini' && apiKey) headers.Authorization = `Bearer ${apiKey}`
+  } else if (profile.kind === 'gemini') {
+    if (apiKey) headers['x-goog-api-key'] = apiKey
+  } else if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`
+  }
   const history = messages.slice(-20)
   const body: Record<string, unknown> = profile.kind === 'anthropic'
     ? { model: modelId, max_tokens: 2048, system, messages: history }

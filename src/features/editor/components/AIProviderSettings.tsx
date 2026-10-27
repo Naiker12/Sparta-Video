@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Check, CircleAlert, KeyRound, LoaderCircle, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { t } from '../services/locale'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../components/ui/dialog'
+import { toast } from '../../../components/ui/toast'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import {
   AI_TASKS, discoverModels, forgetSessionKey, getSessionKey, hasSessionKey, makeProviderId, providerKinds, readProviderRegistry,
@@ -178,6 +179,7 @@ export function AIProviderSettings() {
     if (commit({ profiles, assignments })) {
       if (isTauri() && apiKey) forgetSessionKey(id)
       setEditing(false)
+      toast.success(t('Proveedor guardado', 'Provider saved'), { description: `${profile.name} · ${t(`${loadedModels.length} modelos`, `${loadedModels.length} models`)}` })
     }
   }
 
@@ -189,7 +191,7 @@ export function AIProviderSettings() {
     forgetSessionKey(profile.id)
     const assignments = { ...registry.assignments }
     for (const task of AI_TASKS) if (splitModelKey(assignments[task] ?? '')[0] === profile.id) delete assignments[task]
-    commit({ profiles: registry.profiles.filter((item) => item.id !== profile.id), assignments })
+    if (commit({ profiles: registry.profiles.filter((item) => item.id !== profile.id), assignments })) toast.info(t('Proveedor eliminado', 'Provider removed'), { description: profile.name })
   }
 
   const updateTask = (task: AITask, value: string) => commit({ ...registry, assignments: { ...registry.assignments, [task]: value } })

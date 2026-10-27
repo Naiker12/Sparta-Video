@@ -3,8 +3,8 @@ import { persist, type PersistStorage } from 'zustand/middleware'
 import type { Clip, MediaItem, SequenceSettings, TimelineMarker, Track } from './model'
 import { getMediaTypeFromName } from './services/media-storage'
 
-type ProjectSnapshot = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks' | 'selectedClipId' | 'selectedMediaId'>
-type EditorState = {
+export type ProjectSnapshot = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks' | 'selectedClipId' | 'selectedMediaId'>
+export type EditorState = {
   projectName: string; sequence: SequenceSettings; tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]
   selectedClipId: string; selectedMediaId: string | null; playhead: number; zoom: number; playing: boolean; snapToFrames: boolean
   activeTool: 'select' | 'razor'
@@ -16,10 +16,11 @@ type EditorState = {
   updateAsset: (assetId: string, changes: Partial<Pick<MediaItem, 'title' | 'type' | 'detail' | 'thumb' | 'status'>>) => void; removeAsset: (assetId: string) => void
   addMedia: (asset: MediaItem, at?: number, trackId?: string) => string; updateClip: (clipId: string, changes: Partial<Clip>) => void
   moveClip: (clipId: string, start: number, duration?: number) => void; moveClipToNewTrack: (clipId: string) => void; splitClip: (clipId: string, time: number) => void
-  deleteClip: (clipId: string) => void; addMarker: (time: number) => void; removeMarker: (markerId: string) => void; toggleSnap: () => void; addTrack: (kind: 'video' | 'audio') => void
+  deleteClip: (clipId: string) => void; addMarker: (time: number, label?: string) => void; removeMarker: (markerId: string) => void; toggleSnap: () => void; addTrack: (kind: 'video' | 'audio') => void
   toggleMute: (id: string) => void; toggleLock: (id: string) => void; undo: () => void; redo: () => void
+  loadProject: (project: PersistedProjectState) => void; resetProject: () => void
 }
-type PersistedProjectState = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks'>
+export type PersistedProjectState = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks'>
 
 let nextClip = 10
 let nextMarker = 1
@@ -221,11 +222,11 @@ export const useEditorStore = create<EditorState>()(persist((set) => ({
     const tracks = copyTracks(state.tracks).map((track) => ({ ...track, clips: track.clips.filter((clip) => clip.id !== clipId) }))
     return JSON.stringify(tracks) === JSON.stringify(state.tracks) ? state : { ...commit(state, { tracks }), selectedClipId: state.selectedClipId === clipId ? '' : state.selectedClipId }
   }),
-  addMarker: (time) => set((state) => {
+  addMarker: (time, customLabel) => set((state) => {
     let number = nextMarker++
     while (state.markers.some((item) => item.id === `m${number}`)) number = nextMarker++
     const markerTime = state.snapToFrames ? Math.round(Math.max(0, time) * state.sequence.frameRate) / state.sequence.frameRate : Math.max(0, time)
-    const marker: TimelineMarker = { id: `m${number}`, time: markerTime, label: `Marker ${number}` }
+    const marker: TimelineMarker = { id: `m${number}`, time: markerTime, label: customLabel || `Marker ${number}` }
     return commit(state, { markers: [...state.markers, marker] })
   }),
   removeMarker: (markerId) => set((state) => {
@@ -251,6 +252,35 @@ export const useEditorStore = create<EditorState>()(persist((set) => ({
     lastHistoryGroup = null
     const next = state.future[0]
     return next ? { ...applySnapshot(next), past: [...state.past, snapshot(state)], future: state.future.slice(1) } : state
+  }),
+  loadProject: (project) => set({
+    projectName: project.projectName,
+    sequence: { ...project.sequence },
+    tracks: copyTracks(project.tracks),
+    assets: project.assets.map((asset) => ({ ...asset })),
+    markers: copyMarkers(project.markers),
+    snapToFrames: project.snapToFrames ?? true,
+    mutedTracks: [...(project.mutedTracks ?? [])],
+    lockedTracks: [...(project.lockedTracks ?? [])],
+    selectedClipId: '',
+    selectedMediaId: null,
+    playhead: 0,
+    playing: false,
+    past: [],
+    future: [],
+  }),
+  resetProject: () => set({
+    projectName: 'Sin título',
+    sequence: { width: 1920, height: 1080, frameRate: 24 },
+    tracks: emptyTracks(),
+    assets: [],
+    markers: [],
+    selectedClipId: '',
+    selectedMediaId: null,
+    playhead: 0,
+    playing: false,
+    past: [],
+    future: [],
   }),
 }), {
   name: 'sparta-video-project-v1', storage: projectStorage, version: 5,

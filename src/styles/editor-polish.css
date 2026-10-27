@@ -589,33 +589,336 @@
   cursor: not-allowed;
 }
 
-/* Toast Notice */
-.toast-notice {
+/* Toast notifications live in styles/toast.css */
+
+/* ==========================================================================
+   Export Dialog & Render Pipeline Styles
+   ========================================================================== */
+.export-dialog {
   position: fixed;
-  z-index: 150;
-  bottom: 24px;
+  z-index: 126;
   left: 50%;
-  transform: translateX(-50%);
+  top: 50%;
+  width: min(580px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 24px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  outline: none;
+  overflow-y: auto;
+  animation: dialog-enter 180ms cubic-bezier(.2,.8,.2,1);
+}
+
+.export-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.export-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.export-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.export-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.export-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.export-preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.export-preset-card:hover:not(:disabled) {
+  border-color: var(--line-active, rgba(255, 255, 255, 0.2));
+  background: var(--panel-hover);
+}
+
+.export-preset-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-raised));
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.export-preset-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 9999px;
-  background: #1f2026;
-  color: #f3f4f6;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.export-preset-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.export-preset-title {
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.export-preset-check {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.export-preset-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding-left: 26px;
+}
+
+.export-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.export-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.export-advanced-toggle {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.export-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--accent);
   font-size: 11px;
   font-weight: 500;
-  animation: reply-in 0.2s ease-out;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: opacity 0.15s ease;
 }
-.toast-check {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
+
+.export-toggle-button:hover {
+  text-decoration: underline;
+}
+
+.export-advanced-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--panel-raised) 70%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.export-row {
   display: grid;
-  place-items: center;
-  background: rgba(16, 185, 129, 0.2);
-  color: #34d399;
-  font-size: 11px;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
+
+.export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.export-field label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.export-field input[type="number"],
+.export-field select {
+  height: 30px;
+  padding: 0 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.export-summary-card {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.export-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-summary-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+.export-summary-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.export-progress-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-raised));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 10px;
+}
+
+.export-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.export-progress-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.export-progress-percent {
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.export-progress-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.export-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.15s ease;
+}
+
+.export-footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.export-submit-btn {
+  min-width: 140px;
+}
+
+/* ==========================================================================
+   Assistant Prompt Suggestion Chips
+   ========================================================================== */
+.assistant-quick-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  width: 100%;
+}
+
+.assistant-compose-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0 6px 0;
+  scrollbar-width: none;
+}
+
+.assistant-compose-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.assistant-chip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.assistant-chip-button:hover {
+  background: var(--panel-hover);
+  border-color: var(--accent);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.assistant-chip-button.mini {
+  padding: 3px 8px;
+  font-size: 10px;
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+

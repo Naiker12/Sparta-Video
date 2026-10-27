@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AudioLines, Check, Download, LoaderCircle, Mic2, Music2, RefreshCw, Sparkles } from 'lucide-react'
+import { AudioLines, Check, Download, FolderPlus, LoaderCircle, Mic2, Music2, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import { t } from '../services/locale'
 import { readProviderRegistry, type AITask, type ProviderRegistry } from '../services/ai-provider-registry'
 import { generateElevenLabsAudio, listElevenLabsVoices, type ElevenLabsVoice } from '../services/audio-generation'
+import { toast } from '../../../components/ui/toast'
+import { useEditorStore } from '../editor-store'
+import { storeMediaFile } from '../services/media-storage'
+import type { MediaItem } from '../model'
 
 type AudioMode = 'voice' | 'audio'
-type GeneratedResult = { url: string; filename: string; label: string }
+type GeneratedResult = { blob: Blob; url: string; filename: string; label: string; duration: number }
 const selectedProvider = (registry: ProviderRegistry, task: AITask) => {
   const value = registry.assignments[task] ?? ''
   const splitAt = value.indexOf('::')
@@ -63,17 +67,57 @@ export function AudioGenerationPanel() {
       const binary = atob(encoded)
       const bytes = new Uint8Array(binary.length)
       for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }))
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
+      const url = URL.createObjectURL(blob)
       const safeLabel = clean.slice(0, 36).replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'sparta-audio'
       const filename = `${mode === 'voice' ? 'narracion' : 'efecto'}-${safeLabel}.mp3`
-      setResult({ url, filename, label: assignment.model.name })
-      setNotice(t('Audio listo para escuchar o descargar.', 'Audio is ready to preview or download.'))
+      setResult({ blob, url, filename, label: assignment.model.name, duration: mode === 'audio' ? durationSeconds : Math.max(2, Math.round(clean.length / 15)) })
+      setNotice(t('Audio listo para escuchar, insertar o descargar.', 'Audio is ready to preview, insert or download.'))
+      toast.success(t('Audio generado', 'Audio generated'), { description: filename })
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
       setError(message.includes('Failed to fetch') || message.includes('NetworkError')
         ? t('No se pudo conectar desde el navegador. Usa la app Tauri para generar audio sin restricciones CORS.', 'The browser could not connect. Use the Tauri desktop app to generate audio without CORS restrictions.')
         : message)
     } finally { setGenerating(false) }
+  }
+
+  const addToLibrary = async () => {
+    if (!result) return
+    const id = `local-ai-audio-${crypto.randomUUID()}`
+    const sizeBytes = result.blob.size
+    const sizeStr = sizeBytes >= 1_000_000 ? `${(sizeBytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(sizeBytes / 1000))} KB`
+    const asset: MediaItem = {
+      id,
+      title: result.filename,
+      detail: `AUDIO · ${sizeStr}`,
+      thumb: 'wave',
+      type: 'audio',
+      status: 'ready',
+    }
+    const file = new File([result.blob], result.filename, { type: 'audio/mpeg' })
+    try {
+      await storeMediaFile(id, file)
+    } catch {
+      // IndexedDB might not be available in all contexts, asset is still added to the store
+    }
+    useEditorStore.getState().addAssets([asset])
+    useEditorStore.getState().selectMedia(id)
+    toast.success(t('Audio agregado a la biblioteca', 'Audio added to media library'), { description: result.filename })
+    return asset
+  }
+
+  const addToTimeline = async () => {
+    if (!result) return
+    const asset = await addToLibrary()
+    if (!asset) return
+    const playhead = useEditorStore.getState().playhead
+    const clipId = useEditorStore.getState().addMedia(asset, playhead)
+    if (clipId) {
+      toast.success(t('Audio insertado en la línea de tiempo', 'Audio inserted into timeline'), { description: result.filename })
+    } else {
+      toast.warning(t('Elige una pista de audio desbloqueada para insertar este medio.', 'Choose an unlocked audio track to insert this media.'))
+    }
   }
 
   const switchMode = (next: AudioMode) => {
@@ -107,7 +151,15 @@ export function AudioGenerationPanel() {
     <div className="audio-generation-footer"><span>{prompt.length.toLocaleString()} / 10 000 · {mode === 'voice' ? t('El proveedor cobra por caracteres.', 'Provider charges by characters.') : t('El proveedor cobra por generación.', 'Provider charges per generation.')}</span><button type="button" disabled={!isElevenLabs || !prompt.trim() || generating || (mode === 'voice' && !voiceId)} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{generating ? t('Generando…', 'Generating…') : t('Generar audio', 'Generate audio')}</button></div>
 
     {(error || notice) && <p className={`audio-generation-message ${error ? 'error' : 'success'}`} role={error ? 'alert' : 'status'}>{error || notice}</p>}
-    {result && <article className="generated-audio-card"><div><Check size={14} /><strong>{result.label}</strong><span>{result.filename}</span></div><audio controls preload="metadata" src={result.url}>{t('Tu navegador no puede reproducir este audio.', 'Your browser cannot play this audio.')}</audio><a href={result.url} download={result.filename}><Download size={13} />{t('Descargar MP3', 'Download MP3')}</a></article>}
-    <p className="audio-generation-note">{t('La generación usa créditos de tu cuenta de ElevenLabs. El resultado se previsualiza aquí; aún no se inserta en la línea de tiempo.', 'Generation uses credits from your ElevenLabs account. Preview the result here; it is not inserted into the timeline yet.')}</p>
+    {result && <article className="generated-audio-card">
+      <div><Check size={14} /><strong>{result.label}</strong><span>{result.filename}</span></div>
+      <audio controls preload="metadata" src={result.url}>{t('Tu navegador no puede reproducir este audio.', 'Your browser cannot play this audio.')}</audio>
+      <div className="generated-audio-actions">
+        <button type="button" className="audio-action-btn primary" onClick={() => void addToTimeline()}><Plus size={12} /> {t('Insertar en línea de tiempo', 'Insert into timeline')}</button>
+        <button type="button" className="audio-action-btn secondary" onClick={() => void addToLibrary()}><FolderPlus size={12} /> {t('Añadir a biblioteca', 'Add to library')}</button>
+        <a href={result.url} download={result.filename} className="audio-download-link"><Download size={12} /> {t('Descargar MP3', 'Download MP3')}</a>
+      </div>
+    </article>}
+    <p className="audio-generation-note">{t('La generación usa créditos de tu cuenta de ElevenLabs. Puedes insertar el audio directamente en la línea de tiempo o guardarlo en la biblioteca.', 'Generation uses credits from your ElevenLabs account. You can insert the audio directly into the timeline or save it in the library.')}</p>
   </section>
 }

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Bot, ChevronRight, Eraser, LoaderCircle, LockKeyhole, MessageSquareText, Send, Sparkles, WandSparkles } from 'lucide-react'
+import { AudioLines, Bot, Check, ChevronRight, Eraser, LoaderCircle, LockKeyhole, MessageSquareText, PlayCircle, Send, Sparkles, WandSparkles } from 'lucide-react'
 import { IconButton } from './controls'
 import { AudioGenerationPanel } from './AudioGenerationPanel'
 import { useEditorStore } from '../editor-store'
 import { AI_PREFS_EVENT } from '../services/ai-preferences'
 import { readProviderRegistry, type ProviderRegistry } from '../services/ai-provider-registry'
 import { sendAIChat, type AnalysisDepth, type ChatMessage } from '../services/ai-chat'
+import { applyAIOperations, extractAIProposal, formatOperationLabel } from '../services/ai-operations'
+import { toast } from '../../../components/ui/toast'
 import { t } from '../services/locale'
 
 type Props = { open: boolean; onClose: () => void; projectName: string }
@@ -125,6 +127,21 @@ function AssistantPanelSession({ open, onClose, projectName }: Props) {
     try { window.localStorage.setItem('sparta-ai-analysis-depth', value) } catch { /* selection remains for this session */ }
   }
 
+  const promptSuggestions = useMemo(() => {
+    if (mode === 'create') {
+      return [
+        { label: '🎬 ' + t('Estructura de guion', 'Script outline'), text: t('Genera una estructura de guion en 3 actos con tiempos estimados para este proyecto.', 'Generate a 3-act script outline with estimated timestamps for this project.') },
+        { label: '📱 ' + t('Guion para Reel / TikTok', 'Reel / TikTok hook'), text: t('Propón un gancho de 3 segundos y una estructura dinámica vertical de 30 segundos.', 'Propose a 3-second hook and a dynamic 30-second vertical structure.') },
+        { label: '🎙️ ' + t('Texto para voz en off', 'Voiceover copy'), text: t('Escribe el texto de una narración cinematográfica para acompañar esta secuencia.', 'Write a cinematic voiceover narration to accompany this sequence.') },
+      ]
+    }
+    return [
+      { label: '⚡ ' + t('Sugerir montaje', 'Suggest montage'), text: t('Analiza el ritmo y la duración de los clips actuales y propón mejoras de montaje.', 'Analyze the rhythm and duration of current clips and propose montage improvements.') },
+      { label: '📍 ' + t('Añadir marcadores', 'Add markers'), text: t('Propón marcadores de ritmo clave a lo largo de la secuencia para guiar los cortes.', 'Propose key rhythm markers throughout the sequence to guide cuts.') },
+      { label: '🔊 ' + t('Ajustar audio', 'Balance audio'), text: t('Revisa los clips de la secuencia y propón un balance de volumen equilibrado.', 'Review the sequence clips and propose a balanced volume mix.') },
+    ]
+  }, [mode])
+
   return <aside className={`assistant-panel ${open ? '' : 'hidden'}`}>
     <div className="assistant-heading">
       <div className="assistant-badge"><WandSparkles size={16} /></div>
@@ -142,13 +159,67 @@ function AssistantPanelSession({ open, onClose, projectName }: Props) {
     <div className="assistant-context"><span className="context-dot" /> {mode === 'create' ? t('PLANIFICAR VIDEO', 'PLAN VIDEO') : mode === 'audio' ? t('ESTUDIO DE AUDIO', 'AUDIO STUDIO') : <>{t('TRABAJANDO EN', 'WORKING ON')} <strong title={projectName}>{projectName}</strong></>}</div>
     <div className="chat-content" ref={feedRef}>
       {mode === 'audio' ? <AudioGenerationPanel /> : <>
-        {!messages.length && !requesting && <div className="chat-welcome"><div className="welcome-spark"><Bot size={18} /></div><h3>{selected ? t('¿En qué trabajamos?', 'What are we working on?') : t('Configura un modelo para empezar', 'Set up a model to get started')}</h3><p>{selected ? t('El asistente recibirá el estado actual del proyecto y el historial reciente de esta conversación.', 'The assistant will receive the current project state and recent chat history.') : t('Agrega un proveedor y carga un modelo con capacidad de texto desde Preferencias → IA y Proveedores.', 'Add a provider and load a text-capable model in Preferences → AI Providers.')}</p></div>}
-        {messages.map((message) => <article className={`assistant-chat-message ${message.role}`} key={message.id}><span className="assistant-message-icon">{message.role === 'assistant' ? <Bot size={13} /> : null}</span><div className="assistant-message-content">{message.content}</div></article>)}
+        {!messages.length && !requesting && <div className="chat-welcome">
+          <div className="welcome-spark"><Bot size={18} /></div>
+          <h3>{selected ? t('¿En qué trabajamos?', 'What are we working on?') : t('Configura un modelo para empezar', 'Set up a model to get started')}</h3>
+          <p>{selected ? t('El asistente recibirá el estado actual del proyecto y el historial reciente de esta conversación.', 'The assistant will receive the current project state and recent chat history.') : t('Agrega un proveedor y carga un modelo con capacidad de texto desde Preferencias → IA y Proveedores.', 'Add a provider and load a text-capable model in Preferences → AI Providers.')}</p>
+          {selected && <div className="assistant-quick-prompts">
+            {promptSuggestions.map((item, idx) => (
+              <button key={idx} type="button" className="assistant-chip-button" onClick={() => setDraft(item.text)}>
+                {item.label}
+              </button>
+            ))}
+          </div>}
+        </div>}
+        {messages.map((message) => {
+          const proposal = message.role === 'assistant' ? extractAIProposal(message.content) : null
+          return <article className={`assistant-chat-message ${message.role}`} key={message.id}>
+            <span className="assistant-message-icon">{message.role === 'assistant' ? <Bot size={13} /> : null}</span>
+            <div className="assistant-message-content">
+              <div>{message.content}</div>
+              {proposal && <div className="ai-proposal-card">
+                <div className="ai-proposal-header">
+                  <PlayCircle size={14} className="ai-proposal-icon" />
+                  <strong>{proposal.title}</strong>
+                </div>
+                <p className="ai-proposal-summary">{proposal.summary}</p>
+                <ul className="ai-proposal-operations">
+                  {proposal.operations.map((op, idx) => (
+                    <li key={idx}><code>•</code> {formatOperationLabel(op)}</li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  className="ai-proposal-apply-btn"
+                  onClick={() => {
+                    const result = applyAIOperations(proposal.operations)
+                    if (result.applied > 0) {
+                      toast.success(t(`${result.applied} cambio(s) aplicados al proyecto`, `${result.applied} change(s) applied to project`), {
+                        description: proposal.title,
+                      })
+                    } else {
+                      toast.warning(t('No se pudieron aplicar las operaciones', 'Could not apply operations'))
+                    }
+                  }}
+                >
+                  <Check size={13} /> {t('Aplicar propuesta a la edición', 'Apply proposal to edit')}
+                </button>
+              </div>}
+            </div>
+          </article>
+        })}
         {requesting && <p className="assistant-thinking" role="status"><LoaderCircle className="spin" size={13} /> {t('Analizando el proyecto y preparando la respuesta…', 'Analyzing the project and preparing a response…')}</p>}
         {error && <p className="assistant-chat-error" role="alert">{error}</p>}
       </>}
     </div>
     {mode !== 'audio' && <div className="chat-compose">
+      <div className="assistant-compose-chips">
+        {promptSuggestions.map((item, idx) => (
+          <button key={idx} type="button" className="assistant-chip-button mini" onClick={() => setDraft(item.text)}>
+            {item.label}
+          </button>
+        ))}
+      </div>
       <div className="assistant-model-controls">
         <label><span className="sr-only">{t('Modelo de texto', 'Text model')}</span><select aria-label={t('Modelo de texto', 'Text model')} value={selectedKeyValue} onChange={(event) => selectModel(event.target.value)}><option value="">{t('Seleccionar modelo', 'Select a model')}</option>{options.map(({ key, profile, model }) => <option key={key} value={key}>{profile.name} · {model.name}</option>)}</select></label>
         <label><span className="sr-only">{t('Profundidad de análisis', 'Analysis depth')}</span><select aria-label={t('Profundidad de análisis', 'Analysis depth')} value={depth} onChange={(event) => selectDepth(event.target.value as AnalysisDepth)}><option value="concise">{t('Breve', 'Concise')}</option><option value="balanced">{t('Equilibrada', 'Balanced')}</option><option value="deep">{t('Profunda', 'Deep')}</option></select></label>

@@ -40,7 +40,14 @@
   --warning: #f59e0b;
   --error: #ef4444;
   --destructive: #ef4444;
+  --success: #34d399;
+  --info: #60a5fa;
   --violet: #a88cff;
+
+  /* Floating glass surfaces (toasts, popovers) */
+  --glass-bg: rgba(28, 30, 36, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-highlight: rgba(255, 255, 255, 0.04);
 
   /* Typography */
   --fs-xs: 11px;
@@ -92,6 +99,13 @@
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, .08);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, .1);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, .12);
+  --success: #059669;
+  --info: #2563eb;
+  --warning: #d97706;
+  --error: #dc2626;
+  --glass-bg: rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(15, 23, 42, 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.6);
 }
 
 :root[data-palette="minimal"] {

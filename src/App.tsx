@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Clapperboard, Film, FolderOpen, Pencil, Settings2, Sparkles, Undo2, Video } from 'lucide-react'
+import { ChevronDown, Clapperboard, FileDown, FileUp, Film, FolderOpen, Pencil, PlusCircle, Settings2, Sparkles, Undo2, Video } from 'lucide-react'
 import { AssistantPanel } from './features/editor/components/AssistantPanel'
 import { IconButton } from './features/editor/components/controls'
 import { InspectorPanel } from './features/editor/components/InspectorPanel'
@@ -9,13 +9,18 @@ import { TimelinePanel } from './features/editor/components/TimelinePanel'
 import { ActionMenu } from './features/editor/components/ActionMenu'
 import { PreferencesSheet } from './features/editor/components/PreferencesSheet'
 import { RenameProjectDialog } from './features/editor/components/RenameProjectDialog'
+import { ExportDialog } from './features/editor/components/ExportDialog'
+import { TimelineAudioEngine } from './features/editor/services/audio-playback'
 import { getProjectSaveStatus, subscribeProjectSaveStatus, useEditorStore } from './features/editor/editor-store'
 import type { MediaItem } from './features/editor/model'
 import { captureVideoThumbnail, getMediaMimeType, storeMediaFile, storeMediaPreview } from './features/editor/services/media-storage'
+import { downloadProjectFile, exportProjectData, openProjectFromFile } from './features/editor/services/project-file'
 import { Group, Panel, Separator, useDefaultLayout, useGroupRef, usePanelRef } from 'react-resizable-panels'
 import { t, useLanguage } from './features/editor/services/locale'
+import { Toaster, errorMessage, toast } from './components/ui/toast'
 import './App.css'
 import './styles/editor-polish.css'
+import './styles/toast.css'
 
 // Layout is a convenience preference. Keep the editor usable if browser storage is blocked.
 const layoutMemory = new Map<string, string>()
@@ -80,15 +85,20 @@ function App() {
     return current ?? active
   }, undefined)
   const selectedMedia = assets.find((item) => item.id === selectedMediaId)
+  const hasReadyAssets = assets.some((asset) => asset.status === 'ready')
+  const hasTimelineClips = tracks.some((track) => track.clips.length > 0)
+  const canExport = hasReadyAssets && hasTimelineClips && sequenceDuration > 0
   const [chatOpen, setChatOpen] = useState(true)
-  const [notice, setNotice] = useState('')
   const [saveStatus, setSaveStatus] = useState(getProjectSaveStatus)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const audioEngineRef = useRef<TimelineAudioEngine | null>(null)
   const [timelineExpanded, setTimelineExpanded] = useState(false)
   const resolution = `${sequence.width} × ${sequence.height}`
   const frameRate = sequence.frameRate
   const fileInput = useRef<HTMLInputElement>(null)
+  const projectFileInput = useRef<HTMLInputElement>(null)
   const assistantPanelRef = usePanelRef()
   const shellGroupRef = useGroupRef()
   const upperGroupRef = useGroupRef()
@@ -121,6 +131,17 @@ function App() {
   }, [playing, sequenceDuration, frameRate, setPlayhead, setPlaying])
 
   useEffect(() => {
+    if (!audioEngineRef.current) audioEngineRef.current = new TimelineAudioEngine()
+    const engine = audioEngineRef.current
+    void engine.sync(playhead, playing, tracks, assets, mutedTracks)
+    return () => { engine.pauseAll() }
+  }, [playhead, playing, tracks, assets, mutedTracks])
+
+  useEffect(() => {
+    return () => { audioEngineRef.current?.destroy() }
+  }, [])
+
+  useEffect(() => {
     const panel = assistantPanelRef.current
     if (panel) setChatOpen(!panel.isCollapsed())
   }, [assistantPanelRef])
@@ -147,6 +168,7 @@ function App() {
     shellGroupRef.current?.setLayout(window.innerWidth < 1100 ? { library: 20, editor: 80, assistant: 0 } : { library: 16, editor: 67, assistant: 17 })
     upperGroupRef.current?.setLayout(window.innerWidth < 1100 ? { monitor: 72, inspector: 28 } : { monitor: 76, inspector: 24 })
     editorVerticalGroupRef.current?.setLayout({ stage: 52, timeline: 48 })
+    toast.success(t('Distribución de paneles restablecida', 'Panel layout reset'))
   }
   const toggleTimelineExpanded = () => {
     const next = !timelineExpanded
@@ -197,11 +219,11 @@ function App() {
     })
     addAssets(pending.map(({ asset }) => asset))
     if (pending[0].asset.type !== 'audio') selectMedia(pending[0].asset.id)
-    setNotice(sourceFiles.length === 1 ? t('Importando archivo…', 'Importing file…') : t(`Importando ${sourceFiles.length} archivos…`, `Importing ${sourceFiles.length} files…`))
+    const importToast = toast.loading(sourceFiles.length === 1 ? t('Importando archivo…', 'Importing file…') : t(`Importando ${sourceFiles.length} archivos…`, `Importing ${sourceFiles.length} files…`), { description: sourceFiles.length === 1 ? sourceFiles[0].name : undefined })
     const { inspectMediaFile } = await import('./features/editor/services/media-catalog')
     const results = await Promise.allSettled(pending.map(async ({ file, asset }) => {
       const metadata = await inspectMediaFile(file)
-      if (asset.type !== 'audio') await storeMediaFile(asset.id, file)
+      await storeMediaFile(asset.id, file)
       if (asset.type === 'video') {
         const preview = await captureVideoThumbnail(file)
         if (preview) await storeMediaPreview(asset.id, preview)
@@ -209,7 +231,7 @@ function App() {
       updateAsset(asset.id, {
         title: metadata.name,
         detail: `${asset.type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}`,
-        status: asset.type === 'audio' ? metadata.status : 'ready',
+        status: 'ready',
       })
       return asset.id
     }))
@@ -220,14 +242,26 @@ function App() {
       return [sourceFiles[index].name]
     })
     const succeeded = results.length - failedNames.length
-    setNotice(succeeded && failedNames.length
-      ? t(`${succeeded} importados; ${failedNames.length} no se pudieron procesar: ${failedNames.join(', ')}`, `${succeeded} imported; ${failedNames.length} could not be processed: ${failedNames.join(', ')}`)
-      : succeeded
-        ? succeeded === 1 ? t('1 archivo importado a la biblioteca', '1 file imported to the library') : t(`${succeeded} archivos importados a la biblioteca`, `${succeeded} files imported to the library`)
-        : t(`${failedNames.length} archivo(s) no se pudieron procesar. Revisa el estado en la biblioteca.`, `${failedNames.length} file(s) could not be processed. Check their status in the library.`))
-    window.setTimeout(() => setNotice(''), 2800)
+    if (succeeded && failedNames.length) {
+      toast.warning(t(`${succeeded} importados, ${failedNames.length} con errores`, `${succeeded} imported, ${failedNames.length} failed`), { id: importToast, description: failedNames.join(', ') })
+    } else if (succeeded) {
+      toast.success(succeeded === 1 ? t('1 archivo importado a la biblioteca', '1 file imported to the library') : t(`${succeeded} archivos importados a la biblioteca`, `${succeeded} files imported to the library`), { id: importToast })
+    } else {
+      toast.error(t(`${failedNames.length} archivo(s) no se pudieron procesar`, `${failedNames.length} file(s) could not be processed`), { id: importToast, description: t('Revisa el estado en la biblioteca.', 'Check their status in the library.') })
+    }
   }
-  const deleteMedia = (assetId: string) => removeAsset(assetId)
+  const deleteMedia = (assetId: string) => {
+    const asset = useEditorStore.getState().assets.find((item) => item.id === assetId)
+    removeAsset(assetId)
+    if (!asset) return
+    const historyDepth = useEditorStore.getState().past.length
+    toast.info(t('Medio eliminado', 'Media removed'), {
+      description: asset.title,
+      duration: 6000,
+      // Only undo when nothing else has been committed since, so we never revert an unrelated edit.
+      action: { label: t('Deshacer', 'Undo'), onClick: () => { if (useEditorStore.getState().past.length === historyDepth) undo() } },
+    })
+  }
   const togglePlayback = () => {
     if (!playing && sequenceDuration > 0 && playhead >= sequenceDuration) setPlayhead(0)
     setPlaying(!playing)
@@ -238,23 +272,25 @@ function App() {
       const { inspectMediaFile } = await import('./features/editor/services/media-catalog')
       const metadata = await inspectMediaFile(file)
       const type: MediaItem['type'] = metadata.mimeType.startsWith('image/') ? 'image' : metadata.mimeType.startsWith('audio/') ? 'audio' : 'video'
-      if (type !== 'audio') await storeMediaFile(assetId, file)
+      await storeMediaFile(assetId, file)
       if (type === 'video') {
         const preview = await captureVideoThumbnail(file)
         if (preview) await storeMediaPreview(assetId, preview)
       }
-      updateAsset(assetId, { title: metadata.name, type, detail: `${type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}`, thumb: type === 'image' ? 'image-catalog' : type === 'audio' ? 'wave' : 'video-catalog', status: type === 'audio' ? metadata.status : 'ready' })
+      updateAsset(assetId, { title: metadata.name, type, detail: `${type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}`, thumb: type === 'image' ? 'image-catalog' : type === 'audio' ? 'wave' : 'video-catalog', status: 'ready' })
+      toast.success(t('Medio vinculado', 'Media linked'), { description: metadata.name })
     } catch (error) {
-      updateAsset(assetId, { status: 'error', detail: error instanceof Error ? error.message : t('No se pudo vincular el archivo.', 'Could not link the file.') })
+      const message = errorMessage(error, t('No se pudo vincular el archivo.', 'Could not link the file.'))
+      updateAsset(assetId, { status: 'error', detail: message })
+      toast.error(t('No se pudo vincular el medio', 'Could not link media'), { description: message })
     }
   }
   const addMediaToTimeline = (asset: MediaItem, at?: number, trackId?: string) => {
     const id = addMedia(asset, at, trackId)
     if (!id) {
-      setNotice(asset.type === 'audio'
+      toast.warning(asset.type === 'audio'
         ? t('Elige una pista de audio desbloqueada para insertar este medio.', 'Choose an unlocked audio track to insert this media.')
         : t('Elige una pista de vídeo desbloqueada para insertar este medio.', 'Choose an unlocked video track to insert this media.'))
-      window.setTimeout(() => setNotice(''), 2800)
     }
     return id
   }
@@ -262,11 +298,10 @@ function App() {
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
       await navigator.clipboard.writeText(name)
-      setNotice(t('Nombre del clip copiado.', 'Clip name copied.'))
+      toast.success(t('Nombre del clip copiado.', 'Clip name copied.'))
     } catch {
-      setNotice(t('No se pudo acceder al portapapeles en este navegador.', 'Clipboard access is unavailable in this browser.'))
+      toast.error(t('No se pudo acceder al portapapeles en este navegador.', 'Clipboard access is unavailable in this browser.'))
     }
-    window.setTimeout(() => setNotice(''), 2800)
   }
   return <main className="app-shell">
     <header className="titlebar">
@@ -274,6 +309,10 @@ function App() {
         <div className="brand-mark"><Clapperboard size={15} /></div><span>SPARTA</span><span className="brand-video">VIDEO</span><span className="brand-divider" />
         <ActionMenu label={t('Acciones del proyecto', 'Project actions')} triggerClass="project-menu-trigger" items={[
           { heading: t('PROYECTO', 'PROJECT') },
+          { label: t('Nuevo proyecto', 'New project'), icon: PlusCircle, onSelect: () => { useEditorStore.getState().resetProject(); toast.info(t('Nuevo proyecto creado', 'New project created')) } },
+          { label: t('Abrir proyecto (.sparta)…', 'Open project (.sparta)…'), icon: FileUp, onSelect: () => projectFileInput.current?.click() },
+          { label: t('Guardar proyecto como (.sparta)…', 'Save project as (.sparta)…'), icon: FileDown, onSelect: () => { const fileData = exportProjectData(); downloadProjectFile(fileData); toast.success(t('Archivo de proyecto guardado', 'Project file saved'), { description: `${fileData.project.name}.sparta` }) } },
+          { separator: true },
           { label: t('Cambiar nombre', 'Rename project'), icon: Pencil, onSelect: () => setRenameOpen(true) },
           { separator: true },
           { label: t('Preferencias del proyecto', 'Project preferences'), icon: FolderOpen, onSelect: () => setSettingsOpen(true) },
@@ -284,11 +323,12 @@ function App() {
       </div>
     </header>
     <input ref={fileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" multiple accept="video/*,audio/*,image/*" tabIndex={-1} aria-hidden="true" onChange={(event) => { void importFiles(event.target.files); event.target.value = '' }} />
+    <input ref={projectFileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" accept=".sparta,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProjectFromFile(file); event.target.value = '' }} />
     <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 16, editor: 67, assistant: 17 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
       <Panel id="library" defaultSize="16%" minSize="190px" maxSize="25%" className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
       <Separator id="library-separator" className="panel-separator" aria-label={t('Redimensionar biblioteca de medios','Resize media library')} />
       <Panel id="editor" defaultSize="67%" minSize="45%" className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
-        <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia','Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia','Sequence resolution') }, ...[{ label: '1920 × 1080', width: 1920, height: 1080 }, { label: '1280 × 720', width: 1280, height: 720 }, { label: '1080 × 1920', width: 1080, height: 1920 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })) , { separator: true }, { heading: t('Fotogramas por segundo','Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer','Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)','Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente','Close assistant panel') : t('Abrir panel asistente','Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><Sparkles size={16} /></IconButton><button type="button" className="export-button" disabled title={t('El motor de exportación aún no está conectado','The export engine is not connected yet')} aria-label={t('Exportación no disponible','Export unavailable')}><Video size={15} /> {t('Exportar','Export')} <span className="sr-only">Export</span></button></div></div>
+        <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia','Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia','Sequence resolution') }, ...[{ label: '1920 × 1080', width: 1920, height: 1080 }, { label: '1280 × 720', width: 1280, height: 720 }, { label: '1080 × 1920', width: 1080, height: 1920 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })) , { separator: true }, { heading: t('Fotogramas por segundo','Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer','Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)','Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente','Close assistant panel') : t('Abrir panel asistente','Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><Sparkles size={16} /></IconButton><button type="button" className="export-button" disabled={!canExport} title={canExport ? t('Exportar secuencia de vídeo', 'Export video sequence') : t('El motor de exportación se habilita al tener medios listos en la línea de tiempo', 'The export engine is enabled when ready media is on the timeline')} aria-label={canExport ? t('Exportar vídeo', 'Export video') : t('Exportación no disponible', 'Export unavailable')} onClick={() => setExportOpen(true)}><Video size={15} /> {t('Exportar', 'Export')} <span className="sr-only">{canExport ? 'Export video' : 'Export'}</span></button></div></div>
         <Group id="sparta-editor-vertical" groupRef={editorVerticalGroupRef} className="editor-vertical-group" orientation="vertical" defaultLayout={editorVerticalLayout.defaultLayout ?? { stage: 52, timeline: 48 }} onLayoutChanged={editorVerticalLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
           <Panel id="stage" defaultSize="52%" minSize="26%" maxSize="78%" className="resize-panel-content">
             <div className="upper-workspace"><Group id="sparta-preview-inspector" groupRef={upperGroupRef} className="preview-inspector-group" orientation="horizontal" defaultLayout={upperLayout.defaultLayout ?? { monitor: 76, inspector: 24 }} onLayoutChanged={upperLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}><Panel id="monitor" defaultSize="76%" minSize="55%" className="resize-panel-content"><PreviewMonitor playhead={playhead} markers={markers} onSeek={setPlayhead} frameRate={frameRate} duration={sequenceDuration} clip={previewClip} media={!previewClip ? selectedMedia : undefined} sequenceSize={sequence} playing={playing} onTogglePlay={togglePlayback} /></Panel><Separator id="monitor-splitter" className="panel-separator" aria-label={t('Redimensionar monitor e inspector','Resize preview and inspector')} /><Panel id="inspector" defaultSize="24%" minSize="18%" maxSize="40%" className="resize-panel-content"><InspectorPanel clip={selectedClip} selectedMedia={selectedMedia} assets={assets} playhead={playhead} sequenceSize={sequence} onSeek={setPlayhead} readOnly={selectedClipReadOnly} onAddSelected={() => { if (selectedMedia) addMediaToTimeline(selectedMedia, playhead) }} onUpdateClip={updateClip} onCopyClipName={(name) => void copyClipName(name)} onResetClip={() => { if (selectedClip && !selectedClipReadOnly) updateClip(selectedClip.id, { transform: { x: sequence.width / 2, y: sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }, opacity: 100, blendMode: 'normal', volume: 100, fadeIn: 0, fadeOut: 0, uniformScale: true, keyframes: [] }) }} /></Panel></Group></div>
@@ -303,8 +343,9 @@ function App() {
       <Panel id="assistant" panelRef={assistantPanelRef} defaultSize="17%" minSize="13%" maxSize="28%" collapsedSize="0%" collapsible className="resize-panel-content"><AssistantPanel open onClose={toggleAssistant} projectName={projectName} /></Panel>
     </Group>
     <PreferencesSheet open={settingsOpen} onOpenChange={setSettingsOpen} onResetLayout={resetWorkspace} snapToFrames={snapToFrames} onToggleSnap={toggleSnap} saveStatus={saveStatus} />
-    <RenameProjectDialog open={renameOpen} name={projectName} onOpenChange={setRenameOpen} onSave={setProjectName} />
-    {notice && <div className="toast-notice"><span className="toast-check"><span>✓</span></span>{notice}</div>}
+    <RenameProjectDialog open={renameOpen} name={projectName} onOpenChange={setRenameOpen} onSave={(name) => { setProjectName(name); toast.success(t('Proyecto renombrado', 'Project renamed'), { description: name }) }} />
+    <ExportDialog open={exportOpen} projectName={projectName} sequenceDuration={sequenceDuration} sequenceSize={sequence} tracks={tracks} assets={assets} mutedTracks={mutedTracks} onOpenChange={setExportOpen} />
+    <Toaster />
   </main>
 }
 

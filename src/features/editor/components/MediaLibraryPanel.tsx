@@ -172,8 +172,16 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, onSelect
                   <button type="button" className="media-entry-action destructive" aria-label={t('Quitar del proyecto', 'Remove from project')} title={t('Quitar del proyecto', 'Remove from project')} onClick={() => setDeleteTarget(item)}><Trash2 size={13} /></button>
                 </div>
               </div>
-              {(status === 'catalog-only' || status === 'missing') && <button type="button" className="media-relink-action" onClick={() => { relinkTargetId.current = item.id; relinkInputRef.current?.click() }}><Upload size={11} />{t('Vincular archivo', 'Link file')}</button>}
-              {status === 'missing' && <button className="media-relink" type="button" disabled title={t('La relocalización se habilitará cuando el proyecto conserve rutas de archivo', 'Relinking will be available when the project retains file paths')}>{t('Relocalizar · pronto', 'Relink · soon')}</button>}
+              {(status === 'catalog-only' || status === 'missing') && (
+                <button
+                  type="button"
+                  className="media-relink-action"
+                  title={t('Selecciona el archivo original desde tu equipo para relocalizarlo', 'Select the original file from your computer to relink it')}
+                  onClick={() => { relinkTargetId.current = item.id; relinkInputRef.current?.click() }}
+                >
+                  <Upload size={11} />{status === 'missing' ? t('Relocalizar archivo', 'Relink file') : t('Vincular archivo', 'Link file')}
+                </button>
+              )}
               {status === 'error' && <details className="media-error-detail"><summary>{t('Ver detalle', 'View details')}</summary><p>{item.detail || errorDetail}</p></details>}
             </div>
           )
@@ -195,7 +203,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, onSelect
 
       <div className="media-foot">
         <span><Layers2 size={13} /> {assets.length} {t('elementos', 'items')}</span>
-        <span>{t('Solo catálogo', 'Catalog only')}</span>
+        <span>{assets.some((a) => a.status === 'ready') ? `${assets.filter((a) => a.status === 'ready').length} ${t('disponibles', 'ready')}` : t('Solo catálogo', 'Catalog only')}</span>
       </div>
       <Dialog.Root open={!!renameTarget} onOpenChange={(open) => { if (!open) setRenameTarget(null) }}>
         <Dialog.Portal>

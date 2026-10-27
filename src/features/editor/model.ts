@@ -1,3 +1,13 @@
+export type Transform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number }
+
+export type Keyframe = {
+  property: 'position' | 'scale' | 'rotation' | 'opacity'
+  time: number
+  value?: number
+  valueX?: number
+  valueY?: number
+}
+
 export type Clip = {
   id: string
   title: string
@@ -7,14 +17,14 @@ export type Clip = {
   thumbnail: string
   sourceAssetId?: string
   kind: 'video' | 'audio'
-  transform?: { x: number; y: number; scaleX: number; scaleY: number; rotation: number }
+  transform?: Transform
   uniformScale?: boolean
   opacity?: number
   blendMode?: 'normal' | 'multiply' | 'screen' | 'overlay'
   volume?: number
   fadeIn?: number
   fadeOut?: number
-  keyframes?: { property: 'position' | 'scale'; time: number }[]
+  keyframes?: Keyframe[]
 }
 
 export type Track = {

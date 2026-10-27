@@ -1,0 +1,442 @@
+import type { Clip, MediaItem, Track } from '../model'
+import type { ExportPresetId, ExportSettings, RenderProgress, RenderResult } from './contracts'
+import { loadMediaSource } from './media-storage'
+import { getInterpolatedOpacity, getInterpolatedTransform } from './keyframe-interpolation'
+
+export const EXPORT_PRESETS: Record<ExportPresetId, {
+  label: string
+  description: string
+  width: number
+  height: number
+  frameRate: number
+  bitrateMbps: number
+  format: 'webm' | 'mp4' | 'wav'
+}> = {
+  'web-1080p': {
+    label: '1080p Full HD (Web / YouTube)',
+    description: '1920 × 1080 · 30 fps · 8 Mbps',
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    bitrateMbps: 8,
+    format: 'webm',
+  },
+  'social-vertical': {
+    label: '1080p Vertical (TikTok / Reels / Shorts)',
+    description: '1080 × 1920 · 30 fps · 8 Mbps',
+    width: 1080,
+    height: 1920,
+    frameRate: 30,
+    bitrateMbps: 8,
+    format: 'webm',
+  },
+  'uhd-4k': {
+    label: '4K Ultra HD (Master)',
+    description: '3840 × 2160 · 30 fps · 25 Mbps',
+    width: 3840,
+    height: 2160,
+    frameRate: 30,
+    bitrateMbps: 25,
+    format: 'webm',
+  },
+  'fast-720p': {
+    label: '720p HD Rápido (Borrador)',
+    description: '1280 × 720 · 30 fps · 4 Mbps',
+    width: 1280,
+    height: 720,
+    frameRate: 30,
+    bitrateMbps: 4,
+    format: 'webm',
+  },
+  'audio-only': {
+    label: 'Audio Master (Mixdown estéreo)',
+    description: 'WAV PCM 48 kHz 24/16-bit estéreo',
+    width: 1920,
+    height: 1080,
+    frameRate: 30,
+    bitrateMbps: 1.5,
+    format: 'wav',
+  },
+}
+
+export function getDefaultExportSettings(projectName: string, preset: ExportPresetId = 'web-1080p'): ExportSettings {
+  const p = EXPORT_PRESETS[preset]
+  const safeName = projectName.trim().replace(/[^\p{L}\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, '') || 'video_export'
+  return {
+    preset,
+    format: p.format,
+    width: p.width,
+    height: p.height,
+    frameRate: p.frameRate,
+    bitrateMbps: p.bitrateMbps,
+    fileName: `${safeName}.${p.format}`,
+    range: 'entire',
+  }
+}
+
+/**
+ * Encodes an AudioBuffer to a standard 16-bit PCM WAV Blob.
+ */
+export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+  const numChannels = buffer.numberOfChannels
+  const sampleRate = buffer.sampleRate
+  const length = buffer.length * numChannels * 2
+  const arrayBuffer = new ArrayBuffer(44 + length)
+  const view = new DataView(arrayBuffer)
+
+  // Write WAV header
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+  }
+
+  writeString(0, 'RIFF')
+  view.setUint32(4, 36 + length, true)
+  writeString(8, 'WAVE')
+  writeString(12, 'fmt ')
+  view.setUint32(16, 16, true) // PCM chunk size
+  view.setUint16(20, 1, true) // Audio format: PCM
+  view.setUint16(22, numChannels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * numChannels * 2, true) // Byte rate
+  view.setUint16(32, numChannels * 2, true) // Block align
+  view.setUint16(34, 16, true) // Bits per sample
+  writeString(36, 'data')
+  view.setUint32(40, length, true)
+
+  // Interleave channels
+  const channels: Float32Array[] = []
+  for (let c = 0; c < numChannels; c++) channels.push(buffer.getChannelData(c))
+
+  let offset = 44
+  for (let i = 0; i < buffer.length; i++) {
+    for (let c = 0; c < numChannels; c++) {
+      const sample = Math.max(-1, Math.min(1, channels[c][i]))
+      const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7FFF
+      view.setInt16(offset, int16, true)
+      offset += 2
+    }
+  }
+
+  return new Blob([arrayBuffer], { type: 'audio/wav' })
+}
+
+/**
+ * Mixes all active audio clips on the timeline into a single AudioBuffer using OfflineAudioContext.
+ */
+export async function renderAudioMixdown(
+  tracks: Track[],
+  _assets: MediaItem[],
+  duration: number,
+  mutedTracks: string[] = [],
+  sampleRate = 48000,
+): Promise<AudioBuffer | null> {
+  const audioTracks = tracks.filter((t) => t.kind === 'audio' && !mutedTracks.includes(t.id))
+  const audioClips = audioTracks.flatMap((t) => t.clips).filter((c) => c.duration > 0)
+  if (audioClips.length === 0 || duration <= 0) return null
+
+  const lengthSamples = Math.max(1, Math.ceil(duration * sampleRate))
+  const OfflineCtx = window.OfflineAudioContext || (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext }).webkitOfflineAudioContext
+  if (!OfflineCtx) return null
+
+  const offlineContext = new OfflineCtx(2, lengthSamples, sampleRate)
+
+  // Load and decode unique audio assets
+  const assetBuffers = new Map<string, AudioBuffer>()
+  for (const clip of audioClips) {
+    const assetId = clip.sourceAssetId
+    if (!assetId || assetBuffers.has(assetId)) continue
+
+    const blobUrl = await loadMediaSource(assetId)
+    if (!blobUrl) continue
+
+    try {
+      const response = await fetch(blobUrl)
+      const arrayBuffer = await response.arrayBuffer()
+      const decoded = await offlineContext.decodeAudioData(arrayBuffer)
+      assetBuffers.set(assetId, decoded)
+    } catch {
+      // Asset failed decoding, skip gracefully
+    } finally {
+      URL.revokeObjectURL(blobUrl)
+    }
+  }
+
+  // Schedule clips into the offline context
+  for (const clip of audioClips) {
+    const buffer = clip.sourceAssetId ? assetBuffers.get(clip.sourceAssetId) : null
+    if (!buffer) continue
+
+    const source = offlineContext.createBufferSource()
+    source.buffer = buffer
+
+    const gain = offlineContext.createGain()
+    const baseVolume = (clip.volume ?? 100) / 100
+    gain.gain.setValueAtTime(baseVolume, clip.start)
+
+    // Handle fade in
+    if (clip.fadeIn && clip.fadeIn > 0) {
+      gain.gain.setValueAtTime(0, clip.start)
+      gain.gain.linearRampToValueAtTime(baseVolume, clip.start + clip.fadeIn)
+    }
+
+    // Handle fade out
+    if (clip.fadeOut && clip.fadeOut > 0) {
+      const fadeStart = Math.max(clip.start, clip.start + clip.duration - clip.fadeOut)
+      gain.gain.setValueAtTime(baseVolume, fadeStart)
+      gain.gain.linearRampToValueAtTime(0, clip.start + clip.duration)
+    }
+
+    source.connect(gain)
+    gain.connect(offlineContext.destination)
+    source.start(clip.start, 0, clip.duration)
+  }
+
+  return offlineContext.startRendering()
+}
+
+export interface RenderSequenceParams {
+  tracks: Track[]
+  assets: MediaItem[]
+  sequenceDuration: number
+  settings: ExportSettings
+  mutedTracks?: string[]
+  onProgress?: (progress: RenderProgress) => void
+  signal?: AbortSignal
+}
+
+/**
+ * Main export rendering pipeline. Renders timeline tracks to a video (WebM/MP4) or audio (WAV) file.
+ */
+export async function renderSequence({
+  tracks,
+  assets,
+  sequenceDuration,
+  settings,
+  mutedTracks = [],
+  onProgress,
+  signal,
+}: RenderSequenceParams): Promise<RenderResult> {
+  const duration = Math.max(0.1, sequenceDuration)
+  const totalFrames = Math.max(1, Math.ceil(duration * settings.frameRate))
+
+  onProgress?.({ stage: 'preparing', percent: 0, currentFrame: 0, totalFrames, message: 'Preparando medios y motor de render...' })
+
+  if (signal?.aborted) throw new Error('Exportación cancelada.')
+
+  // Audio-only export branch
+  if (settings.format === 'wav' || settings.preset === 'audio-only') {
+    onProgress?.({ stage: 'rendering', percent: 25, currentFrame: 0, totalFrames, message: 'Mezclando pistas de audio en alta fidelidad...' })
+    const audioBuffer = await renderAudioMixdown(tracks, assets, duration, mutedTracks)
+    if (signal?.aborted) throw new Error('Exportación cancelada.')
+
+    let blob: Blob
+    if (audioBuffer) {
+      blob = audioBufferToWavBlob(audioBuffer)
+    } else {
+      const ctx = new (window.OfflineAudioContext || (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext }).webkitOfflineAudioContext)(2, 48000, 48000)
+      const silentBuffer = ctx.createBuffer(2, 48000, 48000)
+      blob = audioBufferToWavBlob(silentBuffer)
+    }
+
+    onProgress?.({ stage: 'completed', percent: 100, currentFrame: totalFrames, totalFrames, message: 'Mezcla completada con éxito.' })
+    return {
+      blob,
+      fileName: settings.fileName.endsWith('.wav') ? settings.fileName : `${settings.fileName}.wav`,
+      durationSeconds: duration,
+      sizeBytes: blob.size,
+    }
+  }
+
+  // Video compositing branch
+  const canvas = document.createElement('canvas')
+  canvas.width = settings.width
+  canvas.height = settings.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('No se pudo inicializar el contexto 2D para renderizar la secuencia.')
+
+  // Check MediaRecorder support
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('MediaRecorder no está disponible en este entorno.')
+  }
+
+  let mimeType = 'video/webm;codecs=vp9'
+  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm'
+  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = ''
+
+  // Pre-render audio track if present
+  onProgress?.({ stage: 'preparing', percent: 10, currentFrame: 0, totalFrames, message: 'Procesando mezcla de audio del proyecto...' })
+  const audioBuffer = await renderAudioMixdown(tracks, assets, duration, mutedTracks)
+  if (signal?.aborted) throw new Error('Exportación cancelada.')
+
+  // Create stream from canvas
+  const canvasStream = canvas.captureStream(settings.frameRate)
+  let combinedStream = canvasStream
+
+  // Add audio track to stream if available
+  if (audioBuffer && typeof AudioContext !== 'undefined') {
+    try {
+      const audioCtx = new AudioContext()
+      const dest = audioCtx.createMediaStreamDestination()
+      const source = audioCtx.createBufferSource()
+      source.buffer = audioBuffer
+      source.connect(dest)
+      source.start()
+
+      const audioTrack = dest.stream.getAudioTracks()[0]
+      if (audioTrack) {
+        combinedStream = new MediaStream([...canvasStream.getVideoTracks(), audioTrack])
+      }
+    } catch {
+      // Fallback to video-only stream if audio routing fails
+    }
+  }
+
+  const chunks: Blob[] = []
+  const recorder = new MediaRecorder(combinedStream, {
+    mimeType: mimeType || undefined,
+    videoBitsPerSecond: settings.bitrateMbps * 1_000_000,
+  })
+
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data)
+  }
+
+  const completionPromise = new Promise<Blob>((resolve, reject) => {
+    recorder.onstop = () => {
+      const finalBlob = new Blob(chunks, { type: mimeType || 'video/webm' })
+      resolve(finalBlob)
+    }
+    recorder.onerror = (e) => reject(new Error(`Error en MediaRecorder: ${String(e)}`))
+  })
+
+  recorder.start()
+
+  // Pre-load visual assets into HTML elements
+  const visualAssets = new Map<string, HTMLImageElement | HTMLVideoElement>()
+  const videoClips = tracks.filter((t) => t.kind === 'video').flatMap((t) => t.clips)
+  for (const clip of videoClips) {
+    const assetId = clip.sourceAssetId
+    if (!assetId || visualAssets.has(assetId)) continue
+    const asset = assets.find((a) => a.id === assetId)
+    const url = await loadMediaSource(assetId)
+    if (!url) continue
+
+    if (asset?.type === 'image' || clip.thumbnail === 'image-catalog') {
+      const img = new Image()
+      img.src = url
+      await new Promise((res) => { img.onload = res; img.onerror = res })
+      visualAssets.set(assetId, img)
+    } else {
+      const vid = document.createElement('video')
+      vid.src = url
+      vid.muted = true
+      vid.playsInline = true
+      await new Promise((res) => { vid.onloadedmetadata = res; vid.onerror = res })
+      visualAssets.set(assetId, vid)
+    }
+  }
+
+  // Draw frame by frame
+  const frameInterval = 1 / settings.frameRate
+  for (let frame = 0; frame < totalFrames; frame++) {
+    if (signal?.aborted) {
+      recorder.stop()
+      throw new Error('Exportación cancelada.')
+    }
+
+    const time = frame * frameInterval
+
+    // Background fill
+    ctx.fillStyle = '#0a0a0c'
+    ctx.fillRect(0, 0, settings.width, settings.height)
+
+    // Render active video clips in layer order (bottom to top)
+    const activeVideoTracks = tracks.filter((t) => t.kind === 'video')
+    for (const track of activeVideoTracks) {
+      for (const clip of track.clips) {
+        if (time >= clip.start && time < clip.start + clip.duration) {
+          drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), time, settings.width, settings.height)
+        }
+      }
+    }
+
+    const percent = Math.min(98, Math.round((frame / totalFrames) * 90) + 10)
+    onProgress?.({
+      stage: 'rendering',
+      percent,
+      currentFrame: frame + 1,
+      totalFrames,
+      message: `Renderizando cuadro ${frame + 1} de ${totalFrames}...`,
+    })
+
+    // Yield to event loop to allow video frame capture
+    await new Promise((r) => setTimeout(r, 16))
+  }
+
+  onProgress?.({ stage: 'encoding', percent: 99, currentFrame: totalFrames, totalFrames, message: 'Finalizando codificación de vídeo...' })
+  recorder.stop()
+
+  const finalBlob = await completionPromise
+  onProgress?.({ stage: 'completed', percent: 100, currentFrame: totalFrames, totalFrames, message: 'Exportación completada con éxito.' })
+
+  return {
+    blob: finalBlob,
+    fileName: settings.fileName,
+    durationSeconds: duration,
+    sizeBytes: finalBlob.size,
+  }
+}
+
+function drawClipToCanvas(
+  ctx: CanvasRenderingContext2D,
+  clip: Clip,
+  element: HTMLImageElement | HTMLVideoElement | undefined,
+  time: number,
+  canvasWidth: number,
+  canvasHeight: number,
+) {
+  ctx.save()
+
+  const opacity = getInterpolatedOpacity(clip, time) / 100
+  ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
+
+  const transform = getInterpolatedTransform(clip, time, { width: canvasWidth, height: canvasHeight })
+  const scaleX = (transform.scaleX ?? 100) / 100
+  const scaleY = (transform.scaleY ?? 100) / 100
+
+  ctx.translate(transform.x, transform.y)
+  if (transform.rotation) ctx.rotate((transform.rotation * Math.PI) / 180)
+  ctx.scale(scaleX, scaleY)
+
+  if (element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0) {
+    ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
+  } else if (element instanceof HTMLVideoElement && element.readyState >= 2) {
+    element.currentTime = Math.max(0, time - clip.start)
+    ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
+  } else {
+    // Fallback: visual placeholder card
+    ctx.fillStyle = clip.color === 'olive' ? '#2f4236' : clip.color === 'sand' ? '#443c2c' : '#22384a'
+    ctx.fillRect(-canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
+    ctx.fillStyle = '#ffffff'
+    ctx.font = '28px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(clip.title, 0, 0)
+  }
+
+  ctx.restore()
+}
+
+/**
+ * Triggers a browser download of the exported video or audio file.
+ */
+export function downloadRenderResult(result: RenderResult): void {
+  const url = URL.createObjectURL(result.blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = result.fileName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 15000)
+}
