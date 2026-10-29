@@ -85,7 +85,7 @@ export async function loadMediaPreview(id: string): Promise<string | null> {
         const file = new File([originalBlob], 'video-source.mp4', { type: originalBlob.type || 'video/mp4' })
         const generated = await captureVideoThumbnail(file)
         if (generated) {
-          await storeMediaPreview(id, generated).catch(() => {})
+          await storeMediaPreview(id, generated).catch(() => { })
           return URL.createObjectURL(generated)
         }
       } catch {

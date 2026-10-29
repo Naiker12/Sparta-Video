@@ -17,12 +17,13 @@ type Props = {
   onAddTextClip?: () => void; onAutoSubtitles?: () => void; onClearSubtitles?: () => void
   onPackClips?: () => void; onAutoMarkers?: () => void; onAutoAudio?: () => void
   onAddMarker: (time: number) => void; onRemoveMarker: (id: string) => void; onToggleSnap: () => void; onToggleExpanded: () => void; onSetTool: (tool: 'select' | 'razor') => void
+  onImportFiles?: (files: FileList | File[]) => void
 }
 type Gesture = { id: string; startX: number; originalStart: number; originalDuration: number; mode: 'move' | 'trim-left' | 'trim-right' }
 type GestureFeedback = { id: string; mode: Gesture['mode']; start: number; duration: number; originalStart: number; originalDuration: number }
 type SnapFeedback = { time: number; target: string }
 
-export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onAddTextClip, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool }: Props) {
+export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onAddTextClip, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool, onImportFiles }: Props) {
   const scale = 31 * zoom
   const sequenceDuration = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration)), ...markers.map((marker) => marker.time))
   const selectedClipObj = tracks.flatMap((track) => track.clips).find((clip) => clip.id === selected)
@@ -71,6 +72,9 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
   const beginGesture = (event: React.PointerEvent, clip: Clip, mode: Gesture['mode']) => {
     if (event.button !== 0) return
     event.preventDefault(); event.stopPropagation(); onSelect(clip.id)
+    try {
+      (event.currentTarget as HTMLElement)?.setPointerCapture?.(event.pointerId)
+    } catch { /* ignore */ }
     gestureRef.current = { id: clip.id, startX: event.clientX, originalStart: clip.start, originalDuration: clip.duration, mode }
     const move = (moveEvent: PointerEvent) => {
       const active = gestureRef.current
@@ -105,7 +109,12 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
       setGestureFeedback({ id: active.id, mode: active.mode, start: nextStart, duration: nextDuration, originalStart: active.originalStart, originalDuration: active.originalDuration })
       setPreview((current) => ({ ...current, [active.id]: { start: nextStart, duration: nextDuration } }))
     }
-    const end = () => {
+    const end = (upEvent?: PointerEvent) => {
+      if (upEvent) {
+        try {
+          (upEvent.target as HTMLElement)?.releasePointerCapture?.(upEvent.pointerId)
+        } catch { /* ignore */ }
+      }
       const active = gestureRef.current
       const pending = pendingRef.current
       if (active && pending) onMoveClip(active.id, pending.start, pending.duration)
@@ -207,7 +216,33 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
       </div>
       <div className="track-controls-resizer" onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); resizingTrackHeaderRef.current = true; trackHeaderStartRef.current = { x: event.clientX, width: trackHeaderWidth } }} title={t('Arrastra para calibrar ancho de pistas', 'Drag to resize track headers')} />
       <div className="timeline-scroll" ref={timelineRef} onScroll={() => syncVerticalScroll('timeline')} onWheel={(event) => { if (!event.ctrlKey) return; event.preventDefault(); const rect = timelineRef.current?.getBoundingClientRect(); if (!rect) return; const anchor = event.clientX - rect.left; const nextZoom = Math.max(0.25, Math.min(2.4, zoom * (event.deltaY < 0 ? 1.1 : 0.9))); onZoom(nextZoom); requestAnimationFrame(() => { if (timelineRef.current) timelineRef.current.scrollLeft = (timelineRef.current.scrollLeft + anchor) * nextZoom / zoom - anchor }) }} onKeyDown={(event) => { if (event.key === '\\') { event.preventDefault(); fitSequence(); return } if (event.key === '[' || event.key === ']') { const sorted = [...markers].sort((a, b) => a.time - b.time); if (!sorted.length) return; const index = sorted.findIndex((marker) => marker.id === activeMarkerId); const next = event.key === ']' ? sorted[(index + 1) % sorted.length] : sorted[(index <= 0 ? sorted.length : index) - 1]; event.preventDefault(); setActiveMarkerId(next.id); onSeek(next.time) } if (event.key === 'Escape') setActiveMarkerId(null) }} role="region" aria-label={t('Pistas de la línea de tiempo', 'Timeline tracks')} tabIndex={0}>
-        <div className="timeline-canvas" style={{ width: `${Math.max(880, scale * rulerTickCount)}px`, backgroundSize: `${scale}px 100%` }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData('application/sparta-media'); const item = assets.find((asset) => asset.id === id); if (item) { const rect = timelineRef.current?.getBoundingClientRect(); if (!rect) return; const lane = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-track-id]') : null; onAddMedia(item, Math.max(0, (event.clientX - rect.left + timelineRef.current!.scrollLeft) / scale), lane?.dataset.trackId) } }}>
+        <div
+          className="timeline-canvas"
+          style={{ width: `${Math.max(880, scale * rulerTickCount)}px`, backgroundSize: `${scale}px 100%` }}
+          onDragOver={(event) => {
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
+          }}
+          onDragEnter={(event) => {
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
+          }}
+          onDrop={(event) => {
+            event.preventDefault()
+            if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+              onImportFiles?.(event.dataTransfer.files)
+              return
+            }
+            const id = event.dataTransfer.getData('application/sparta-media') || event.dataTransfer.getData('text/plain')
+            const item = assets.find((asset) => asset.id === id)
+            if (item) {
+              const rect = timelineRef.current?.getBoundingClientRect()
+              if (!rect) return
+              const lane = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-track-id]') : null
+              onAddMedia(item, Math.max(0, (event.clientX - rect.left + timelineRef.current!.scrollLeft) / scale), lane?.dataset.trackId)
+            }
+          }}
+        >
           <div className="ruler" ref={rulerRef} onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); scrubbingRef.current = true; seekFromClientX(event.clientX) }}>{rulerMarks.map((time) => <div className="ruler-mark" key={time} style={{ left: `${time * scale}px` }}><span>{formatRulerTime(time)}</span><i /></div>)}</div>
           {markers.map((marker) => <button key={marker.id} className={`timeline-marker ${activeMarkerId === marker.id ? 'marker-active' : ''}`} style={{ left: `${marker.time * scale}px` }} title={`${marker.label} · ${formatTimecode(marker.time, frameRate)} · pulsa Supr para eliminar`} onClick={() => { setActiveMarkerId(marker.id); onSeek(marker.time) }} onKeyDown={(event) => { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); event.stopPropagation(); setActiveMarkerId(null); onRemoveMarker(marker.id) } }} onContextMenu={(event) => { event.preventDefault(); setActiveMarkerId(null); onRemoveMarker(marker.id) }} aria-label={`${marker.label} en ${formatTimecode(marker.time, frameRate)}. Supr para eliminar`} />)}
           {markers.filter((marker) => marker.id === activeMarkerId).map((marker) => <div key={`popover-${marker.id}`} className="marker-popover" style={{ left: `${marker.time * scale}px` }}><strong>{marker.label}</strong><span>{formatTimecode(marker.time, frameRate)}</span><button type="button" onClick={() => { setActiveMarkerId(null); onRemoveMarker(marker.id) }}>{t('Eliminar', 'Delete')}</button></div>)}

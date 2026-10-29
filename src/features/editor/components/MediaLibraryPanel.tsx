@@ -465,7 +465,11 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                   <button
                     className={`media-card ${selectedMedia === item.id ? 'media-selected' : ''}`}
                     draggable
-                    onDragStart={(event) => event.dataTransfer.setData('application/sparta-media', item.id)}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'copyMove'
+                      event.dataTransfer.setData('application/sparta-media', item.id)
+                      event.dataTransfer.setData('text/plain', item.id)
+                    }}
                     onDoubleClick={() => onAdd(item)}
                     onClick={() => onSelect(item)}
                     title={t('Arrastra o haz doble clic para añadir', 'Drag or double-click to add')}
