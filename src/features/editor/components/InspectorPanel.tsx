@@ -196,11 +196,15 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                 onChange={(e) => onUpdateClip(clip.id, { text: e.target.value })}
               />
               <div className="subtitle-calib-grid">
-                <label className="toggle-row">
-                  <span>{t('Altura Y', 'Vertical Y')} <small className="fade-val">{textStyle.positionY}%</small></span>
+                <div className="calib-slider-card">
+                  <div className="calib-slider-header">
+                    <span>{t('Altura Y', 'Vertical Y')}</span>
+                    <span className="calib-slider-badge">{textStyle.positionY}%</span>
+                  </div>
                   <input
                     aria-label={t('Altura vertical del subtítulo', 'Subtitle vertical height')}
                     type="range"
+                    className="calib-range-input"
                     min="8"
                     max="92"
                     step="1"
@@ -214,12 +218,16 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                       })
                     }}
                   />
-                </label>
-                <label className="toggle-row">
-                  <span>{t('Tamaño letra', 'Font size')} <small className="fade-val">{textStyle.fontSize}px</small></span>
+                </div>
+                <div className="calib-slider-card">
+                  <div className="calib-slider-header">
+                    <span>{t('Tamaño letra', 'Font size')}</span>
+                    <span className="calib-slider-badge">{textStyle.fontSize}px</span>
+                  </div>
                   <input
                     aria-label={t('Tamaño de letra del subtítulo', 'Subtitle font size')}
                     type="range"
+                    className="calib-range-input"
                     min="20"
                     max="96"
                     step="2"
@@ -227,12 +235,15 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                     value={textStyle.fontSize}
                     onChange={(e) => updateTextStyle({ fontSize: Number(e.target.value) })}
                   />
-                </label>
+                </div>
               </div>
               <div className="subtitle-timing-calib">
-                <div className="subtitle-timing-row">
-                  <span>{t('Tiempo clip', 'Clip timing')}</span>
-                  <div className="subtitle-nudge-group">
+                <div className="subtitle-timing-item">
+                  <div className="subtitle-timing-header">
+                    <span>{t('Tiempo clip', 'Clip timing')}</span>
+                    <span className="calib-time-readout">{clip.start.toFixed(2)}s</span>
+                  </div>
+                  <div className="subtitle-nudge-group-split">
                     <button
                       type="button"
                       disabled={readOnly}
@@ -242,7 +253,6 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                     >
                       −0.1s
                     </button>
-                    <span className="calib-time-readout">{clip.start.toFixed(2)}s</span>
                     <button
                       type="button"
                       disabled={readOnly}
@@ -255,13 +265,15 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                   </div>
                 </div>
                 {onNudgeAllSubtitlesTime && (
-                  <div className="subtitle-timing-row">
-                    <span>{t('Sincronizar pista', 'Sync track')}</span>
-                    <div className="subtitle-nudge-group">
-                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(-0.2)}>−0.2s</button>
-                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(-0.05)}>−0.05s</button>
-                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(0.05)}>+0.05s</button>
-                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(0.2)}>+0.2s</button>
+                  <div className="subtitle-timing-item">
+                    <div className="subtitle-timing-header">
+                      <span>{t('Sincronizar pista', 'Sync track')}</span>
+                    </div>
+                    <div className="subtitle-nudge-grid-4">
+                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(-0.2)} title="-0.20s">−0.2s</button>
+                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(-0.05)} title="-0.05s">−0.05s</button>
+                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(0.05)} title="+0.05s">+0.05s</button>
+                      <button type="button" disabled={readOnly} className="calib-nudge-btn" onClick={() => onNudgeAllSubtitlesTime(0.2)} title="+0.20s">+0.2s</button>
                     </div>
                   </div>
                 )}

@@ -939,16 +939,22 @@
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  padding: 10px 14px 0;
+  padding: 10px 10px 0;
   overflow: hidden;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .inspector-tabs {
   display: flex;
-  gap: 16px;
+  gap: 10px;
   margin-top: 6px;
   border-bottom: 1px solid var(--line);
   height: 28px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+  width: 100%;
 }
 
 .inspector-tabs button {
@@ -1044,24 +1050,42 @@
 }
 
 .property-row {
-  height: 28px;
+  min-height: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: var(--text-secondary);
   font-size: 11px;
   gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 
 .property-drag-label {
   cursor: ew-resize;
   user-select: none;
+  font-size: 10.5px;
+  flex-shrink: 0;
+  min-width: 48px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .property-values {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.property-values small {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
 }
 
 .property-values label {
@@ -1070,28 +1094,43 @@
   background: var(--panel-raised);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 2px 6px;
+  padding: 2px 4px;
   height: 22px;
+  flex: 1;
+  min-width: 28px;
+  max-width: 58px;
 }
 
 .property-values input {
-  width: 44px;
+  width: 100%;
+  min-width: 18px;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
   text-align: right;
   font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 10.5px;
+  padding: 0;
 }
 
 .toggle-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  height: 26px;
+  min-height: 26px;
   font-size: 11px;
   color: var(--text-secondary);
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.toggle-row input[type="range"] {
+  flex: 1;
+  min-width: 40px;
+  max-width: 130px;
+  margin: 0;
 }
 
 .toggle {
@@ -1104,6 +1143,7 @@
   padding: 2px;
   cursor: pointer;
   transition: background 0.15s ease;
+  flex-shrink: 0;
 }
 
 .toggle i {
@@ -1128,11 +1168,23 @@
   gap: 8px;
   color: var(--text-secondary);
   font-size: 11px;
+  width: 100%;
+  min-width: 0;
 }
 
 .slider-row input[type="range"] {
   flex: 1;
+  min-width: 40px;
   accent-color: var(--accent);
+  margin: 0;
+}
+
+.slider-value-badge {
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  min-width: 38px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
 .select-button {
@@ -1143,6 +1195,8 @@
   border-radius: 6px;
   color: var(--text);
   cursor: pointer;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .inspector-empty {
