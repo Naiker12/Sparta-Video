@@ -195,6 +195,7 @@ Configura tu entorno de trabajo y conecta tus propios modelos de lenguaje y serv
 | `Ctrl + +` / `Ctrl + -` | Zoom in / Zoom out en la línea de tiempo |
 | `Ctrl + 0` | Encajar línea de tiempo al espacio disponible |
 | `Supr` / `Backspace` | Eliminar clip o marcador seleccionado |
+| `Alt + Supr` / `Alt + Backspace` | Borrar todos los subtítulos de la secuencia (con opción Deshacer) |
 
 ---
 

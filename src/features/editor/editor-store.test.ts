@@ -200,4 +200,47 @@ describe('editor project operations', () => {
     const afterUndo = useEditorStore.getState().tracks.flatMap((t) => t.clips)
     expect(afterUndo.some((c) => c.text === 'Primera línea de impacto')).toBe(false)
   })
+
+  it('clears all subtitles and text clips in one operation with full undo and redo support', () => {
+    const store = useEditorStore.getState()
+    // Generate some subtitles
+    const count = store.autoGenerateSubtitles(
+      'capcut-pop-pill',
+      'Línea uno\nLínea dos\nLínea tres\nLínea cuatro',
+    )
+    expect(count).toBe(4)
+
+    // Add another custom text clip
+    store.addTextClip({
+      text: 'Texto suelto',
+      at: 1.0,
+      duration: 2.0,
+    })
+
+    const totalClipsBefore = useEditorStore.getState().tracks.flatMap((t) => t.clips).length
+    const cleared = useEditorStore.getState().clearAllSubtitles()
+    expect(cleared).toBeGreaterThanOrEqual(5)
+
+    const clipsAfter = useEditorStore.getState().tracks.flatMap((t) => t.clips)
+    expect(clipsAfter.length).toBe(totalClipsBefore - cleared)
+    expect(clipsAfter.some((c) => c.text !== undefined)).toBe(false)
+    expect(clipsAfter.some((c) => c.thumbnail === 'text-overlay')).toBe(false)
+
+    // Test Undo restores all cleared subtitles
+    useEditorStore.getState().undo()
+    const clipsRestored = useEditorStore.getState().tracks.flatMap((t) => t.clips)
+    expect(clipsRestored.length).toBe(totalClipsBefore)
+    expect(clipsRestored.some((c) => c.text === 'Línea uno')).toBe(true)
+
+    // Test Redo clears them again
+    useEditorStore.getState().redo()
+    const clipsRedone = useEditorStore.getState().tracks.flatMap((t) => t.clips)
+    expect(clipsRedone.length).toBe(totalClipsBefore - cleared)
+
+    // Running on empty returns 0 without pushing new history
+    const pastLength = useEditorStore.getState().past.length
+    const emptyClear = useEditorStore.getState().clearAllSubtitles()
+    expect(emptyClear).toBe(0)
+    expect(useEditorStore.getState().past.length).toBe(pastLength)
+  })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, FileDown, FileUp, Film, FolderOpen, Pencil, PlusCircle, Settings2, Undo2, Video } from 'lucide-react'
 import { AssistantPanel, type AssistantMode } from './features/editor/components/AssistantPanel'
 import {
@@ -72,6 +72,7 @@ function App() {
   const addTextClip = useEditorStore((state) => state.addTextClip)
   const applyPresetToAllSubtitles = useEditorStore((state) => state.applyPresetToAllSubtitles)
   const autoGenerateSubtitles = useEditorStore((state) => state.autoGenerateSubtitles)
+  const clearAllSubtitles = useEditorStore((state) => state.clearAllSubtitles)
   const moveClip = useEditorStore((state) => state.moveClip)
   const moveClipToNewTrack = useEditorStore((state) => state.moveClipToNewTrack)
   const addAssets = useEditorStore((state) => state.addAssets)
@@ -239,6 +240,23 @@ function App() {
     editorVerticalGroupRef.current?.setLayout(next ? { stage: 16, timeline: 84 } : { stage: 52, timeline: 48 })
   }
 
+  const handleClearSubtitles = useCallback(() => {
+    const count = clearAllSubtitles()
+    if (count > 0) {
+      toast.success(
+        t(`Se eliminaron ${count} subtítulos de la secuencia`, `${count} subtitles removed from sequence`),
+        {
+          action: {
+            label: t('Deshacer', 'Undo'),
+            onClick: () => undo(),
+          },
+        }
+      )
+    } else {
+      toast.info(t('No hay subtítulos en la línea de tiempo para borrar', 'No subtitles on the timeline to delete'))
+    }
+  }, [clearAllSubtitles, undo])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return
@@ -263,6 +281,7 @@ function App() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo() }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { const id = useEditorStore.getState().selectedClipId; if (id) { event.preventDefault(); duplicateClip(id) } }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); document.querySelector<HTMLInputElement>('[aria-label="Buscar medios"]')?.focus() }
+      if (event.altKey && (event.key === 'Delete' || event.key === 'Backspace')) { event.preventDefault(); handleClearSubtitles(); return }
       if (event.key === 'Delete' || event.key === 'Backspace') { const id = useEditorStore.getState().selectedClipId; if (id) { event.preventDefault(); deleteClip(id) } }
       if (event.key.toLowerCase() === 's' && !event.ctrlKey && !event.metaKey) { const st = useEditorStore.getState(); if (st.selectedClipId) { splitClip(st.selectedClipId, st.playhead) } }
       if (event.key.toLowerCase() === 'c') setActiveTool('razor')
@@ -271,7 +290,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [addMarker, deleteClip, duplicateClip, moveClip, redo, renameOpen, sequenceDuration, setActiveTool, setPlayhead, settingsOpen, splitClip, undo])
+  }, [addMarker, deleteClip, duplicateClip, handleClearSubtitles, moveClip, redo, renameOpen, sequenceDuration, setActiveTool, setPlayhead, settingsOpen, splitClip, undo])
 
   const importFiles = async (files: FileList | File[] | null) => {
     if (!files?.length) return
@@ -489,7 +508,7 @@ function App() {
     <input ref={fileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" multiple accept="video/*,audio/*,image/*" tabIndex={-1} aria-hidden="true" onChange={(event) => { void importFiles(event.target.files); event.target.value = '' }} />
     <input ref={projectFileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" accept=".sparta,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProjectFromFile(file); event.target.value = '' }} />
     <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 17, editor: 63, assistant: 20 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
-      <Panel id="library" defaultSize="17%" minSize="190px" maxSize="25%" className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
+      <Panel id="library" defaultSize="17%" minSize="190px" maxSize="25%" className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onClearSubtitles={handleClearSubtitles} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
       <Separator id="library-separator" className="panel-separator" aria-label={t('Redimensionar biblioteca de medios','Resize media library')} />
       <Panel id="editor" defaultSize="63%" minSize="45%" className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
         <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia','Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia','Sequence resolution') }, ...[{ label: '1920 × 1080', width: 1920, height: 1080 }, { label: '1280 × 720', width: 1280, height: 720 }, { label: '1080 × 1920', width: 1080, height: 1920 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })) , { separator: true }, { heading: t('Fotogramas por segundo','Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer','Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)','Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente','Close assistant panel') : t('Abrir panel asistente','Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><IconNlePanelRight size={15} /></IconButton><button type="button" className="export-button" disabled={!canExport} title={canExport ? t('Exportar secuencia de vídeo', 'Export video sequence') : t('El motor de exportación se habilita al tener medios listos en la línea de tiempo', 'The export engine is enabled when ready media is on the timeline')} aria-label={canExport ? t('Exportar vídeo', 'Export video') : t('Exportación no disponible', 'Export unavailable')} onClick={() => setExportOpen(true)}><Video size={15} /> {t('Exportar', 'Export')} <span className="sr-only">{canExport ? 'Export video' : 'Export'}</span></button></div></div>
@@ -524,7 +543,7 @@ function App() {
           </Panel>
           <Separator id="stage-timeline-splitter" className="panel-separator panel-separator-horizontal" aria-label={t('Redimensionar monitor y línea de tiempo', 'Resize monitor and timeline')} />
           <Panel id="timeline" defaultSize="48%" minSize="22%" className="resize-panel-content">
-            <TimelinePanel tracks={tracks} assets={assets} markers={markers} selected={selectedClipId} playhead={playhead} zoom={zoom} frameRate={frameRate} snap={snapToFrames} expanded={timelineExpanded} tool={activeTool} mutedTracks={mutedTracks} lockedTracks={lockedTracks} onMuteTrack={toggleMute} onLockTrack={toggleLock} onSelect={selectClip} onSeek={setPlayhead} onZoom={setZoom} onAddTrack={addTrack} onAddMedia={addMediaToTimeline} onMoveClip={moveClip} onMoveClipToNewTrack={moveClipToNewTrack} onSplitClip={splitClip} onDeleteClip={deleteClip} onDuplicateClip={(id) => { duplicateClip(id); toast.success(t('Clip duplicado', 'Clip duplicated')) }} onAddTextClip={() => { addTextClip({ presetId: 'hormozi-karaoke', at: playhead }); toast.success(t('Texto animado Pro añadido en el cabezal', 'Pro animated text added at playhead')) }} onAutoSubtitles={() => { void handleGenerateVideoSubtitles('hormozi-karaoke') }} onPackClips={() => { const n = ripplePackTrack(); if (n > 0) toast.success(t(`${n} clip(s) compactados sin huecos`, `${n} clip(s) packed without gaps`)); else toast.info(t('No hay huecos que compactar', 'No gaps to pack')) }} onAutoMarkers={() => { const n = autoSceneMarkers(); if (n > 0) toast.success(t(`${n} marcador(es) añadidos en cortes`, `${n} marker(s) added at cuts`)); else toast.info(t('Ya existen marcadores en los cortes', 'Cut markers already exist')) }} onAutoAudio={() => { const n = autoAudioBalance(); if (n > 0) toast.success(t(`Mezcla y fundidos aplicados a ${n} clip(s)`, `Mix and fades applied to ${n} clip(s)`)); else toast.info(t('Añade clips para nivelar audio', 'Add clips to balance audio')) }} onAddMarker={addMarker} onRemoveMarker={removeMarker} onToggleSnap={toggleSnap} onToggleExpanded={toggleTimelineExpanded} onSetTool={setActiveTool} />
+            <TimelinePanel tracks={tracks} assets={assets} markers={markers} selected={selectedClipId} playhead={playhead} zoom={zoom} frameRate={frameRate} snap={snapToFrames} expanded={timelineExpanded} tool={activeTool} mutedTracks={mutedTracks} lockedTracks={lockedTracks} onMuteTrack={toggleMute} onLockTrack={toggleLock} onSelect={selectClip} onSeek={setPlayhead} onZoom={setZoom} onAddTrack={addTrack} onAddMedia={addMediaToTimeline} onMoveClip={moveClip} onMoveClipToNewTrack={moveClipToNewTrack} onSplitClip={splitClip} onDeleteClip={deleteClip} onDuplicateClip={(id) => { duplicateClip(id); toast.success(t('Clip duplicado', 'Clip duplicated')) }} onAddTextClip={() => { addTextClip({ presetId: 'hormozi-karaoke', at: playhead }); toast.success(t('Texto animado Pro añadido en el cabezal', 'Pro animated text added at playhead')) }} onAutoSubtitles={() => { void handleGenerateVideoSubtitles('hormozi-karaoke') }} onClearSubtitles={handleClearSubtitles} onPackClips={() => { const n = ripplePackTrack(); if (n > 0) toast.success(t(`${n} clip(s) compactados sin huecos`, `${n} clip(s) packed without gaps`)); else toast.info(t('No hay huecos que compactar', 'No gaps to pack')) }} onAutoMarkers={() => { const n = autoSceneMarkers(); if (n > 0) toast.success(t(`${n} marcador(es) añadidos en cortes`, `${n} marker(s) added at cuts`)); else toast.info(t('Ya existen marcadores en los cortes', 'Cut markers already exist')) }} onAutoAudio={() => { const n = autoAudioBalance(); if (n > 0) toast.success(t(`Mezcla y fundidos aplicados a ${n} clip(s)`, `Mix and fades applied to ${n} clip(s)`)); else toast.info(t('Añade clips para nivelar audio', 'Add clips to balance audio')) }} onAddMarker={addMarker} onRemoveMarker={removeMarker} onToggleSnap={toggleSnap} onToggleExpanded={toggleTimelineExpanded} onSetTool={setActiveTool} />
           </Panel>
         </Group>
       </section></Panel>

@@ -21,6 +21,7 @@ type Props = {
   onAddTextClip?: (presetId: string, customText?: string) => void
   onAutoSubtitles?: (presetId: string, customScript?: string, language?: SubtitleLanguage) => void
   onApplySubtitlePreset?: (presetId: string, language?: SubtitleLanguage) => void
+  onClearSubtitles?: () => void
   onRename: (assetId: string, name: string) => void
   onDelete: (assetId: string) => void
   onRelink: (assetId: string, file: File) => void
@@ -29,7 +30,7 @@ type Props = {
   onOpenProject: () => void
 }
 
-export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtractingSubtitles = false, subtitleProgressText, importStatus, onSelect, onAdd, onAddTextClip, onAutoSubtitles, onApplySubtitlePreset, onRename, onDelete, onRelink, onImport, onImportFiles, onOpenProject }: Props) {
+export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtractingSubtitles = false, subtitleProgressText, importStatus, onSelect, onAdd, onAddTextClip, onAutoSubtitles, onApplySubtitlePreset, onClearSubtitles, onRename, onDelete, onRelink, onImport, onImportFiles, onOpenProject }: Props) {
   const [dockTab, setDockTab] = useState<'media' | 'text'>('media')
   const [textCategory, setTextCategory] = useState<'all' | TextPresetCategory>('all')
   const [captionLanguage, setCaptionLanguage] = useState<SubtitleLanguage>('spanish')
@@ -251,6 +252,18 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                         )}
                         <span>{isExtractingSubtitles ? t('Extrayendo', 'Extracting') : t('Extraer', 'Extract')}</span>
                       </button>
+                      {onClearSubtitles && (
+                        <button
+                          type="button"
+                          className="auto-captions-clear-btn"
+                          disabled={isExtractingSubtitles}
+                          title={t('Borrar todos los subtítulos de la secuencia para volver a crearlos (Alt + Supr)', 'Clear all sequence subtitles to recreate them (Alt + Delete)')}
+                          onClick={onClearSubtitles}
+                        >
+                          <Trash2 size={12} />
+                          <span>{t('Limpiar', 'Clear')}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}

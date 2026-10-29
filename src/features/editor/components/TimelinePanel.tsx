@@ -14,7 +14,7 @@ type Props = {
   onAddTrack: (kind: 'video' | 'audio') => void; onAddMedia: (item: MediaItem, at: number, trackId?: string) => void
   onMoveClip: (clipId: string, start: number, duration?: number) => void; onMoveClipToNewTrack: (clipId: string) => void; onSplitClip: (clipId: string, time: number) => void
   onDeleteClip?: (clipId: string) => void; onDuplicateClip?: (clipId: string) => void
-  onAddTextClip?: () => void; onAutoSubtitles?: () => void
+  onAddTextClip?: () => void; onAutoSubtitles?: () => void; onClearSubtitles?: () => void
   onPackClips?: () => void; onAutoMarkers?: () => void; onAutoAudio?: () => void
   onAddMarker: (time: number) => void; onRemoveMarker: (id: string) => void; onToggleSnap: () => void; onToggleExpanded: () => void; onSetTool: (tool: 'select' | 'razor') => void
 }
@@ -22,7 +22,7 @@ type Gesture = { id: string; startX: number; originalStart: number; originalDura
 type GestureFeedback = { id: string; mode: Gesture['mode']; start: number; duration: number; originalStart: number; originalDuration: number }
 type SnapFeedback = { time: number; target: string }
 
-export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onAddTextClip, onAutoSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool }: Props) {
+export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onAddTextClip, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool }: Props) {
   const scale = 31 * zoom
   const sequenceDuration = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration)), ...markers.map((marker) => marker.time))
   const selectedClipObj = tracks.flatMap((track) => track.clips).find((clip) => clip.id === selected)
@@ -266,6 +266,16 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
         {onAutoSubtitles && (
           <button type="button" className="timeline-tool" onClick={onAutoSubtitles} title={t('Generar subtítulos sincronizados con el audio del video', 'Generate subtitles synced with video audio')}>
             <IconNleCaptions size={12} /> {t('Subtítulos', 'Subtitles')}
+          </button>
+        )}
+        {onClearSubtitles && (
+          <button
+            type="button"
+            className="timeline-tool destructive-tool"
+            onClick={onClearSubtitles}
+            title={t('Borrar todos los subtítulos de la secuencia para volver a crearlos (Alt + Supr)', 'Delete all sequence subtitles to recreate them (Alt + Delete)')}
+          >
+            <Trash2 size={12} /> {t('Borrar subtítulos', 'Clear subtitles')} <span className="shortcut">Alt+Supr</span>
           </button>
         )}
         {selectedClipObj && (

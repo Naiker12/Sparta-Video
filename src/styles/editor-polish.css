@@ -2529,6 +2529,34 @@
   background: var(--accent-hover);
 }
 
+.auto-captions-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.auto-captions-clear-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.6);
+  color: #ffffff;
+}
+
+.auto-captions-clear-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .text-preset-filters {
   display: flex;
   flex-wrap: wrap;

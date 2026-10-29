@@ -33,6 +33,7 @@ export type EditorState = {
   addMedia: (asset: MediaItem, at?: number, trackId?: string) => string
   addTextClip: (options?: AddTextClipOptions) => string
   addSubtitleSequence: (entries: SubtitleEntryInput[], options?: { replaceExisting?: boolean }) => number
+  clearAllSubtitles: () => number
   applyPresetToAllSubtitles: (presetId: string) => number
   calibrateAllSubtitles: (sourceClipId: string) => number
   nudgeAllSubtitlesTime: (deltaSeconds: number) => number
@@ -382,6 +383,35 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
       return { ...commit(state, { tracks }), selectedClipId: lastId || state.selectedClipId, selectedMediaId: null }
     })
     return added
+  },
+  clearAllSubtitles: () => {
+    let count = 0
+    set((state) => {
+      const tracks = copyTracks(state.tracks).map((track) => {
+        if (state.lockedTracks.includes(track.id)) return track
+        const remainingClips = track.clips.filter((clip) => {
+          const isSubtitle =
+            clip.text !== undefined ||
+            clip.thumbnail === 'text-overlay' ||
+            (track.name.toLowerCase().includes('sub') && clip.sourceAssetId === undefined)
+          if (isSubtitle) {
+            count += 1
+            return false
+          }
+          return true
+        })
+        return {
+          ...track,
+          clips: remainingClips,
+        }
+      })
+      if (count === 0) return state
+      return {
+        ...commit(state, { tracks }),
+        selectedClipId: state.selectedClipId && !tracks.some((t) => t.clips.some((c) => c.id === state.selectedClipId)) ? '' : state.selectedClipId,
+      }
+    })
+    return count
   },
   applyPresetToAllSubtitles: (presetId) => {
     let updated = 0
