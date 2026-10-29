@@ -8,6 +8,7 @@ import { t } from '../services/locale'
 import { loadMediaSource } from '../services/media-storage'
 import { getInterpolatedOpacity, getInterpolatedTransform } from '../services/keyframe-interpolation'
 import { computeTextAnimationState, getDefaultTextStyle } from '../services/text-presets'
+import { toast } from '../../../components/ui/toast'
 
 type Props = {
   playhead: number
@@ -17,6 +18,7 @@ type Props = {
   textOverlays?: Clip[]
   selectedClipId?: string
   media?: MediaItem
+  assets?: MediaItem[]
   markers: TimelineMarker[]
   sequenceSize?: { width: number; height: number }
   onSetSequence?: (sequence: { width: number; height: number; frameRate: number }) => void
@@ -55,6 +57,7 @@ export function PreviewMonitor({
   textOverlays = [],
   selectedClipId,
   media,
+  assets,
   markers,
   sequenceSize = { width: 1920, height: 1080 },
   onSetSequence,
@@ -99,8 +102,39 @@ export function PreviewMonitor({
   const clipStart = clip?.start
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (playhead / duration) * 100)) : 0
   const isSequenceVertical = sequenceSize.height > sequenceSize.width
-  const isVideoVertical = detectedVideoFormat ? detectedVideoFormat.isVertical : false
-  const showAspectMismatchAlert = isVideo && !!detectedVideoFormat && (isVideoVertical !== isSequenceVertical)
+
+  // Proactive format detection from asset metadata or video element
+  const assetItem = assets?.find((a) => a.id === sourceAssetId) ?? (media?.id === sourceAssetId ? media : undefined)
+  const assetWidth = assetItem?.width ?? media?.width
+  const assetHeight = assetItem?.height ?? media?.height
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const updateDimensions = () => {
+      const vw = video.videoWidth
+      const vh = video.videoHeight
+      if (vw > 0 && vh > 0) {
+        setDetectedVideoFormat({ width: vw, height: vh, isVertical: vh > vw })
+      }
+    }
+    updateDimensions()
+    video.addEventListener('loadedmetadata', updateDimensions)
+    video.addEventListener('loadeddata', updateDimensions)
+    return () => {
+      video.removeEventListener('loadedmetadata', updateDimensions)
+      video.removeEventListener('loadeddata', updateDimensions)
+    }
+  }, [sourceState?.url, clip?.id, sourceAssetId])
+
+  const effectiveFormat = detectedVideoFormat ?? (assetWidth && assetHeight ? {
+    width: assetWidth,
+    height: assetHeight,
+    isVertical: assetHeight > assetWidth,
+  } : null)
+
+  const isVideoVertical = effectiveFormat ? effectiveFormat.isVertical : false
+  const showAspectMismatchAlert = isVideo && !!effectiveFormat && (isVideoVertical !== isSequenceVertical)
 
   useEffect(() => {
     if (!sourceAssetId || (!isImage && !isVideo)) {
@@ -376,6 +410,39 @@ export function PreviewMonitor({
       </div>
     </div>
     <div className={`preview-stage ${zoom !== 'fit' ? 'is-zoomed' : ''}`} ref={stageRef}>
+      {showAspectMismatchAlert && onSetSequence && (
+        <div className="preview-stage-format-pill-wrapper" role="region" aria-label={t('Alerta de proporción de aspecto', 'Aspect ratio alert')}>
+          <button
+            type="button"
+            className="preview-stage-format-pill"
+            onClick={() => {
+              onSetSequence({
+                width: isVideoVertical ? 1080 : 1920,
+                height: isVideoVertical ? 1920 : 1080,
+                frameRate,
+              })
+              toast.success(
+                isVideoVertical
+                  ? t('Secuencia adaptada a vertical 9:16 (1080×1920)', 'Sequence adapted to vertical 9:16 (1080×1920)')
+                  : t('Secuencia adaptada a horizontal 16:9 (1920×1080)', 'Sequence adapted to horizontal 16:9 (1920×1080)'),
+                {
+                  description: t('Adaptado automáticamente al formato del vídeo sin bandas negras.', 'Adjusted automatically to video format without black bars.'),
+                },
+              )
+            }}
+            title={isVideoVertical
+              ? t('Clic para adaptar la secuencia a 1080×1920 (9:16) y eliminar bandas negras', 'Click to adapt sequence to 1080×1920 (9:16) and eliminate black bars')
+              : t('Clic para adaptar la secuencia a 1920×1080 (16:9)', 'Click to adapt sequence to 1920×1080 (16:9)')}
+          >
+            <span className="pill-badge-icon">{isVideoVertical ? '📱' : '🖥️'}</span>
+            <span className="pill-text-block">
+              <strong>{isVideoVertical ? t('Vídeo vertical 9:16 detectado', 'Vertical 9:16 video detected') : t('Vídeo horizontal 16:9 detectado', 'Horizontal 16:9 video detected')}</strong>
+              <small>{isVideoVertical ? t('Clic para adaptar secuencia a 1080×1920 (pantalla completa)', 'Click to adapt sequence to 1080×1920 (fullscreen)') : t('Clic para adaptar secuencia a 1920×1080 (pantalla completa)', 'Click to adapt sequence to 1920×1080 (fullscreen)')}</small>
+            </span>
+            <span className="pill-action-tag">{t('Adaptar ahora', 'Adapt now')}</span>
+          </button>
+        </div>
+      )}
       <div ref={canvasBoxRef} className={`preview-image ${sourceUrl || hasActiveTextOverlays ? 'preview-image-loaded' : 'preview-empty-image'}`} style={canvasBoxStyle}>
         {sourceUrl && isImage && <img className="preview-media-image" style={mediaTransform} src={sourceUrl} alt={previewTitle ?? ''} />}
         {sourceUrl && isVideo && <video key={`${sourceAssetId}-${clip?.id ?? 'library'}`} ref={videoRef} className="preview-media-image" style={mediaTransform} src={sourceUrl} muted={isMuted} playsInline preload="auto" onLoadedMetadata={(event) => {

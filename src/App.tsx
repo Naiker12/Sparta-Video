@@ -43,7 +43,44 @@ const layoutMemory = new Map<string, string>()
 const layoutStorage: Storage = {
   get length() { try { return window.localStorage.length } catch { return layoutMemory.size } },
   clear() { layoutMemory.clear(); try { window.localStorage.clear() } catch { /* memory fallback is enough */ } },
-  getItem(key) { try { const value = window.localStorage.getItem(key); if (value !== null) layoutMemory.set(key, value); return value ?? layoutMemory.get(key) ?? null } catch { return layoutMemory.get(key) ?? null } },
+  getItem(key) {
+    try {
+      const raw = window.localStorage.getItem(key) ?? layoutMemory.get(key) ?? null
+      if (raw && (key.includes('sparta-workspace') || key === 'sparta-workspace')) {
+        try {
+          const parsed = JSON.parse(raw)
+          let modified = false
+          // Check standard object layout { library: number, editor: number, ... }
+          if (typeof parsed.library === 'number' && parsed.library < 14) {
+            parsed.library = 20
+            const rest = 100 - parsed.library - (typeof parsed.assistant === 'number' ? parsed.assistant : 0)
+            parsed.editor = Math.max(45, rest)
+            modified = true
+          }
+          // Check react-resizable-panels v2 format: { [panelIds]: { layout: [number, number, number] } }
+          for (const k of Object.keys(parsed)) {
+            const entry = parsed[k]
+            if (entry && Array.isArray(entry.layout) && typeof entry.layout[0] === 'number' && entry.layout[0] < 14) {
+              entry.layout[0] = 20
+              const rest = 100 - entry.layout[0] - (entry.layout[2] ?? 0)
+              entry.layout[1] = Math.max(45, rest)
+              modified = true
+            }
+          }
+          if (modified) {
+            const healed = JSON.stringify(parsed)
+            try { window.localStorage.setItem(key, healed) } catch { /* ignore */ }
+            layoutMemory.set(key, healed)
+            return healed
+          }
+        } catch { /* parse error, ignore */ }
+      }
+      if (raw !== null) layoutMemory.set(key, raw)
+      return raw
+    } catch {
+      return layoutMemory.get(key) ?? null
+    }
+  },
   key(index) { try { return window.localStorage.key(index) } catch { return [...layoutMemory.keys()][index] ?? null } },
   removeItem(key) { layoutMemory.delete(key); try { window.localStorage.removeItem(key) } catch { /* memory fallback is enough */ } },
   setItem(key, value) { layoutMemory.set(key, value); try { window.localStorage.setItem(key, value) } catch { /* retain the layout for this session */ } },
@@ -218,6 +255,24 @@ function App() {
     }
   }
   useEffect(() => {
+    // Proactive self-healing for library panel if crushed or corrupted in localStorage
+    const healLayoutIfCrushed = () => {
+      try {
+        const layout = shellGroupRef.current?.getLayout() as Record<string, number> | undefined
+        if (layout && typeof layout.library === 'number' && layout.library < 14) {
+          shellGroupRef.current?.setLayout({
+            library: 20,
+            editor: chatOpen ? 60 : 80,
+            assistant: chatOpen ? 20 : 0,
+          })
+        }
+      } catch { /* ignore */ }
+    }
+    const timer = setTimeout(healLayoutIfCrushed, 100)
+    return () => clearTimeout(timer)
+  }, [chatOpen, shellGroupRef])
+
+  useEffect(() => {
     const compactLayout = () => {
       if (window.innerWidth >= 1100) return
       if (assistantPanelRef.current && !assistantPanelRef.current.isCollapsed()) assistantPanelRef.current.collapse()
@@ -230,7 +285,12 @@ function App() {
     return () => window.removeEventListener('resize', compactLayout)
   }, [assistantPanelRef, shellGroupRef, upperGroupRef, editorVerticalGroupRef])
   const resetWorkspace = () => {
-    shellGroupRef.current?.setLayout(window.innerWidth < 1100 ? { library: 20, editor: 80, assistant: 0 } : { library: 17, editor: 63, assistant: 20 })
+    try {
+      window.localStorage.removeItem('react-resizable-panels:sparta-workspace')
+      window.localStorage.removeItem('react-resizable-panels:sparta-workspace:library:editor:assistant')
+      window.localStorage.removeItem('sparta-workspace')
+    } catch { /* ignore */ }
+    shellGroupRef.current?.setLayout(window.innerWidth < 1100 ? { library: 20, editor: 80, assistant: 0 } : { library: 20, editor: 60, assistant: 20 })
     upperGroupRef.current?.setLayout(window.innerWidth < 1100 ? { monitor: 72, inspector: 28 } : { monitor: 75, inspector: 25 })
     editorVerticalGroupRef.current?.setLayout({ stage: 52, timeline: 48 })
     toast.success(t('Distribución de paneles restablecida', 'Panel layout reset'))
@@ -590,10 +650,23 @@ function App() {
     </header>
     <input ref={fileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" multiple accept="video/*,audio/*,image/*" tabIndex={-1} aria-hidden="true" onChange={(event) => { void importFiles(event.target.files); event.target.value = '' }} />
     <input ref={projectFileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" accept=".sparta,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProjectFromFile(file); event.target.value = '' }} />
-    <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 18, editor: 62, assistant: 20 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
-      <Panel id="library" defaultSize={18} minSize={14} maxSize={26} className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onClearSubtitles={handleClearSubtitles} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
-      <Separator id="library-separator" className="panel-separator" aria-label={t('Redimensionar biblioteca de medios', 'Resize media library')} />
-      <Panel id="editor" defaultSize={62} minSize={45} className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
+    <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 20, editor: 60, assistant: 20 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
+      <Panel id="library" defaultSize="20%" minSize="240px" maxSize="35%" className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onClearSubtitles={handleClearSubtitles} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
+      <Separator
+        id="library-separator"
+        className="panel-separator"
+        aria-label={t('Redimensionar biblioteca de medios', 'Resize media library')}
+        title={t('Doble clic para restablecer ancho', 'Double-click to reset width')}
+        onDoubleClick={() => {
+          shellGroupRef.current?.setLayout({
+            library: 20,
+            editor: chatOpen ? 60 : 80,
+            assistant: chatOpen ? 20 : 0,
+          })
+          toast.info(t('Ancho de biblioteca restaurado al 20%', 'Library width restored to 20%'))
+        }}
+      />
+      <Panel id="editor" defaultSize="60%" minSize="45%" className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
         <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia', 'Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia', 'Sequence resolution') }, ...[{ label: '1920 × 1080 (16:9)', width: 1920, height: 1080 }, { label: '1080 × 1920 (9:16)', width: 1080, height: 1920 }, { label: '1080 × 1080 (1:1)', width: 1080, height: 1080 }, { label: '1080 × 1350 (4:5)', width: 1080, height: 1350 }, { label: '1280 × 720 (16:9)', width: 1280, height: 720 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })), { separator: true }, { heading: t('Fotogramas por segundo', 'Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer', 'Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)', 'Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente', 'Close assistant panel') : t('Abrir panel asistente', 'Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><IconNlePanelRight size={15} /></IconButton><button type="button" className="export-button" disabled={!canExport} title={canExport ? t('Exportar secuencia de vídeo', 'Export video sequence') : t('El motor de exportación se habilita al tener medios listos en la línea de tiempo', 'The export engine is enabled when ready media is on the timeline')} aria-label={canExport ? t('Exportar vídeo', 'Export video') : t('Exportación no disponible', 'Export unavailable')} onClick={() => setExportOpen(true)}><Video size={15} /> {t('Exportar', 'Export')} <span className="sr-only">{canExport ? 'Export video' : 'Export'}</span></button></div></div>
         <Group id="sparta-editor-vertical" groupRef={editorVerticalGroupRef} className="editor-vertical-group" orientation="vertical" defaultLayout={editorVerticalLayout.defaultLayout ?? { stage: 52, timeline: 48 }} onLayoutChanged={editorVerticalLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
           <Panel id="stage" defaultSize="52%" minSize="26%" maxSize="78%" className="resize-panel-content">
@@ -615,6 +688,7 @@ function App() {
                   onSelectClip={selectClip}
                   onUpdateClip={updateClip}
                   media={!previewClip ? selectedMedia : undefined}
+                  assets={assets}
                   sequenceSize={sequence}
                   onSetSequence={setSequence}
                   onDuplicateClip={duplicateClip}
