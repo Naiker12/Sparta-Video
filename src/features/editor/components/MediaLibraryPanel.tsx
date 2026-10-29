@@ -471,8 +471,14 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                     title={t('Arrastra o haz doble clic para añadir', 'Drag or double-click to add')}
                     aria-label={item.title}
                   >
-                    <div className={`media-thumb ${item.thumb}`}>
+                    <div className={`media-thumb ${item.thumb} ${imagePreviews[item.id] ? 'has-preview' : ''} ${status === 'processing' ? 'is-processing' : ''}`}>
                       {imagePreviews[item.id] && <img className="media-preview-image" src={imagePreviews[item.id]} alt="" draggable={false} />}
+                      {status === 'processing' && (
+                        <div className="media-processing-overlay" aria-live="polite">
+                          <LoaderCircle size={18} className="spin text-cyan-400" />
+                          <span className="media-processing-text">{t('Procesando…', 'Processing…')}</span>
+                        </div>
+                      )}
                       <span className="thumb-kind">
                         {item.type === 'audio' ? <AudioLines size={13} /> : item.type === 'image' ? <ImageIcon size={13} /> : <Video size={13} />}
                       </span>

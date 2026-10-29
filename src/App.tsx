@@ -309,11 +309,27 @@ function App() {
     })
     addAssets(pending.map(({ asset }) => asset))
     if (pending[0].asset.type !== 'audio') selectMedia(pending[0].asset.id)
-    const importToast = toast.loading(sourceFiles.length === 1 ? t('Importando archivo…', 'Importing file…') : t(`Importando ${sourceFiles.length} archivos…`, `Importing ${sourceFiles.length} files…`), { description: sourceFiles.length === 1 ? sourceFiles[0].name : undefined })
+    const isSingle = sourceFiles.length === 1
+    const importToast = toast.loading(
+      isSingle
+        ? t('Importando y procesando vídeo…', 'Importing and processing video…')
+        : t(`Importando ${sourceFiles.length} archivos…`, `Importing ${sourceFiles.length} files…`),
+      {
+        description: isSingle
+          ? t(`Indexando "${sourceFiles[0].name}" y generando miniatura…`, `Indexing "${sourceFiles[0].name}" and generating thumbnail…`)
+          : t('Indexando metadatos y generando miniaturas…', 'Indexing metadata and generating thumbnails…'),
+      },
+    )
     const { inspectMediaFile } = await import('./features/editor/services/media-catalog')
     let processedCount = 0
-    const results = await Promise.allSettled(pending.map(async ({ file, asset }) => {
+    const results = await Promise.allSettled(pending.map(async ({ file, asset }, idx) => {
       setImportStatus((prev) => (prev ? { ...prev, currentFileName: file.name } : null))
+      if (!isSingle) {
+        toast.loading(
+          t(`Procesando archivo ${idx + 1} de ${sourceFiles.length}…`, `Processing file ${idx + 1} of ${sourceFiles.length}…`),
+          { id: importToast, description: file.name },
+        )
+      }
       const metadata = await inspectMediaFile(file)
       await storeMediaFile(asset.id, file)
       const probedDuration = asset.type !== 'image' ? await probeMediaDuration(file, asset.type) : null
@@ -341,11 +357,21 @@ function App() {
     })
     const succeeded = results.length - failedNames.length
     if (succeeded && failedNames.length) {
-      toast.warning(t(`${succeeded} importados, ${failedNames.length} con errores`, `${succeeded} imported, ${failedNames.length} failed`), { id: importToast, description: failedNames.join(', ') })
+      toast.warning(t(`${succeeded} importados, ${failedNames.length} con incidencias`, `${succeeded} imported, ${failedNames.length} with issues`), { id: importToast, description: failedNames.join(', '), duration: 7000 })
     } else if (succeeded) {
-      toast.success(succeeded === 1 ? t('1 archivo importado a la biblioteca', '1 file imported to the library') : t(`${succeeded} archivos importados a la biblioteca`, `${succeeded} files imported to the library`), { id: importToast })
+      const firstName = sourceFiles[0]?.name ?? ''
+      toast.success(
+        isSingle
+          ? t('Vídeo listo en la biblioteca', 'Video ready in library')
+          : t(`${succeeded} archivos listos en la biblioteca`, `${succeeded} files ready in library`),
+        {
+          id: importToast,
+          description: isSingle ? firstName : t('Listos para arrastrar a la línea de tiempo.', 'Ready to drag to the timeline.'),
+          duration: 6000,
+        },
+      )
     } else {
-      toast.error(t(`${failedNames.length} archivo(s) no se pudieron procesar`, `${failedNames.length} file(s) could not be processed`), { id: importToast, description: t('Revisa el estado en la biblioteca.', 'Check their status in the library.') })
+      toast.error(t(`${failedNames.length} archivo(s) no se pudieron procesar`, `${failedNames.length} file(s) could not be processed`), { id: importToast, description: t('Revisa el estado en la biblioteca.', 'Check their status in the library.'), duration: 8000 })
     }
   }
   const deleteMedia = (assetId: string) => {

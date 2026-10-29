@@ -66,8 +66,34 @@ export async function loadMediaPreview(id: string): Promise<string | null> {
       request.onsuccess = () => resolve(request.result as Blob | undefined)
       request.onerror = () => reject(request.error ?? new Error('No se pudo leer la miniatura.'))
     })
-    const blob = await read(PREVIEWS) ?? await read(STORE)
-    return blob ? URL.createObjectURL(blob) : null
+    const previewBlob = await read(PREVIEWS)
+    if (previewBlob && previewBlob.size > 0) {
+      return URL.createObjectURL(previewBlob)
+    }
+
+    // Si no hay miniatura guardada en PREVIEWS, verificar el archivo original en STORE
+    const originalBlob = await read(STORE)
+    if (!originalBlob) return null
+
+    if (originalBlob.type.startsWith('image/')) {
+      return URL.createObjectURL(originalBlob)
+    }
+
+    // Para archivos de vídeo: generar miniatura inteligente al vuelo y guardarla en caché
+    if (originalBlob.type.startsWith('video/') || !originalBlob.type) {
+      try {
+        const file = new File([originalBlob], 'video-source.mp4', { type: originalBlob.type || 'video/mp4' })
+        const generated = await captureVideoThumbnail(file)
+        if (generated) {
+          await storeMediaPreview(id, generated).catch(() => {})
+          return URL.createObjectURL(generated)
+        }
+      } catch {
+        /* fallback silencioso */
+      }
+    }
+
+    return null
   } finally {
     database.close()
   }
@@ -104,36 +130,89 @@ export async function captureVideoThumbnail(file: File): Promise<Blob | null> {
   const video = document.createElement('video')
   video.muted = true
   video.playsInline = true
-  video.preload = 'metadata'
+  video.preload = 'auto'
+
+  // Contenedor temporal en el DOM para que el compositor GPU decodifique cuadros en WebView2 / Chromium
+  const container = typeof document !== 'undefined' ? document.createElement('div') : null
+  if (container) {
+    container.style.cssText = 'position:fixed;bottom:-9999px;right:-9999px;width:320px;height:180px;opacity:0.01;pointer-events:none;'
+    container.appendChild(video)
+    document.body.appendChild(container)
+  }
+
   try {
     await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error('El video tardó demasiado en abrirse.')), 12_000)
+      const timeout = window.setTimeout(() => reject(new Error('El video tardó demasiado en abrirse.')), 14_000)
       const finish = () => { window.clearTimeout(timeout); resolve() }
       video.onerror = () => { window.clearTimeout(timeout); reject(new Error('No se pudo leer un fotograma del video.')) }
-      video.onloadedmetadata = () => {
-        const time = Number.isFinite(video.duration) && video.duration > 0.1 ? Math.min(1, video.duration / 3) : 0
-        if (time === 0) video.onloadeddata = finish
-        else { video.onseeked = finish; video.currentTime = time }
+
+      const onMetadata = () => {
+        // Buscar un segundo representativo (evitar el fade-in negro de los primeros 0-1.5s)
+        const dur = Number.isFinite(video.duration) ? video.duration : 0
+        const targetTime = dur > 3 ? Math.min(Math.max(2.0, dur * 0.12), 6.0) : (dur > 0.5 ? 0.3 : 0)
+
+        if (targetTime === 0) {
+          video.onloadeddata = finish
+        } else {
+          video.onseeked = finish
+          video.currentTime = targetTime
+        }
+      }
+
+      if (video.readyState >= 1) {
+        onMetadata()
+      } else {
+        video.onloadedmetadata = onMetadata
       }
       video.src = url
       video.load()
     })
+
     if (!video.videoWidth || !video.videoHeight) return null
     const width = Math.min(480, video.videoWidth)
     const height = Math.max(1, Math.round(width * video.videoHeight / video.videoWidth))
     const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
-    const context = canvas.getContext('2d')
+    const context = canvas.getContext('2d', { willReadFrequently: true })
     if (!context) return null
+
     context.drawImage(video, 0, 0, width, height)
-    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82))
+
+    // Si el fotograma capturado resulta ser casi negro absoluto (fade-in inicial largo) y el video dura más, buscar más adelante
+    try {
+      const sampleW = Math.min(64, width)
+      const sampleH = Math.min(36, height)
+      const imgData = context.getImageData(0, 0, sampleW, sampleH)
+      let totalLuma = 0
+      const pixelCount = imgData.data.length / 4
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        totalLuma += 0.299 * imgData.data[i] + 0.587 * imgData.data[i + 1] + 0.114 * imgData.data[i + 2]
+      }
+      const avgLuma = totalLuma / pixelCount
+
+      if (avgLuma < 14 && Number.isFinite(video.duration) && video.duration > 8) {
+        const altTime = Math.min(video.duration * 0.28, 12.0)
+        await new Promise<void>((res) => {
+          video.onseeked = () => res()
+          setTimeout(res, 800)
+          video.currentTime = altTime
+        })
+        context.clearRect(0, 0, width, height)
+        context.drawImage(video, 0, 0, width, height)
+      }
+    } catch {
+      /* análisis de luminancia opcional */
+    }
+
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85))
   } catch {
     return null
   } finally {
     video.pause()
     video.removeAttribute('src')
-    video.load()
+    try { video.load() } catch { /* ignore */ }
+    if (container) container.remove()
     URL.revokeObjectURL(url)
   }
 }
