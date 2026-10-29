@@ -220,61 +220,65 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                       </p>
                     )}
                     <div className="auto-captions-controls">
-                      <select
-                        aria-label={t('Idioma hablado del video', 'Spoken video language')}
-                        className="auto-captions-select is-lang"
-                        value={captionLanguage}
-                        disabled={isExtractingSubtitles}
-                        onChange={(e) => setCaptionLanguage(e.target.value as SubtitleLanguage)}
-                      >
-                        <option value="spanish">{t('Español', 'Spanish')}</option>
-                        <option value="english">{t('Inglés', 'English')}</option>
-                        <option value="auto">{t('Auto', 'Auto')}</option>
-                      </select>
-                      <select
-                        aria-label={t('Estilo de subtítulo automático', 'Auto-caption style')}
-                        className="auto-captions-select"
-                        value={captionPresetId}
-                        disabled={isExtractingSubtitles}
-                        onChange={(e) => {
-                          const nextId = e.target.value
-                          setCaptionPresetId(nextId)
-                          onApplySubtitlePreset?.(nextId, captionLanguage)
-                        }}
-                      >
-                        {TEXT_STYLE_PRESETS.filter((p) => p.category === 'subtitles').map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {t(p.name, p.nameEn)}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="auto-captions-generate-btn"
-                        disabled={isExtractingSubtitles || !activeSourceMedia}
-                        onClick={() => {
-                          onAutoSubtitles?.(captionPresetId, undefined, captionLanguage)
-                        }}
-                      >
-                        {isExtractingSubtitles ? (
-                          <LoaderCircle size={12} className="spin" />
-                        ) : (
-                          <IconNleCaptions size={12} />
-                        )}
-                        <span>{isExtractingSubtitles ? t('Extrayendo', 'Extracting') : t('Extraer', 'Extract')}</span>
-                      </button>
-                      {onClearSubtitles && (
+                      <div className="auto-captions-row">
+                        <select
+                          aria-label={t('Idioma hablado del video', 'Spoken video language')}
+                          className="auto-captions-select is-lang"
+                          value={captionLanguage}
+                          disabled={isExtractingSubtitles}
+                          onChange={(e) => setCaptionLanguage(e.target.value as SubtitleLanguage)}
+                        >
+                          <option value="spanish">{t('Español', 'Spanish')}</option>
+                          <option value="english">{t('Inglés', 'English')}</option>
+                          <option value="auto">{t('Auto', 'Auto')}</option>
+                        </select>
+                        <select
+                          aria-label={t('Estilo de subtítulo automático', 'Auto-caption style')}
+                          className="auto-captions-select"
+                          value={captionPresetId}
+                          disabled={isExtractingSubtitles}
+                          onChange={(e) => {
+                            const nextId = e.target.value
+                            setCaptionPresetId(nextId)
+                            onApplySubtitlePreset?.(nextId, captionLanguage)
+                          }}
+                        >
+                          {TEXT_STYLE_PRESETS.filter((p) => p.category === 'subtitles').map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {t(p.name, p.nameEn)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="auto-captions-row actions">
                         <button
                           type="button"
-                          className="auto-captions-clear-btn"
-                          disabled={isExtractingSubtitles}
-                          title={t('Borrar todos los subtítulos de la secuencia para volver a crearlos (Alt + Supr)', 'Clear all sequence subtitles to recreate them (Alt + Delete)')}
-                          onClick={onClearSubtitles}
+                          className="auto-captions-generate-btn"
+                          disabled={isExtractingSubtitles || !activeSourceMedia}
+                          onClick={() => {
+                            onAutoSubtitles?.(captionPresetId, undefined, captionLanguage)
+                          }}
                         >
-                          <Trash2 size={12} />
-                          <span>{t('Limpiar', 'Clear')}</span>
+                          {isExtractingSubtitles ? (
+                            <LoaderCircle size={12} className="spin" />
+                          ) : (
+                            <IconNleCaptions size={12} />
+                          )}
+                          <span>{isExtractingSubtitles ? t('Extrayendo…', 'Extracting…') : t('Generar subtítulos', 'Generate captions')}</span>
                         </button>
-                      )}
+                        {onClearSubtitles && (
+                          <button
+                            type="button"
+                            className="auto-captions-clear-btn"
+                            disabled={isExtractingSubtitles}
+                            title={t('Borrar todos los subtítulos de la secuencia para volver a crearlos (Alt + Supr)', 'Clear all sequence subtitles to recreate them (Alt + Delete)')}
+                            onClick={onClearSubtitles}
+                          >
+                            <Trash2 size={12} />
+                            <span>{t('Limpiar', 'Clear')}</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

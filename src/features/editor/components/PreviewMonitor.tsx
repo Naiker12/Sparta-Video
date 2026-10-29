@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Crosshair, Expand, Film, Grid2X2, LoaderCircle, Pause, Play, SkipBack, SkipForward, StepBack, StepForward, Type } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Expand, Film, Grid2X2, LoaderCircle, Pause, Pencil, Play, SkipBack, SkipForward, StepBack, StepForward, Trash2, Type } from 'lucide-react'
 import { IconButton } from './controls'
 import { ActionMenu } from './ActionMenu'
 import type { Clip, MediaItem, TimelineMarker } from '../model'
@@ -19,6 +19,9 @@ type Props = {
   media?: MediaItem
   markers: TimelineMarker[]
   sequenceSize?: { width: number; height: number }
+  onSetSequence?: (sequence: { width: number; height: number; frameRate: number }) => void
+  onDuplicateClip?: (clipId: string) => void
+  onDeleteClip?: (clipId: string) => void
   playing: boolean
   onSeek: (time: number) => void
   onTogglePlay: () => void
@@ -54,6 +57,9 @@ export function PreviewMonitor({
   media,
   markers,
   sequenceSize = { width: 1920, height: 1080 },
+  onSetSequence,
+  onDuplicateClip,
+  onDeleteClip,
   playing,
   onSeek,
   onTogglePlay,
@@ -69,6 +75,11 @@ export function PreviewMonitor({
   const [hoverScrub, setHoverScrub] = useState<{ time: number; ratio: number } | null>(null)
   const [timecodeDraft, setTimecodeDraft] = useState<string | null>(null)
   const [sourceState, setSourceState] = useState<{ assetId: string; status: 'ready' | 'missing'; url?: string } | null>(null)
+  const [snapGuides, setSnapGuides] = useState<{ x: boolean; y: number | null }>({ x: false, y: null })
+  const [detectedVideoFormat, setDetectedVideoFormat] = useState<{ width: number; height: number; isVertical: boolean } | null>(null)
+  const [inlineEditingClipId, setInlineEditingClipId] = useState<string | null>(null)
+  const [inlineEditText, setInlineEditText] = useState('')
+  const inlineInputRef = useRef<HTMLTextAreaElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const canvasBoxRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -87,6 +98,9 @@ export function PreviewMonitor({
   const isVideo = clip && !isTextOnlyPrimary ? clip.kind === 'video' && !isImage : media?.type === 'video'
   const clipStart = clip?.start
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (playhead / duration) * 100)) : 0
+  const isSequenceVertical = sequenceSize.height > sequenceSize.width
+  const isVideoVertical = detectedVideoFormat ? detectedVideoFormat.isVertical : false
+  const showAspectMismatchAlert = isVideo && !!detectedVideoFormat && (isVideoVertical !== isSequenceVertical)
 
   useEffect(() => {
     if (!sourceAssetId || (!isImage && !isVideo)) {
@@ -184,7 +198,7 @@ export function PreviewMonitor({
   }
 
   const startTextOverlayDrag = (event: React.PointerEvent, overlayClip: Clip) => {
-    if (event.button !== 0) return
+    if (event.button !== 0 || inlineEditingClipId === overlayClip.id) return
     event.preventDefault()
     event.stopPropagation()
     onSelectClip?.(overlayClip.id)
@@ -206,17 +220,76 @@ export function PreviewMonitor({
     const move = (moveEvent: PointerEvent) => {
       const deltaYPercent = ((moveEvent.clientY - startY) / Math.max(100, rect.height)) * 100
       const deltaXRatio = (moveEvent.clientX - startX) / Math.max(100, rect.width)
-      const nextY = Math.max(6, Math.min(94, Math.round(initialPosY + deltaYPercent)))
-      const nextX = Math.max(
+      let nextY = Math.max(6, Math.min(94, Math.round(initialPosY + deltaYPercent)))
+      let nextX = Math.max(
         Math.round(sequenceSize.width * 0.08),
         Math.min(
           Math.round(sequenceSize.width * 0.92),
           Math.round(initialTransformX + deltaXRatio * sequenceSize.width),
         ),
       )
+
+      let snappedX = false
+      let snappedYPos: number | null = null
+
+      // Magnetic snap to center X (50%)
+      const centerX = Math.round(sequenceSize.width / 2)
+      const snapThresholdX = sequenceSize.width * 0.035
+      if (Math.abs(nextX - centerX) < snapThresholdX) {
+        nextX = centerX
+        snappedX = true
+      }
+
+      // Magnetic snap to center Y (50%) or standard subtitle line (78%)
+      if (Math.abs(nextY - 50) < 2.5) {
+        nextY = 50
+        snappedYPos = 50
+      } else if (Math.abs(nextY - 78) < 2.5) {
+        nextY = 78
+        snappedYPos = 78
+      }
+
+      setSnapGuides({ x: snappedX, y: snappedYPos })
+
       onUpdateClip(overlayClip.id, {
         textStyle: { ...style, positionY: nextY },
         transform: { ...baseTransform, x: nextX },
+      })
+    }
+    const end = () => {
+      setSnapGuides({ x: false, y: null })
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end, { once: true })
+  }
+
+  const startResizeHandleDrag = (
+    event: React.PointerEvent,
+    overlayClip: Clip,
+  ) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (!onUpdateClip) return
+    const style = overlayClip.textStyle ?? getDefaultTextStyle()
+    const startFontSize = style.fontSize
+    const startX = event.clientX
+    const startY = event.clientY
+
+    const targetEl = (event.target as HTMLElement).closest('.preview-text-overlay-box')
+    const boxRect = targetEl?.getBoundingClientRect()
+    const centerX = boxRect ? boxRect.left + boxRect.width / 2 : startX
+    const centerY = boxRect ? boxRect.top + boxRect.height / 2 : startY
+    const startDist = Math.max(20, Math.hypot(startX - centerX, startY - centerY))
+
+    const move = (moveEvent: PointerEvent) => {
+      const currDist = Math.hypot(moveEvent.clientX - centerX, moveEvent.clientY - centerY)
+      const scaleFactor = currDist / startDist
+      const nextFontSize = Math.max(14, Math.min(130, Math.round(startFontSize * scaleFactor)))
+      onUpdateClip(overlayClip.id, {
+        textStyle: { ...style, fontSize: nextFontSize },
       })
     }
     const end = () => {
@@ -225,6 +298,21 @@ export function PreviewMonitor({
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', end, { once: true })
+  }
+
+  const handleStartInlineEdit = (overlayClip: Clip, initialText: string) => {
+    setInlineEditingClipId(overlayClip.id)
+    setInlineEditText(overlayClip.text ?? initialText)
+    setTimeout(() => inlineInputRef.current?.focus(), 25)
+  }
+
+  const handleCommitInlineEdit = (clipId: string) => {
+    if (inlineEditingClipId !== clipId) return
+    const trimmed = inlineEditText.trim()
+    if (trimmed && onUpdateClip) {
+      onUpdateClip(clipId, { text: trimmed, title: trimmed })
+    }
+    setInlineEditingClipId(null)
   }
 
   return <section className="preview-panel">
@@ -236,6 +324,29 @@ export function PreviewMonitor({
           <span className="monitor-text-layer-badge" title={t('Capas de texto activas en el cabezal', 'Text layers active at playhead')}>
             <Type size={10} /> {textOverlays.length}
           </span>
+        )}
+        {showAspectMismatchAlert && onSetSequence && (
+          <button
+            type="button"
+            className="monitor-adapt-sequence-banner"
+            title={isVideoVertical
+              ? t('Clic para adaptar la secuencia a formato vertical 9:16 (1080×1920)', 'Click to adapt sequence to vertical 9:16 (1080×1920)')
+              : t('Clic para adaptar la secuencia a formato horizontal 16:9 (1920×1080)', 'Click to adapt sequence to horizontal 16:9 (1920×1080)')}
+            onClick={() => {
+              onSetSequence({
+                width: isVideoVertical ? 1080 : 1920,
+                height: isVideoVertical ? 1920 : 1080,
+                frameRate,
+              })
+            }}
+          >
+            <span>{isVideoVertical ? '📱' : '🖥️'}</span>
+            <span>
+              {isVideoVertical
+                ? t('Vídeo 9:16 detectado · Adaptar secuencia', '9:16 video detected · Adapt sequence')
+                : t('Vídeo 16:9 detectado · Adaptar secuencia', '16:9 video detected · Adapt sequence')}
+            </span>
+          </button>
         )}
       </div>
       <div className="monitor-header-actions">
@@ -269,6 +380,11 @@ export function PreviewMonitor({
         {sourceUrl && isImage && <img className="preview-media-image" style={mediaTransform} src={sourceUrl} alt={previewTitle ?? ''} />}
         {sourceUrl && isVideo && <video key={`${sourceAssetId}-${clip?.id ?? 'library'}`} ref={videoRef} className="preview-media-image" style={mediaTransform} src={sourceUrl} muted={isMuted} playsInline preload="auto" onLoadedMetadata={(event) => {
           const video = event.currentTarget
+          const vw = video.videoWidth
+          const vh = video.videoHeight
+          if (vw > 0 && vh > 0) {
+            setDetectedVideoFormat({ width: vw, height: vh, isVertical: vh > vw })
+          }
           video.volume = Math.max(0, Math.min(1, volume))
           video.muted = isMuted
           if (clip && Math.abs(clip.duration - 6) < 0.08 && Number.isFinite(video.duration) && video.duration > 6.5) {
@@ -298,6 +414,7 @@ export function PreviewMonitor({
           const style = textClip.textStyle ?? getDefaultTextStyle()
           const anim = computeTextAnimationState(textClip, playhead)
           const isSelected = selectedClipId === textClip.id && !playing
+          const isEditing = inlineEditingClipId === textClip.id
           const tTransform = textClip.transform ?? {
             x: sequenceSize.width / 2,
             y: sequenceSize.height / 2,
@@ -330,7 +447,7 @@ export function PreviewMonitor({
             <div
               key={textClip.id}
               data-testid={`preview-text-overlay-${textClip.id}`}
-              className={`preview-text-overlay-anchor align-${style.align} ${isSelected ? 'selected' : ''}`}
+              className={`preview-text-overlay-anchor align-${style.align} ${isSelected ? 'selected' : ''} ${isEditing ? 'is-editing' : ''}`}
               style={{
                 top: `${posYPercent}%`,
                 left: `${posXPercent}%`,
@@ -338,7 +455,85 @@ export function PreviewMonitor({
                 opacity: anim.opacity * clipAlpha,
               }}
               onPointerDown={(e) => startTextOverlayDrag(e, textClip)}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                handleStartInlineEdit(textClip, anim.displayText)
+              }}
             >
+              {isSelected && !isEditing && (
+                <div className="preview-text-floating-bar" onPointerDown={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    className="floating-action-btn"
+                    title={t('Editar texto (o haz doble clic)', 'Edit text (or double click)')}
+                    onClick={() => handleStartInlineEdit(textClip, anim.displayText)}
+                  >
+                    <Pencil size={11} />
+                    <span>{t('Editar', 'Edit')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="floating-action-btn"
+                    title={t('Centrar horizontal y vertical', 'Center horizontal and vertical')}
+                    onClick={() => {
+                      onUpdateClip?.(textClip.id, {
+                        transform: {
+                          ...(textClip.transform ?? { scaleX: 100, scaleY: 100, rotation: 0, y: sequenceSize.height / 2 }),
+                          x: sequenceSize.width / 2,
+                        },
+                        textStyle: { ...style, positionY: 50 },
+                      })
+                    }}
+                  >
+                    <span>{t('Centrar', 'Center')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="floating-action-btn"
+                    title={t('Reducir letra (A-)', 'Decrease font size (A-)')}
+                    onClick={() => {
+                      onUpdateClip?.(textClip.id, {
+                        textStyle: { ...style, fontSize: Math.max(14, style.fontSize - 4) },
+                      })
+                    }}
+                  >
+                    A-
+                  </button>
+                  <button
+                    type="button"
+                    className="floating-action-btn"
+                    title={t('Aumentar letra (A+)', 'Increase font size (A+)')}
+                    onClick={() => {
+                      onUpdateClip?.(textClip.id, {
+                        textStyle: { ...style, fontSize: Math.min(130, style.fontSize + 4) },
+                      })
+                    }}
+                  >
+                    A+
+                  </button>
+                  {onDuplicateClip && (
+                    <button
+                      type="button"
+                      className="floating-action-btn"
+                      title={t('Duplicar subtítulo', 'Duplicate subtitle')}
+                      onClick={() => onDuplicateClip(textClip.id)}
+                    >
+                      <Copy size={11} />
+                    </button>
+                  )}
+                  {onDeleteClip && (
+                    <button
+                      type="button"
+                      className="floating-action-btn danger"
+                      title={t('Eliminar subtítulo', 'Delete subtitle')}
+                      onClick={() => onDeleteClip(textClip.id)}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div
                 className="preview-text-overlay-box"
                 style={{
@@ -351,12 +546,32 @@ export function PreviewMonitor({
                   textAlign: style.align,
                   backgroundColor: style.backgroundOpacity > 0 ? hexToRgbaCss(style.backgroundColor, style.backgroundOpacity) : 'transparent',
                   borderRadius: `${Math.round(style.backgroundRadius * textUnit * 10) / 10}px`,
-                  padding: style.backgroundOpacity > 0 ? `${Math.round(12 * textUnit)}px ${Math.round(22 * textUnit)}px` : `${Math.round(2 * textUnit)}px ${Math.round(6 * textUnit)}px`,
+                  padding: style.backgroundOpacity > 0 ? `${Math.round(12 * textUnit)}px ${Math.round(22 * textUnit)}px` : `${Math.round(4 * textUnit)}px ${Math.round(10 * textUnit)}px`,
                   textShadow: textShadowParts.join(', ') || 'none',
                   transform: `translate(${(anim.translateXPx + anim.glitchShiftPx) * textUnit}px, ${anim.translateYPx * textUnit}px) scale(${anim.scaleX * customScaleX}, ${anim.scaleY * customScaleY}) rotate(${anim.rotationDeg + customRot}deg)`,
                 }}
               >
-                {anim.isKaraoke ? (
+                {isEditing ? (
+                  <textarea
+                    ref={inlineInputRef}
+                    autoFocus
+                    className="preview-text-inline-editor"
+                    rows={Math.max(1, inlineEditText.split('\n').length)}
+                    value={inlineEditText}
+                    onChange={(e) => setInlineEditText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleCommitInlineEdit(textClip.id)
+                      } else if (e.key === 'Escape') {
+                        setInlineEditingClipId(null)
+                      }
+                      e.stopPropagation()
+                    }}
+                    onBlur={() => handleCommitInlineEdit(textClip.id)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  />
+                ) : anim.isKaraoke ? (
                   <span className="preview-karaoke-words">
                     {anim.words.map((word, wIdx) => {
                       const isActive = wIdx === anim.activeWordIndex
@@ -378,10 +593,45 @@ export function PreviewMonitor({
                     {anim.isTypewriter && <span className="preview-typewriter-caret" aria-hidden="true">|</span>}
                   </span>
                 )}
+
+                {isSelected && !isEditing && (
+                  <>
+                    <div
+                      className="preview-text-resize-handle handle-nw"
+                      title={t('Arrastra para cambiar tamaño de letra', 'Drag to resize font')}
+                      onPointerDown={(e) => startResizeHandleDrag(e, textClip)}
+                    />
+                    <div
+                      className="preview-text-resize-handle handle-ne"
+                      title={t('Arrastra para cambiar tamaño de letra', 'Drag to resize font')}
+                      onPointerDown={(e) => startResizeHandleDrag(e, textClip)}
+                    />
+                    <div
+                      className="preview-text-resize-handle handle-sw"
+                      title={t('Arrastra para cambiar tamaño de letra', 'Drag to resize font')}
+                      onPointerDown={(e) => startResizeHandleDrag(e, textClip)}
+                    />
+                    <div
+                      className="preview-text-resize-handle handle-se"
+                      title={t('Arrastra para cambiar tamaño de letra', 'Drag to resize font')}
+                      onPointerDown={(e) => startResizeHandleDrag(e, textClip)}
+                    />
+                  </>
+                )}
               </div>
             </div>
           )
         })}
+        {snapGuides.x && (
+          <div className="preview-snap-guide-v" aria-hidden="true">
+            <span className="guide-label">{t('Centro', 'Center')}</span>
+          </div>
+        )}
+        {snapGuides.y !== null && (
+          <div className="preview-snap-guide-h" style={{ top: `${snapGuides.y}%` }} aria-hidden="true">
+            <span className="guide-label">{snapGuides.y === 50 ? t('Centro 50%', 'Center 50%') : t('Subtítulo 78%', 'Subtitle 78%')}</span>
+          </div>
+        )}
         {safeMargins && <div className="safe-margins" aria-hidden="true"><i /><i /></div>}
         {thirds && <div className="thirds-guides" aria-hidden="true"><i /><i /><i /><i /></div>}
       </div>
@@ -443,8 +693,50 @@ export function PreviewMonitor({
         <IconButton label={t('Ir al final', 'Go to end')} onClick={() => onSeek(duration)}><SkipForward size={14} /></IconButton>
       </div>
       <div className="transport-hud-right">
-        <span className="monitor-spec">{aspectLabel}</span>
-        <span className="monitor-spec">{sequenceSize.width}×{sequenceSize.height}</span>
+        {onSetSequence ? (
+          <ActionMenu
+            label={t('Relación de aspecto y resolución', 'Aspect ratio and resolution')}
+            triggerClass="monitor-spec monitor-aspect-menu-btn"
+            popupClass="monitor-aspect-popup"
+            items={[
+              { heading: t('Formato de secuencia', 'Sequence format') },
+              {
+                label: `9:16 · 1080 × 1920 (${t('TikTok / Reels / Shorts', 'TikTok / Reels / Shorts')})`,
+                checked: sequenceSize.width === 1080 && sequenceSize.height === 1920,
+                onSelect: () => onSetSequence({ width: 1080, height: 1920, frameRate }),
+              },
+              {
+                label: `16:9 · 1920 × 1080 (${t('YouTube / Horizontal', 'YouTube / Horizontal')})`,
+                checked: sequenceSize.width === 1920 && sequenceSize.height === 1080,
+                onSelect: () => onSetSequence({ width: 1920, height: 1080, frameRate }),
+              },
+              {
+                label: `1:1 · 1080 × 1080 (${t('Cuadrado / Instagram', 'Square / Instagram')})`,
+                checked: sequenceSize.width === 1080 && sequenceSize.height === 1080,
+                onSelect: () => onSetSequence({ width: 1080, height: 1080, frameRate }),
+              },
+              {
+                label: `4:5 · 1080 × 1350 (${t('Vertical feed / Retrato', 'Vertical feed / Portrait')})`,
+                checked: sequenceSize.width === 1080 && sequenceSize.height === 1350,
+                onSelect: () => onSetSequence({ width: 1080, height: 1350, frameRate }),
+              },
+              {
+                label: `16:9 · 1280 × 720 (${t('HD Ligero', 'Light HD')})`,
+                checked: sequenceSize.width === 1280 && sequenceSize.height === 720,
+                onSelect: () => onSetSequence({ width: 1280, height: 720, frameRate }),
+              },
+            ]}
+          >
+            <span className="monitor-spec-aspect-chip">{aspectLabel}</span>
+            <span className="monitor-spec-res-chip">{sequenceSize.width}×{sequenceSize.height}</span>
+            <ChevronDown size={11} aria-hidden="true" />
+          </ActionMenu>
+        ) : (
+          <>
+            <span className="monitor-spec">{aspectLabel}</span>
+            <span className="monitor-spec">{sequenceSize.width}×{sequenceSize.height}</span>
+          </>
+        )}
         <span className="monitor-spec">{Math.round(frameRate)} fps</span>
       </div>
     </div>

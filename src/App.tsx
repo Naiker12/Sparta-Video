@@ -21,7 +21,7 @@ import {
   captureVideoThumbnail,
   formatMediaDuration,
   getMediaMimeType,
-  probeMediaDuration,
+  probeMediaMetadata,
   storeMediaFile,
   storeMediaPreview,
 } from './features/editor/services/media-storage'
@@ -333,16 +333,19 @@ function App() {
       }
       const metadata = await inspectMediaFile(file)
       await storeMediaFile(asset.id, file)
-      const probedDuration = asset.type !== 'image' ? await probeMediaDuration(file, asset.type) : null
+      const probed = asset.type !== 'image' ? await probeMediaMetadata(file, asset.type) : await probeMediaMetadata(file, 'image')
       if (asset.type === 'video') {
         const preview = await captureVideoThumbnail(file)
         if (preview) await storeMediaPreview(asset.id, preview)
       }
-      const durationSuffix = probedDuration ? ` · ${formatMediaDuration(probedDuration)}` : ''
+      const durationSuffix = probed.duration ? ` · ${formatMediaDuration(probed.duration)}` : ''
+      const resSuffix = probed.width && probed.height ? ` · ${probed.width}×${probed.height}` : ''
       updateAsset(asset.id, {
         title: metadata.name,
-        detail: `${asset.type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}${durationSuffix}`,
-        ...(probedDuration ? { durationSeconds: probedDuration } : {}),
+        detail: `${asset.type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}${resSuffix}${durationSuffix}`,
+        ...(probed.duration ? { durationSeconds: probed.duration } : {}),
+        ...(probed.width ? { width: probed.width } : {}),
+        ...(probed.height ? { height: probed.height } : {}),
         status: 'ready',
       })
       processedCount++
@@ -426,17 +429,20 @@ function App() {
       const metadata = await inspectMediaFile(file)
       const type: MediaItem['type'] = metadata.mimeType.startsWith('image/') ? 'image' : metadata.mimeType.startsWith('audio/') ? 'audio' : 'video'
       await storeMediaFile(assetId, file)
-      const probedDuration = type !== 'image' ? await probeMediaDuration(file, type) : null
+      const probed = type !== 'image' ? await probeMediaMetadata(file, type) : await probeMediaMetadata(file, 'image')
       if (type === 'video') {
         const preview = await captureVideoThumbnail(file)
         if (preview) await storeMediaPreview(assetId, preview)
       }
-      const durationSuffix = probedDuration ? ` · ${formatMediaDuration(probedDuration)}` : ''
+      const durationSuffix = probed.duration ? ` · ${formatMediaDuration(probed.duration)}` : ''
+      const resSuffix = probed.width && probed.height ? ` · ${probed.width}×${probed.height}` : ''
       updateAsset(assetId, {
         title: metadata.name,
         type,
-        detail: `${type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}${durationSuffix}`,
-        ...(probedDuration ? { durationSeconds: probedDuration } : {}),
+        detail: `${type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}${resSuffix}${durationSuffix}`,
+        ...(probed.duration ? { durationSeconds: probed.duration } : {}),
+        ...(probed.width ? { width: probed.width } : {}),
+        ...(probed.height ? { height: probed.height } : {}),
         thumb: type === 'image' ? 'image-catalog' : type === 'audio' ? 'wave' : 'video-catalog',
         status: 'ready',
       })
@@ -448,6 +454,19 @@ function App() {
     }
   }
   const addMediaToTimeline = (asset: MediaItem, at?: number, trackId?: string) => {
+    const existingVideoClips = tracks.filter((t) => t.kind === 'video').flatMap((t) => t.clips)
+    if (existingVideoClips.length === 0 && asset.type === 'video') {
+      const isVertical = asset.height && asset.width ? asset.height > asset.width : false
+      if (isVertical && sequence.width > sequence.height) {
+        setSequence({ ...sequence, width: 1080, height: 1920 })
+        toast.info(t('Secuencia adaptada a formato vertical 9:16 (1080×1920)', 'Sequence adapted to vertical 9:16 (1080×1920)'), {
+          description: t('Adaptado automáticamente al formato del vídeo.', 'Adapted automatically to video format.'),
+        })
+      } else if (!isVertical && asset.width && asset.height && sequence.height > sequence.width) {
+        setSequence({ ...sequence, width: 1920, height: 1080 })
+        toast.info(t('Secuencia adaptada a formato horizontal 16:9 (1920×1080)', 'Sequence adapted to horizontal 16:9 (1920×1080)'))
+      }
+    }
     const id = addMedia(asset, at, trackId)
     if (!id) {
       toast.warning(asset.type === 'audio'
@@ -571,11 +590,11 @@ function App() {
     </header>
     <input ref={fileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" multiple accept="video/*,audio/*,image/*" tabIndex={-1} aria-hidden="true" onChange={(event) => { void importFiles(event.target.files); event.target.value = '' }} />
     <input ref={projectFileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" accept=".sparta,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProjectFromFile(file); event.target.value = '' }} />
-    <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 17, editor: 63, assistant: 20 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
-      <Panel id="library" defaultSize="17%" minSize="190px" maxSize="25%" className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onClearSubtitles={handleClearSubtitles} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
+    <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 18, editor: 62, assistant: 20 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
+      <Panel id="library" defaultSize={18} minSize={14} maxSize={26} className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onClearSubtitles={handleClearSubtitles} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
       <Separator id="library-separator" className="panel-separator" aria-label={t('Redimensionar biblioteca de medios', 'Resize media library')} />
-      <Panel id="editor" defaultSize="63%" minSize="45%" className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
-        <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia', 'Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia', 'Sequence resolution') }, ...[{ label: '1920 × 1080', width: 1920, height: 1080 }, { label: '1280 × 720', width: 1280, height: 720 }, { label: '1080 × 1920', width: 1080, height: 1920 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })), { separator: true }, { heading: t('Fotogramas por segundo', 'Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer', 'Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)', 'Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente', 'Close assistant panel') : t('Abrir panel asistente', 'Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><IconNlePanelRight size={15} /></IconButton><button type="button" className="export-button" disabled={!canExport} title={canExport ? t('Exportar secuencia de vídeo', 'Export video sequence') : t('El motor de exportación se habilita al tener medios listos en la línea de tiempo', 'The export engine is enabled when ready media is on the timeline')} aria-label={canExport ? t('Exportar vídeo', 'Export video') : t('Exportación no disponible', 'Export unavailable')} onClick={() => setExportOpen(true)}><Video size={15} /> {t('Exportar', 'Export')} <span className="sr-only">{canExport ? 'Export video' : 'Export'}</span></button></div></div>
+      <Panel id="editor" defaultSize={62} minSize={45} className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
+        <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia', 'Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia', 'Sequence resolution') }, ...[{ label: '1920 × 1080 (16:9)', width: 1920, height: 1080 }, { label: '1080 × 1920 (9:16)', width: 1080, height: 1920 }, { label: '1080 × 1080 (1:1)', width: 1080, height: 1080 }, { label: '1080 × 1350 (4:5)', width: 1080, height: 1350 }, { label: '1280 × 720 (16:9)', width: 1280, height: 720 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })), { separator: true }, { heading: t('Fotogramas por segundo', 'Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer', 'Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)', 'Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente', 'Close assistant panel') : t('Abrir panel asistente', 'Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><IconNlePanelRight size={15} /></IconButton><button type="button" className="export-button" disabled={!canExport} title={canExport ? t('Exportar secuencia de vídeo', 'Export video sequence') : t('El motor de exportación se habilita al tener medios listos en la línea de tiempo', 'The export engine is enabled when ready media is on the timeline')} aria-label={canExport ? t('Exportar vídeo', 'Export video') : t('Exportación no disponible', 'Export unavailable')} onClick={() => setExportOpen(true)}><Video size={15} /> {t('Exportar', 'Export')} <span className="sr-only">{canExport ? 'Export video' : 'Export'}</span></button></div></div>
         <Group id="sparta-editor-vertical" groupRef={editorVerticalGroupRef} className="editor-vertical-group" orientation="vertical" defaultLayout={editorVerticalLayout.defaultLayout ?? { stage: 52, timeline: 48 }} onLayoutChanged={editorVerticalLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
           <Panel id="stage" defaultSize="52%" minSize="26%" maxSize="78%" className="resize-panel-content">
             <div className="upper-workspace"><Group id="sparta-preview-inspector" groupRef={upperGroupRef} className="preview-inspector-group" orientation="horizontal" defaultLayout={upperLayout.defaultLayout ?? { monitor: 75, inspector: 25 }} onLayoutChanged={upperLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}><Panel id="monitor" defaultSize="75%" minSize="55%" className="resize-panel-content">{(() => {
@@ -597,6 +616,9 @@ function App() {
                   onUpdateClip={updateClip}
                   media={!previewClip ? selectedMedia : undefined}
                   sequenceSize={sequence}
+                  onSetSequence={setSequence}
+                  onDuplicateClip={duplicateClip}
+                  onDeleteClip={deleteClip}
                   playing={playing}
                   onTogglePlay={togglePlayback}
                   isMuted={isPreviewClipMuted}

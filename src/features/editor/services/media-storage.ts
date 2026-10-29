@@ -269,10 +269,16 @@ export function parseDurationFromDetail(detail?: string): number | null {
   return null
 }
 
-export async function probeMediaDuration(
+export type ProbedMediaMetadata = {
+  duration: number | null
+  width?: number
+  height?: number
+}
+
+export async function probeMediaMetadata(
   fileOrBlob: Blob,
   type?: 'video' | 'audio' | 'image',
-): Promise<number | null> {
+): Promise<ProbedMediaMetadata> {
   const resolvedType =
     type ??
     (fileOrBlob.type.startsWith('image/')
@@ -280,9 +286,24 @@ export async function probeMediaDuration(
       : fileOrBlob.type.startsWith('audio/')
         ? 'audio'
         : 'video')
-  if (resolvedType === 'image') return null
+
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
-    return null
+    return { duration: null }
+  }
+
+  if (resolvedType === 'image') {
+    const url = URL.createObjectURL(fileOrBlob)
+    try {
+      const dim = await new Promise<{ width: number; height: number } | null>((res) => {
+        const img = new Image()
+        img.onload = () => res({ width: img.naturalWidth, height: img.naturalHeight })
+        img.onerror = () => res(null)
+        img.src = url
+      })
+      return { duration: null, width: dim?.width, height: dim?.height }
+    } finally {
+      URL.revokeObjectURL(url)
+    }
   }
 
   const url = URL.createObjectURL(fileOrBlob)
@@ -297,6 +318,9 @@ export async function probeMediaDuration(
   const timeoutMs = isJsdom ? 60 : 10_000
 
   try {
+    let capturedWidth: number | undefined
+    let capturedHeight: number | undefined
+
     const duration = await new Promise<number | null>((resolve) => {
       let settled = false
       const finish = (value: number | null) => {
@@ -308,6 +332,10 @@ export async function probeMediaDuration(
       const timer = window.setTimeout(() => finish(null), timeoutMs)
       element.onerror = () => finish(null)
       element.onloadedmetadata = () => {
+        if (element instanceof HTMLVideoElement && element.videoWidth && element.videoHeight) {
+          capturedWidth = element.videoWidth
+          capturedHeight = element.videoHeight
+        }
         if (Number.isFinite(element.duration) && element.duration > 0) {
           finish(element.duration)
           return
@@ -336,7 +364,7 @@ export async function probeMediaDuration(
       element.src = url
       try { element.load() } catch { finish(null) }
     })
-    return duration
+    return { duration, width: capturedWidth, height: capturedHeight }
   } finally {
     try {
       element.pause()
@@ -345,4 +373,12 @@ export async function probeMediaDuration(
     } catch { /* ignore */ }
     URL.revokeObjectURL(url)
   }
+}
+
+export async function probeMediaDuration(
+  fileOrBlob: Blob,
+  type?: 'video' | 'audio' | 'image',
+): Promise<number | null> {
+  const result = await probeMediaMetadata(fileOrBlob, type)
+  return result.duration
 }

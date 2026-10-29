@@ -249,6 +249,18 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
         1 / fps,
         state.snapToFrames ? Math.round(resolvedDuration * fps) / fps : resolvedDuration,
       )
+
+      // Auto-adapt sequence format if timeline has no video clips yet and incoming video format is known
+      let nextSequence = state.sequence
+      const hasExistingVideoClips = state.tracks.some((t) => t.kind === 'video' && t.clips.length > 0)
+      if (!hasExistingVideoClips && kind === 'video' && latestAsset.width && latestAsset.height) {
+        if (latestAsset.height > latestAsset.width && state.sequence.width > state.sequence.height) {
+          nextSequence = { ...state.sequence, width: 1080, height: 1920 }
+        } else if (latestAsset.width > latestAsset.height && state.sequence.height > state.sequence.width) {
+          nextSequence = { ...state.sequence, width: 1920, height: 1080 }
+        }
+      }
+
       clipId = `c${nextClip++}`
       while (tracks.some((track) => track.clips.some((item) => item.id === clipId))) clipId = `c${nextClip++}`
       const clip: Clip = {
@@ -260,7 +272,7 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
         color: latestAsset.thumb === 'cliff' ? 'olive' : latestAsset.thumb === 'harbor' ? 'blue' : 'sand',
         thumbnail: latestAsset.thumb,
         kind,
-        transform: { x: state.sequence.width / 2, y: state.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 },
+        transform: { x: nextSequence.width / 2, y: nextSequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 },
         uniformScale: true,
         opacity: 100,
         blendMode: 'normal',
@@ -272,7 +284,7 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
       const rawStart = at ?? (target.clips.length === 0 ? 0 : target.clips.reduce((end, item) => Math.max(end, item.start + item.duration), 0))
       const start = state.snapToFrames ? Math.round(rawStart * fps) / fps : rawStart
       tracks = tracks.map((track) => track.id === target!.id ? { ...track, clips: [...track.clips, { ...clip, start }] } : track)
-      return { ...commit(state, { tracks }), selectedClipId: clip.id, selectedMediaId: null }
+      return { ...commit(state, { tracks, sequence: nextSequence }), selectedClipId: clip.id, selectedMediaId: null }
     })
     return clipId
   },

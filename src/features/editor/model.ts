@@ -90,6 +90,8 @@ export type MediaItem = {
   durationSeconds?: number
   sourcePath?: string
   status?: 'catalog-only' | 'ready' | 'missing' | 'processing' | 'error'
+  width?: number
+  height?: number
 }
 
 export type SequenceSettings = { width: number; height: number; frameRate: number }

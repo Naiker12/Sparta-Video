@@ -131,15 +131,15 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
     const time = Math.max(0, (clientX - rect.left + (timelineRef.current?.scrollLeft ?? 0)) / scale)
     onSeek(snap ? Math.round(time * frameRate) / frameRate : time)
   }
-  const [trackHeaderWidth, setTrackHeaderWidth] = useState(148)
+  const [trackHeaderWidth, setTrackHeaderWidth] = useState(172)
   const resizingTrackHeaderRef = useRef(false)
-  const trackHeaderStartRef = useRef({ x: 0, width: 148 })
+  const trackHeaderStartRef = useRef({ x: 0, width: 172 })
   useEffect(() => {
     const move = (event: PointerEvent) => {
       if (scrubbingRef.current) seekFromClientX(event.clientX)
       if (resizingTrackHeaderRef.current) {
         const delta = event.clientX - trackHeaderStartRef.current.x
-        setTrackHeaderWidth(Math.max(90, Math.min(260, trackHeaderStartRef.current.width + delta)))
+        setTrackHeaderWidth(Math.max(110, Math.min(280, trackHeaderStartRef.current.width + delta)))
       }
     }
     const end = () => {
