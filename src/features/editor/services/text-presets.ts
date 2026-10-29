@@ -585,80 +585,170 @@ export function drawAnimatedTextClipToCanvas(
   ctx.font = `${fontStyle}${style.fontWeight} ${scaledFontSize}px ${style.fontFamily}`
   ctx.textBaseline = 'middle'
 
-  const lines = state.displayText.split('\n')
   const lineHeight = scaledFontSize * 1.24
+  const maxAllowedWidth = Math.round(canvasWidth * 0.84)
+
+  // Smart word wrapping for non-karaoke or multi-line text
+  const rawLines = state.displayText.split('\n')
+  const lines: string[] = []
+  for (const rawLine of rawLines) {
+    const trimmed = rawLine.trim()
+    if (!trimmed) continue
+    const words = trimmed.split(/\s+/)
+    if (words.length <= 1) {
+      lines.push(trimmed)
+      continue
+    }
+    let currentLine = words[0]
+    for (let i = 1; i < words.length; i++) {
+      const candidate = `${currentLine} ${words[i]}`
+      if (ctx.measureText(candidate).width > maxAllowedWidth) {
+        lines.push(currentLine)
+        currentLine = words[i]
+      } else {
+        currentLine = candidate
+      }
+    }
+    if (currentLine) lines.push(currentLine)
+  }
+  if (!lines.length && state.displayText.trim()) {
+    lines.push(state.displayText.trim())
+  }
   const totalHeight = lines.length * lineHeight
 
-  // Measure widest line for background pill
-  let maxLineWidth = 0
-  for (const line of lines) {
-    const m = ctx.measureText(line)
-    if (m.width > maxLineWidth) maxLineWidth = m.width
-  }
-
-  // Draw rounded background box if backgroundOpacity > 0
-  if (style.backgroundOpacity > 0 && maxLineWidth > 0) {
-    const padX = Math.round(22 * scaleFactor)
-    const padY = Math.round(12 * scaleFactor)
-    const boxW = maxLineWidth + padX * 2
-    const boxH = totalHeight + padY * 2
-    const boxX =
-      style.align === 'left'
-        ? -padX
-        : style.align === 'right'
-          ? -boxW + padX
-          : -boxW / 2
-    const boxY = -totalHeight / 2 - padY
-    const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * scaleFactor))
-
-    ctx.fillStyle = hexToRgba(style.backgroundColor, style.backgroundOpacity)
-    ctx.beginPath()
-    if (typeof ctx.roundRect === 'function') {
-      ctx.roundRect(boxX, boxY, boxW, boxH, radius)
-    } else {
-      ctx.rect(boxX, boxY, boxW, boxH)
-    }
-    ctx.fill()
-  }
-
-  // Configure drop shadow / neon glow
-  if (style.shadowBlur > 0) {
-    ctx.shadowColor = style.shadowColor
-    ctx.shadowBlur = style.shadowBlur * scaleFactor
-    ctx.shadowOffsetY = 3 * scaleFactor
-  }
-
-  // Karaoke word-by-word rendering vs standard line rendering
-  if (state.isKaraoke && lines.length === 1 && state.words.length > 0) {
+  // Karaoke word-by-word rendering with auto-wrapping vs standard line rendering
+  if (state.isKaraoke && state.words.length > 0) {
     const spaceWidth = ctx.measureText(' ').width
     const wordWidths = state.words.map((w) => ctx.measureText(w).width)
-    const totalWordsWidth =
-      wordWidths.reduce((sum, w) => sum + w, 0) + spaceWidth * Math.max(0, state.words.length - 1)
-    let cursorX =
-      style.align === 'left'
-        ? 0
-        : style.align === 'right'
-          ? -totalWordsWidth
-          : -totalWordsWidth / 2
+
+    // Partition words into lines that stay inside maxAllowedWidth
+    type KaraokeLine = { words: string[]; wordIndices: number[]; lineWidth: number }
+    const karaokeLines: KaraokeLine[] = []
+    let curLineWords: string[] = []
+    let curLineIndices: number[] = []
+    let curLineWidth = 0
+
+    for (let i = 0; i < state.words.length; i++) {
+      const wWidth = wordWidths[i]
+      const addedWidth = curLineWords.length > 0 ? spaceWidth + wWidth : wWidth
+      if (curLineWords.length > 0 && curLineWidth + addedWidth > maxAllowedWidth) {
+        karaokeLines.push({ words: curLineWords, wordIndices: curLineIndices, lineWidth: curLineWidth })
+        curLineWords = [state.words[i]]
+        curLineIndices = [i]
+        curLineWidth = wWidth
+      } else {
+        curLineWords.push(state.words[i])
+        curLineIndices.push(i)
+        curLineWidth += addedWidth
+      }
+    }
+    if (curLineWords.length > 0) {
+      karaokeLines.push({ words: curLineWords, wordIndices: curLineIndices, lineWidth: curLineWidth })
+    }
+
+    const kTotalHeight = karaokeLines.length * lineHeight
+
+    // Measure widest line for background pill
+    const maxKLineWidth = Math.max(...karaokeLines.map((l) => l.lineWidth), 0)
+    if (style.backgroundOpacity > 0 && maxKLineWidth > 0) {
+      const padX = Math.round(22 * scaleFactor)
+      const padY = Math.round(12 * scaleFactor)
+      const boxW = maxKLineWidth + padX * 2
+      const boxH = kTotalHeight + padY * 2
+      const boxX =
+        style.align === 'left'
+          ? -padX
+          : style.align === 'right'
+            ? -boxW + padX
+            : -boxW / 2
+      const boxY = -kTotalHeight / 2 - padY
+      const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * scaleFactor))
+
+      ctx.fillStyle = hexToRgba(style.backgroundColor, style.backgroundOpacity)
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(boxX, boxY, boxW, boxH, radius)
+      } else {
+        ctx.rect(boxX, boxY, boxW, boxH)
+      }
+      ctx.fill()
+    }
+
+    if (style.shadowBlur > 0) {
+      ctx.shadowColor = style.shadowColor
+      ctx.shadowBlur = style.shadowBlur * scaleFactor
+      ctx.shadowOffsetY = 3 * scaleFactor
+    }
 
     ctx.textAlign = 'left'
-    for (let i = 0; i < state.words.length; i++) {
-      const word = state.words[i]
-      const isCurrent = i === state.activeWordIndex
-      const isPast = i < state.activeWordIndex
+    karaokeLines.forEach((lineObj, lIdx) => {
+      const lineY = -kTotalHeight / 2 + lineHeight * (lIdx + 0.5)
+      let cursorX =
+        style.align === 'left'
+          ? 0
+          : style.align === 'right'
+            ? -lineObj.lineWidth
+            : -lineObj.lineWidth / 2
 
-      if (style.strokeWidth > 0) {
-        ctx.strokeStyle = style.strokeColor
-        ctx.lineWidth = style.strokeWidth * scaleFactor
-        ctx.lineJoin = 'round'
-        ctx.strokeText(word, cursorX, 0)
+      for (let k = 0; k < lineObj.words.length; k++) {
+        const word = lineObj.words[k]
+        const globalIdx = lineObj.wordIndices[k]
+        const isCurrent = globalIdx === state.activeWordIndex
+        const isPast = globalIdx < state.activeWordIndex
+        const wWidth = wordWidths[globalIdx]
+
+        if (style.strokeWidth > 0) {
+          ctx.strokeStyle = style.strokeColor
+          ctx.lineWidth = style.strokeWidth * scaleFactor
+          ctx.lineJoin = 'round'
+          ctx.strokeText(word, cursorX, lineY)
+        }
+
+        ctx.fillStyle = isCurrent ? style.accentColor : isPast ? style.color : style.color
+        ctx.fillText(word, cursorX, isCurrent ? lineY - 2 * scaleFactor : lineY)
+        cursorX += wWidth + spaceWidth
       }
-
-      ctx.fillStyle = isCurrent ? style.accentColor : isPast ? style.color : style.color
-      ctx.fillText(word, cursorX, isCurrent ? -2 * scaleFactor : 0)
-      cursorX += wordWidths[i] + spaceWidth
-    }
+    })
   } else {
+    // Measure widest line for background pill
+    let maxLineWidth = 0
+    for (const line of lines) {
+      const m = ctx.measureText(line)
+      if (m.width > maxLineWidth) maxLineWidth = m.width
+    }
+
+    // Draw rounded background box if backgroundOpacity > 0
+    if (style.backgroundOpacity > 0 && maxLineWidth > 0) {
+      const padX = Math.round(22 * scaleFactor)
+      const padY = Math.round(12 * scaleFactor)
+      const boxW = maxLineWidth + padX * 2
+      const boxH = totalHeight + padY * 2
+      const boxX =
+        style.align === 'left'
+          ? -padX
+          : style.align === 'right'
+            ? -boxW + padX
+            : -boxW / 2
+      const boxY = -totalHeight / 2 - padY
+      const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * scaleFactor))
+
+      ctx.fillStyle = hexToRgba(style.backgroundColor, style.backgroundOpacity)
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(boxX, boxY, boxW, boxH, radius)
+      } else {
+        ctx.rect(boxX, boxY, boxW, boxH)
+      }
+      ctx.fill()
+    }
+
+    // Configure drop shadow / neon glow
+    if (style.shadowBlur > 0) {
+      ctx.shadowColor = style.shadowColor
+      ctx.shadowBlur = style.shadowBlur * scaleFactor
+      ctx.shadowOffsetY = 3 * scaleFactor
+    }
+
     ctx.textAlign = style.align
     lines.forEach((line, idx) => {
       const y = -totalHeight / 2 + lineHeight * (idx + 0.5)

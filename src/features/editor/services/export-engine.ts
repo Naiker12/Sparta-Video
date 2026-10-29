@@ -286,23 +286,92 @@ export async function renderSequence({
   if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = ''
 
   // Pre-render audio track if present
-  onProgress?.({ stage: 'preparing', percent: 10, currentFrame: 0, totalFrames, message: 'Procesando mezcla de audio del proyecto...' })
+  onProgress?.({ stage: 'preparing', percent: 5, currentFrame: 0, totalFrames, message: 'Procesando mezcla de audio del proyecto...' })
   const audioBuffer = await renderAudioMixdown(tracks, assets, duration, mutedTracks)
   if (signal?.aborted) throw new Error('Exportación cancelada.')
+
+  // Pre-load visual assets into DOM-attached elements for reliable hardware decoding
+  onProgress?.({ stage: 'preparing', percent: 10, currentFrame: 0, totalFrames, message: 'Preparando medios de vídeo e imagen...' })
+  const hiddenContainer = typeof document !== 'undefined' ? document.createElement('div') : null
+  if (hiddenContainer) {
+    hiddenContainer.setAttribute('aria-hidden', 'true')
+    hiddenContainer.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;'
+    document.body.appendChild(hiddenContainer)
+  }
+
+  const visualAssets = new Map<string, HTMLImageElement | HTMLVideoElement>()
+  const videoClips = tracks.filter((t) => t.kind === 'video').flatMap((t) => t.clips)
+  for (const clip of videoClips) {
+    const assetId = clip.sourceAssetId
+    if (!assetId || visualAssets.has(assetId)) continue
+    const asset = assets.find((a) => a.id === assetId)
+    const url = await loadMediaSource(assetId)
+    if (!url) continue
+
+    if (asset?.type === 'image' || clip.thumbnail === 'image-catalog') {
+      const img = new Image()
+      img.src = url
+      await new Promise<void>((res) => {
+        if (img.complete && img.naturalWidth > 0) { res(); return }
+        img.onload = () => res()
+        img.onerror = () => res()
+        setTimeout(res, 2000)
+      })
+      visualAssets.set(assetId, img)
+    } else {
+      const vid = document.createElement('video')
+      vid.preload = 'auto'
+      vid.muted = true
+      vid.playsInline = true
+      vid.src = url
+      if (hiddenContainer) hiddenContainer.appendChild(vid)
+      await new Promise<void>((res) => {
+        if (vid.readyState >= 2) { res(); return }
+        const done = () => {
+          vid.removeEventListener('loadeddata', done)
+          vid.removeEventListener('canplay', done)
+          vid.removeEventListener('error', done)
+          res()
+        }
+        vid.addEventListener('loadeddata', done, { once: true })
+        vid.addEventListener('canplay', done, { once: true })
+        vid.addEventListener('error', done, { once: true })
+        setTimeout(done, 2500)
+        try { vid.load() } catch { /* ignore */ }
+      })
+      try { vid.currentTime = 0 } catch { /* ignore */ }
+      visualAssets.set(assetId, vid)
+    }
+  }
+
+  // Pre-render frame 0 onto canvas so captureStream has pixels ready
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, settings.width, settings.height)
+  const activeVideoTracks = tracks.filter((t) => t.kind === 'video' && !mutedTracks.includes(t.id))
+  const initialClips = activeVideoTracks.flatMap((track) =>
+    track.clips.filter((clip) => 0 >= clip.start && 0 < clip.start + clip.duration),
+  )
+  const initialMedia = initialClips.filter((c) => c.text === undefined && c.thumbnail !== 'text-overlay')
+  const initialText = initialClips.filter((c) => c.text !== undefined || c.thumbnail === 'text-overlay')
+  for (const clip of [...initialMedia, ...initialText]) {
+    drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), 0, settings.width, settings.height)
+  }
 
   // Create stream from canvas
   const canvasStream = canvas.captureStream(settings.frameRate)
   let combinedStream = canvasStream
 
+  let audioCtx: AudioContext | undefined
+  let sourceNode: AudioBufferSourceNode | undefined
+
   // Add audio track to stream if available
   if (audioBuffer && typeof AudioContext !== 'undefined') {
     try {
-      const audioCtx = new AudioContext()
+      audioCtx = new AudioContext()
       const dest = audioCtx.createMediaStreamDestination()
-      const source = audioCtx.createBufferSource()
-      source.buffer = audioBuffer
-      source.connect(dest)
-      source.start()
+      sourceNode = audioCtx.createBufferSource()
+      sourceNode.buffer = audioBuffer
+      sourceNode.connect(dest)
 
       const audioTrack = dest.stream.getAudioTracks()[0]
       if (audioTrack) {
@@ -331,32 +400,11 @@ export async function renderSequence({
     recorder.onerror = (e) => reject(new Error(`Error en MediaRecorder: ${String(e)}`))
   })
 
-  recorder.start()
-
-  // Pre-load visual assets into HTML elements
-  const visualAssets = new Map<string, HTMLImageElement | HTMLVideoElement>()
-  const videoClips = tracks.filter((t) => t.kind === 'video').flatMap((t) => t.clips)
-  for (const clip of videoClips) {
-    const assetId = clip.sourceAssetId
-    if (!assetId || visualAssets.has(assetId)) continue
-    const asset = assets.find((a) => a.id === assetId)
-    const url = await loadMediaSource(assetId)
-    if (!url) continue
-
-    if (asset?.type === 'image' || clip.thumbnail === 'image-catalog') {
-      const img = new Image()
-      img.src = url
-      await new Promise((res) => { img.onload = res; img.onerror = res })
-      visualAssets.set(assetId, img)
-    } else {
-      const vid = document.createElement('video')
-      vid.src = url
-      vid.muted = true
-      vid.playsInline = true
-      await new Promise((res) => { vid.onloadedmetadata = res; vid.onerror = res })
-      visualAssets.set(assetId, vid)
-    }
+  // Start synchronized recording and audio
+  if (sourceNode) {
+    try { sourceNode.start() } catch { /* ignore */ }
   }
+  recorder.start()
 
   // Draw frame by frame
   const frameInterval = 1 / settings.frameRate
@@ -368,63 +416,98 @@ export async function renderSequence({
 
   const canvasTrack = canvasStream.getVideoTracks()[0] as unknown as { requestFrame?: () => void }
 
-  for (let frame = 0; frame < totalFrames; frame++) {
-    if (signal?.aborted) {
-      recorder.stop()
-      throw new Error('Exportación cancelada.')
-    }
-
-    const frameStartTime = performance.now()
-    const time = frame * frameInterval
-
-    // Background fill
-    ctx.fillStyle = '#0a0a0c'
-    ctx.fillRect(0, 0, settings.width, settings.height)
-
-    // Render active video clips in layer order (base video first, then text/subtitle overlays on top)
-    const activeVideoTracks = tracks.filter((t) => t.kind === 'video' && !mutedTracks.includes(t.id))
-    const activeClips = activeVideoTracks.flatMap((track) =>
-      track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
-    )
-    const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
-    const textClips = activeClips.filter((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay')
-
-    for (const clip of [...mediaClips, ...textClips]) {
-      drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), time, settings.width, settings.height)
-    }
-
-    // Force canvas capture frame if API is available
-    if (typeof canvasTrack?.requestFrame === 'function') {
-      try {
-        canvasTrack.requestFrame()
-      } catch {
-        /* fallback to stream automatic sampling */
+  try {
+    for (let frame = 0; frame < totalFrames; frame++) {
+      if (signal?.aborted) {
+        try { recorder.stop() } catch { /* ignore */ }
+        throw new Error('Exportación cancelada.')
       }
+
+      const frameStartTime = performance.now()
+      const time = frame * frameInterval
+
+      // Background fill (black for seamless presentation)
+      ctx.fillStyle = '#000000'
+      ctx.fillRect(0, 0, settings.width, settings.height)
+
+      // Active clips for this frame
+      const activeClips = activeVideoTracks.flatMap((track) =>
+        track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+      )
+      const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
+      const textClips = activeClips.filter((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay')
+
+      // Synchronize video element playback/position for media clips
+      for (const [assetId, element] of visualAssets) {
+        if (element instanceof HTMLVideoElement) {
+          const activeClip = mediaClips.find((c) => c.sourceAssetId === assetId)
+          if (activeClip) {
+            const expectedSourceTime = Math.max(0, time - activeClip.start)
+            if (Math.abs(element.currentTime - expectedSourceTime) > 0.25) {
+              try { element.currentTime = expectedSourceTime } catch { /* ignore */ }
+            }
+            if (element.paused) {
+              void element.play().catch(() => {})
+            }
+          } else {
+            if (!element.paused) {
+              element.pause()
+            }
+          }
+        }
+      }
+
+      for (const clip of [...mediaClips, ...textClips]) {
+        drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), time, settings.width, settings.height)
+      }
+
+      // Force canvas capture frame if API is available
+      if (typeof canvasTrack?.requestFrame === 'function') {
+        try {
+          canvasTrack.requestFrame()
+        } catch {
+          /* fallback to stream automatic sampling */
+        }
+      }
+
+      framesSinceLastSample++
+      const now = performance.now()
+      const elapsedSinceSample = now - lastFpsSampleTime
+      if (elapsedSinceSample >= 400 && framesSinceLastSample > 0) {
+        measuredFps = Math.round((framesSinceLastSample / (elapsedSinceSample / 1000)) * 10) / 10
+        lastFpsSampleTime = now
+        framesSinceLastSample = 0
+      }
+
+      const percent = Math.min(98, Math.round((frame / totalFrames) * 88) + 10)
+      onProgress?.({
+        stage: 'rendering',
+        percent,
+        currentFrame: frame + 1,
+        totalFrames,
+        fps: measuredFps,
+        message: `Renderizando cuadro ${frame + 1} de ${totalFrames}...`,
+      })
+
+      // Dynamic pacing: ensure event loop yields without unnecessary delay
+      const computeTime = performance.now() - frameStartTime
+      const sleepMs = Math.max(1, Math.min(20, Math.round(targetFrameIntervalMs - computeTime)))
+      await new Promise((r) => setTimeout(r, sleepMs))
     }
-
-    framesSinceLastSample++
-    const now = performance.now()
-    const elapsedSinceSample = now - lastFpsSampleTime
-    if (elapsedSinceSample >= 400 && framesSinceLastSample > 0) {
-      measuredFps = Math.round((framesSinceLastSample / (elapsedSinceSample / 1000)) * 10) / 10
-      lastFpsSampleTime = now
-      framesSinceLastSample = 0
-    }
-
-    const percent = Math.min(98, Math.round((frame / totalFrames) * 90) + 10)
-    onProgress?.({
-      stage: 'rendering',
-      percent,
-      currentFrame: frame + 1,
-      totalFrames,
-      fps: measuredFps,
-      message: `Renderizando cuadro ${frame + 1} de ${totalFrames}...`,
-    })
-
-    // Dynamic pacing: ensure event loop yields without unnecessary delay
-    const computeTime = performance.now() - frameStartTime
-    const sleepMs = Math.max(1, Math.min(16, Math.round(targetFrameIntervalMs - computeTime)))
-    await new Promise((r) => setTimeout(r, sleepMs))
+  } finally {
+    try {
+      for (const element of visualAssets.values()) {
+        if (element instanceof HTMLVideoElement) {
+          element.pause()
+          element.src = ''
+          try { element.load() } catch { /* ignore */ }
+        }
+      }
+      if (hiddenContainer) hiddenContainer.remove()
+      if (audioCtx && audioCtx.state !== 'closed') {
+        void audioCtx.close().catch(() => {})
+      }
+    } catch { /* ignore */ }
   }
 
   onProgress?.({ stage: 'encoding', percent: 99, currentFrame: totalFrames, totalFrames, message: 'Finalizando codificación de vídeo...' })
@@ -467,13 +550,26 @@ function drawClipToCanvas(
   if (transform.rotation) ctx.rotate((transform.rotation * Math.PI) / 180)
   ctx.scale(scaleX, scaleY)
 
+  let rendered = false
+
   if (element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0) {
-    ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
-  } else if (element instanceof HTMLVideoElement && element.readyState >= 2) {
-    element.currentTime = Math.max(0, time - clip.start)
-    ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
-  } else {
-    // Fallback: visual placeholder card
+    try {
+      ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
+      rendered = true
+    } catch {
+      // Image draw failed
+    }
+  } else if (element instanceof HTMLVideoElement) {
+    try {
+      ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
+      rendered = true
+    } catch {
+      // Video frame draw failed
+    }
+  }
+
+  if (!rendered) {
+    // Fallback: visual placeholder card only when no media asset is available
     ctx.fillStyle = clip.color === 'olive' ? '#2f4236' : clip.color === 'sand' ? '#443c2c' : '#22384a'
     ctx.fillRect(-canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
     ctx.fillStyle = '#ffffff'

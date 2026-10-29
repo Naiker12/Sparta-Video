@@ -362,6 +362,18 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
         })
       }
       if (!newClips.length) return state
+
+      // Sort and sanitize durations to eliminate any overlapping subtitles (SOLAPE)
+      newClips.sort((a, b) => a.start - b.start)
+      const frameDelta = 1 / fps
+      for (let i = 0; i < newClips.length - 1; i++) {
+        const cur = newClips[i]
+        const nxt = newClips[i + 1]
+        if (cur.start + cur.duration > nxt.start) {
+          const maxDur = nxt.start - cur.start - frameDelta
+          cur.duration = Math.max(0.3, state.snapToFrames ? Math.round(maxDur * fps) / fps : Math.round(maxDur * 1000) / 1000)
+        }
+      }
       const sampleTexts = new Set(TEXT_STYLE_PRESETS.map((p) => p.sampleText.toUpperCase()))
       tracks = tracks
         .map((t) => {

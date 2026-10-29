@@ -89,5 +89,52 @@ describe('CapCut Pro text presets & animation engine', () => {
     expect(mockCtx.fillText).toHaveBeenCalledWith('Subtítulo Exportado', 0, expect.any(Number))
     expect(mockCtx.restore).toHaveBeenCalled()
   })
+
+  it('wraps long subtitles and karaoke captions into multi-line rows without overflowing canvas', () => {
+    const karaokeClip: Clip = {
+      id: 'k1',
+      title: 'Karaoke largo',
+      start: 0,
+      duration: 5,
+      color: 'violet',
+      thumbnail: 'text-overlay',
+      kind: 'video',
+      text: 'Esta es una frase muy larga que definitivamente supera el ancho permitido para un subtitulo en pantalla completa',
+      textStyle: getDefaultTextStyle('hormozi-karaoke'),
+      textAnimation: { in: 'karaoke', out: 'none', loop: 'none', inDuration: 0.2, outDuration: 0.2 },
+    }
+
+    const filledWords: string[] = []
+    const mockCtx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      rotate: vi.fn(),
+      scale: vi.fn(),
+      measureText: vi.fn((str: string) => ({ width: str.length * 28 })),
+      beginPath: vi.fn(),
+      roundRect: vi.fn(),
+      rect: vi.fn(),
+      fill: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn((w: string) => filledWords.push(w)),
+      globalAlpha: 1,
+      font: '',
+      textBaseline: 'middle',
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 0,
+      lineJoin: 'round',
+      shadowColor: '',
+      shadowBlur: 0,
+      shadowOffsetY: 0,
+      textAlign: 'left',
+    } as unknown as CanvasRenderingContext2D
+
+    drawAnimatedTextClipToCanvas(mockCtx, karaokeClip, 2.5, 1080, 1920)
+    expect(mockCtx.save).toHaveBeenCalled()
+    expect(filledWords.length).toBeGreaterThan(5)
+    expect(mockCtx.restore).toHaveBeenCalled()
+  })
 })
 
