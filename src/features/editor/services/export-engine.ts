@@ -121,6 +121,12 @@ export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
   return new Blob([arrayBuffer], { type: 'audio/wav' })
 }
 
+function resolveClipAssetId(clip: Clip, assets: MediaItem[]): string | undefined {
+  if (clip.sourceAssetId) return clip.sourceAssetId
+  const match = assets.find((a) => a.id === clip.sourceAssetId || a.title === clip.title)
+  return match?.id
+}
+
 /**
  * Mixes all active audio clips on the timeline into a single AudioBuffer using OfflineAudioContext.
  */
@@ -134,9 +140,11 @@ export async function renderAudioMixdown(
   const unmutedTracks = tracks.filter((t) => !mutedTracks.includes(t.id))
   const audioClips = unmutedTracks.flatMap((t) =>
     t.clips.filter((c) => {
-      if (c.duration <= 0 || !c.sourceAssetId) return false
+      if (c.duration <= 0) return false
       if (c.text !== undefined || c.thumbnail === 'text-overlay' || c.thumbnail === 'image-catalog') return false
-      const asset = assets.find((a) => a.id === c.sourceAssetId)
+      const assetId = resolveClipAssetId(c, assets)
+      if (!assetId) return false
+      const asset = assets.find((a) => a.id === assetId)
       if (asset?.type === 'image') return false
       return true
     }),
@@ -152,7 +160,7 @@ export async function renderAudioMixdown(
   // Load and decode unique audio assets
   const assetBuffers = new Map<string, AudioBuffer>()
   for (const clip of audioClips) {
-    const assetId = clip.sourceAssetId
+    const assetId = resolveClipAssetId(clip, assets)
     if (!assetId || assetBuffers.has(assetId)) continue
 
     const blobUrl = await loadMediaSource(assetId)
@@ -161,7 +169,12 @@ export async function renderAudioMixdown(
     try {
       const response = await fetch(blobUrl)
       const arrayBuffer = await response.arrayBuffer()
-      const decoded = await offlineContext.decodeAudioData(arrayBuffer)
+      const decoded = await new Promise<AudioBuffer>((res, rej) => {
+        const promise = offlineContext.decodeAudioData(arrayBuffer, res, rej)
+        if (promise && typeof promise.then === 'function') {
+          promise.then(res).catch(rej)
+        }
+      })
       assetBuffers.set(assetId, decoded)
     } catch {
       // Asset failed decoding, skip gracefully
@@ -172,7 +185,8 @@ export async function renderAudioMixdown(
 
   // Schedule clips into the offline context
   for (const clip of audioClips) {
-    const buffer = clip.sourceAssetId ? assetBuffers.get(clip.sourceAssetId) : null
+    const assetId = resolveClipAssetId(clip, assets)
+    const buffer = assetId ? assetBuffers.get(assetId) : null
     if (!buffer) continue
 
     const source = offlineContext.createBufferSource()
@@ -295,16 +309,17 @@ export async function renderSequence({
   const hiddenContainer = typeof document !== 'undefined' ? document.createElement('div') : null
   if (hiddenContainer) {
     hiddenContainer.setAttribute('aria-hidden', 'true')
-    // Real dimensions, in-viewport and tiny opacity so Chrome keeps GPU video decoding active
+    // Real dimensions, in-viewport, safe z-index behind dialog backdrop so Chrome keeps GPU video decoding active
     hiddenContainer.style.cssText =
-      'position:fixed;bottom:8px;right:8px;width:320px;height:180px;opacity:0.01;pointer-events:none;z-index:999999;overflow:hidden;'
+      'position:fixed;bottom:8px;right:8px;width:320px;height:180px;opacity:0.99;pointer-events:none;z-index:50;overflow:hidden;border-radius:8px;'
     document.body.appendChild(hiddenContainer)
   }
 
   const visualAssets = new Map<string, HTMLImageElement | HTMLVideoElement>()
   const videoClips = tracks.filter((t) => t.kind === 'video').flatMap((t) => t.clips)
   for (const clip of videoClips) {
-    const assetId = clip.sourceAssetId
+    if (clip.text !== undefined || clip.thumbnail === 'text-overlay') continue
+    const assetId = resolveClipAssetId(clip, assets)
     if (!assetId || visualAssets.has(assetId)) continue
     const asset = assets.find((a) => a.id === assetId)
     const url = await loadMediaSource(assetId)
@@ -365,12 +380,14 @@ export async function renderSequence({
   const initialMedia = initialClips.filter((c) => c.text === undefined && c.thumbnail !== 'text-overlay')
   const initialText = initialClips.filter((c) => c.text !== undefined || c.thumbnail === 'text-overlay')
   for (const clip of [...initialMedia, ...initialText]) {
-    drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), 0, settings.width, settings.height)
+    const aId = resolveClipAssetId(clip, assets)
+    drawClipToCanvas(ctx, clip, aId ? visualAssets.get(aId) : undefined, 0, settings.width, settings.height)
   }
 
   // Start initial media videos playing
   for (const clip of initialMedia) {
-    const vid = visualAssets.get(clip.sourceAssetId ?? '')
+    const aId = resolveClipAssetId(clip, assets)
+    const vid = aId ? visualAssets.get(aId) : undefined
     if (vid instanceof HTMLVideoElement) {
       try { vid.currentTime = 0 } catch { /* ignore */ }
       void vid.play().catch(() => {})
@@ -387,7 +404,11 @@ export async function renderSequence({
   // Add audio track to stream if available
   if (audioBuffer && typeof AudioContext !== 'undefined') {
     try {
-      audioCtx = new AudioContext()
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      audioCtx = new AudioCtx()
+      if (audioCtx.state === 'suspended') {
+        void audioCtx.resume().catch(() => {})
+      }
       const dest = audioCtx.createMediaStreamDestination()
       sourceNode = audioCtx.createBufferSource()
       sourceNode.buffer = audioBuffer
@@ -443,7 +464,6 @@ export async function renderSequence({
         throw new Error('Exportación cancelada.')
       }
 
-      const frameStartTime = performance.now()
       const time = frame * frameInterval
 
       // Background fill (black for seamless presentation)
@@ -460,11 +480,11 @@ export async function renderSequence({
       // Synchronize video element playback/position for media clips
       for (const [assetId, element] of visualAssets) {
         if (element instanceof HTMLVideoElement) {
-          const activeClip = mediaClips.find((c) => c.sourceAssetId === assetId)
+          const activeClip = mediaClips.find((c) => resolveClipAssetId(c, assets) === assetId)
           if (activeClip) {
             const expectedSourceTime = Math.max(0, time - activeClip.start)
             if (!element.paused) {
-              if (Math.abs(element.currentTime - expectedSourceTime) > 0.6) {
+              if (Math.abs(element.currentTime - expectedSourceTime) > 0.8) {
                 try { element.currentTime = expectedSourceTime } catch { /* ignore */ }
               }
             } else {
@@ -494,7 +514,8 @@ export async function renderSequence({
       }
 
       for (const clip of [...mediaClips, ...textClips]) {
-        drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), time, settings.width, settings.height)
+        const aId = resolveClipAssetId(clip, assets)
+        drawClipToCanvas(ctx, clip, aId ? visualAssets.get(aId) : undefined, time, settings.width, settings.height)
       }
 
       // Force canvas capture frame if API is available
@@ -525,10 +546,14 @@ export async function renderSequence({
         message: `Renderizando cuadro ${frame + 1} de ${totalFrames}...`,
       })
 
-      // Dynamic pacing: ensure event loop yields without unnecessary delay
-      const computeTime = performance.now() - frameStartTime
-      const sleepMs = Math.max(1, Math.min(20, Math.round(targetFrameIntervalMs - computeTime)))
-      await new Promise((r) => setTimeout(r, sleepMs))
+      // Drift-free real-time pacing synchronized with wall clock, video playback and audio stream
+      const targetWallClockTime = renderStartTime + (frame + 1) * targetFrameIntervalMs
+      const remainingMs = targetWallClockTime - performance.now()
+      if (remainingMs > 0) {
+        await new Promise((r) => setTimeout(r, remainingMs))
+      } else {
+        await new Promise((r) => setTimeout(r, 0))
+      }
     }
 
     onProgress?.({ stage: 'encoding', percent: 99, currentFrame: totalFrames, totalFrames, message: 'Finalizando codificación de vídeo...' })
@@ -599,8 +624,10 @@ function drawClipToCanvas(
     }
   } else if (element instanceof HTMLVideoElement) {
     try {
-      ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
-      rendered = true
+      if (element.readyState >= 1) {
+        ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
+        rendered = true
+      }
     } catch {
       // Video frame draw failed
     }
