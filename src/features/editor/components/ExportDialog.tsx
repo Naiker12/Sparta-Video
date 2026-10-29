@@ -1,17 +1,23 @@
 import { Dialog } from '@base-ui/react/dialog'
+import { isTauri } from '@tauri-apps/api/core'
 import {
-  CheckCircle2,
+  Activity,
+  AlertTriangle,
+  AudioLines,
+  Check,
+  ChevronDown,
+  Clapperboard,
   Download,
-  Film,
+  Globe,
+  Laptop,
   LoaderCircle,
-  Music,
-  Radio,
-  Sliders,
-  Sparkles,
-  Tv,
+  MonitorPlay,
+  SlidersHorizontal,
+  Smartphone,
   X,
+  Zap,
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from '../../../components/ui/toast'
 import type { MediaItem, Track } from '../model'
 import type { ExportPresetId, ExportSettings, RenderProgress } from '../services/contracts'
@@ -69,6 +75,65 @@ export function ExportDialog({
       fileName: prev.fileName.replace(/\.[a-z0-9]+$/i, `.${p.format}`),
     }))
   }
+
+  const isDesktop = (() => {
+    try {
+      return typeof window !== 'undefined' && (isTauri() || '__TAURI_INTERNALS__' in window)
+    } catch {
+      return false
+    }
+  })()
+
+  // Prevent accidental tab closure or refresh while export is in progress
+  useEffect(() => {
+    if (!isExporting) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [isExporting])
+
+  // In Web mode: warn the user if they navigate away or put tab in background
+  useEffect(() => {
+    if (!isExporting || isDesktop) return
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        toast.warning(t('¡Pestaña en segundo plano!', 'Tab in background!'), {
+          id: 'tab-bg-warn',
+          description: t(
+            'Regresa a Sparta Video. Los navegadores web reducen los FPS de renderizado si sales de esta pestaña.',
+            'Return to Sparta Video. Web browsers throttle rendering FPS if you leave this tab.'
+          ),
+          duration: 9000,
+        })
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [isExporting, isDesktop])
+
+  // Screen Wake Lock API: prevent computer or display from sleeping during rendering
+  useEffect(() => {
+    if (!isExporting) return
+    let wakeLockSentinel: { release: () => Promise<void> } | null = null
+    if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
+      void (navigator as unknown as { wakeLock: { request: (type: string) => Promise<{ release: () => Promise<void> }> } })
+        .wakeLock.request('screen')
+        .then((lock) => {
+          wakeLockSentinel = lock
+        })
+        .catch(() => {
+          /* Wake Lock may be refused or unsupported */
+        })
+    }
+    return () => {
+      if (wakeLockSentinel) {
+        void wakeLockSentinel.release().catch(() => {})
+      }
+    }
+  }, [isExporting])
 
   const handleCancelExport = () => {
     if (abortControllerRef.current) {
@@ -145,13 +210,15 @@ export function ExportDialog({
     ((sequenceDuration * settings.bitrateMbps * 1_000_000) / 8),
   )
 
-  const presetIcons: Record<ExportPresetId, typeof Tv> = {
-    'web-1080p': Tv,
-    'social-vertical': Radio,
-    'uhd-4k': Film,
-    'fast-720p': Sparkles,
-    'audio-only': Music,
+  const presetIcons: Record<ExportPresetId, typeof MonitorPlay> = {
+    'web-1080p': MonitorPlay,
+    'social-vertical': Smartphone,
+    'uhd-4k': Clapperboard,
+    'fast-720p': Zap,
+    'audio-only': AudioLines,
   }
+
+  const baseFileName = settings.fileName.replace(/\.[^.]+$/, '')
 
   return (
     <Dialog.Root
@@ -200,6 +267,29 @@ export function ExportDialog({
 
           <form onSubmit={handleStartExport} className="export-form">
             <div className="export-body">
+              {/* Platform advisory badge: Web vs Desktop mode */}
+              <div className={`export-platform-advisory ${isDesktop ? 'is-desktop' : 'is-web'}`}>
+                <div className="export-advisory-icon">
+                  {isDesktop ? <Laptop size={14} aria-hidden="true" /> : <Globe size={14} aria-hidden="true" />}
+                </div>
+                <div className="export-advisory-copy">
+                  <span className="export-advisory-title">
+                    {isDesktop ? t('Modo Escritorio Activo', 'Desktop App Mode') : t('Modo Web (Navegador)', 'Web Browser Mode')}
+                  </span>
+                  <span className="export-advisory-desc">
+                    {isDesktop
+                      ? t(
+                          'Renderizado nativo acelerado. Puedes minimizar la app o cambiar de ventana; el proceso continuará a máxima velocidad sin límites de navegador.',
+                          'Accelerated native rendering. You can minimize the app or switch windows; export will continue at full speed without browser limits.'
+                        )
+                      : t(
+                          'Mantén esta pestaña activa en primer plano durante la exportación y descarga. Si sales de la pestaña, el navegador reducirá los FPS para ahorrar batería.',
+                          'Keep this tab active in the foreground while exporting and downloading. If you leave, the browser will throttle FPS to save energy.'
+                        )}
+                  </span>
+                </div>
+              </div>
+
               {/* Preset selection grid */}
               <div className="export-section">
                 <label className="export-section-label">
@@ -210,22 +300,27 @@ export function ExportDialog({
                     const item = EXPORT_PRESETS[id]
                     const Icon = presetIcons[id]
                     const isSelected = preset === id
+                    const isWide = id === 'audio-only'
                     return (
                       <button
                         type="button"
                         key={id}
                         role="radio"
                         aria-checked={isSelected}
-                        className={`export-preset-card ${isSelected ? 'selected' : ''}`}
+                        className={`export-preset-card ${isSelected ? 'selected' : ''} ${isWide ? 'is-wide' : ''}`}
                         onClick={() => handlePresetSelect(id)}
                         disabled={isExporting}
                       >
                         <div className="export-preset-header">
-                          <Icon size={18} className="export-preset-icon" />
-                          <span className="export-preset-title">{item.label}</span>
-                          {isSelected && <CheckCircle2 size={16} className="export-preset-check" />}
+                          <Icon size={16} className="export-preset-icon" aria-hidden="true" />
+                          <div className="export-preset-title-wrap">
+                            <span className="export-preset-title">{item.label}</span>
+                            <span className="export-preset-desc">{item.description}</span>
+                          </div>
+                          {isSelected && (
+                            <Check size={14} className="export-preset-check" strokeWidth={2.5} aria-hidden="true" />
+                          )}
                         </div>
-                        <span className="export-preset-desc">{item.description}</span>
                       </button>
                     )
                   })}
@@ -237,16 +332,23 @@ export function ExportDialog({
                 <label htmlFor="export-filename-input" className="export-section-label">
                   {t('Nombre del archivo de salida', 'Output filename')}
                 </label>
-                <input
-                  id="export-filename-input"
-                  className="export-input"
-                  value={settings.fileName}
-                  disabled={isExporting}
-                  onChange={(e) =>
-                    setSettings((prev) => ({ ...prev, fileName: e.target.value }))
-                  }
-                  required
-                />
+                <div className="export-filename-box">
+                  <input
+                    id="export-filename-input"
+                    className="export-input export-filename-input"
+                    value={baseFileName}
+                    disabled={isExporting}
+                    onChange={(e) => {
+                      const nextBase = e.target.value.trim()
+                      setSettings((prev) => ({
+                        ...prev,
+                        fileName: nextBase ? `${nextBase}.${prev.format}` : `video.${prev.format}`,
+                      }))
+                    }}
+                    required
+                  />
+                  <span className="export-filename-ext">.{settings.format}</span>
+                </div>
               </div>
 
               {/* Advanced settings toggle */}
@@ -257,12 +359,13 @@ export function ExportDialog({
                   onClick={() => setShowAdvanced((prev) => !prev)}
                   disabled={isExporting}
                 >
-                  <Sliders size={14} />
+                  <SlidersHorizontal size={13} />
                   <span>
                     {showAdvanced
                       ? t('Ocultar ajustes avanzados', 'Hide advanced settings')
                       : t('Mostrar ajustes avanzados (resolución, bitrate, fps)', 'Show advanced settings (resolution, bitrate, fps)')}
                   </span>
+                  <ChevronDown size={12} className={`export-chevron ${showAdvanced ? 'open' : ''}`} />
                 </button>
               </div>
 
@@ -362,13 +465,13 @@ export function ExportDialog({
                 <div className="export-summary-item">
                   <span className="export-summary-label">{t('Resolución', 'Resolution')}</span>
                   <span className="export-summary-value">
-                    {settings.width} × {settings.height} ({settings.frameRate} fps)
+                    {settings.width} × {settings.height} <span className="export-summary-sub">({settings.frameRate} fps)</span>
                   </span>
                 </div>
                 <div className="export-summary-item">
                   <span className="export-summary-label">{t('Formato', 'Format')}</span>
                   <span className="export-summary-value">
-                    {settings.format.toUpperCase()} ({settings.bitrateMbps} Mbps)
+                    {settings.format.toUpperCase()} <span className="export-summary-sub">({settings.bitrateMbps} Mbps)</span>
                   </span>
                 </div>
                 <div className="export-summary-item">
@@ -377,21 +480,51 @@ export function ExportDialog({
                 </div>
               </div>
 
-              {/* Live progress indicator when rendering */}
+              {/* Live personalized loading and progress indicator */}
               {isExporting && progress && (
                 <div className="export-progress-panel" role="region" aria-live="polite">
                   <div className="export-progress-header">
-                    <span className="export-progress-message">
-                      <LoaderCircle size={15} className="spin" aria-hidden="true" />
-                      {progress.message ?? t('Renderizando vídeo…', 'Rendering video…')}
-                    </span>
+                    <div className="export-progress-badges">
+                      <span className="export-stage-pill">
+                        {progress.stage === 'preparing'
+                          ? t('1/3 Preparando', '1/3 Preparing')
+                          : progress.stage === 'encoding'
+                          ? t('3/3 Descargando', '3/3 Downloading')
+                          : t('2/3 Renderizando', '2/3 Rendering')}
+                      </span>
+                      {typeof progress.fps === 'number' && progress.fps > 0 && progress.stage === 'rendering' && (
+                        <span className="export-fps-pill">
+                          <Activity size={10} aria-hidden="true" />
+                          {progress.fps} FPS
+                        </span>
+                      )}
+                      {progress.totalFrames > 0 && progress.stage === 'rendering' && (
+                        <span className="export-frames-pill">
+                          {progress.currentFrame}/{progress.totalFrames} f
+                        </span>
+                      )}
+                    </div>
                     <span className="export-progress-percent">{progress.percent}%</span>
                   </div>
+
                   <div className="export-progress-track">
                     <div
                       className="export-progress-bar"
                       style={{ width: `${progress.percent}%` }}
                     />
+                  </div>
+
+                  <div className="export-progress-footer">
+                    <span className="export-progress-message">
+                      <LoaderCircle size={13} className="spin" aria-hidden="true" />
+                      {progress.message ?? t('Procesando secuencia de vídeo…', 'Processing video sequence…')}
+                    </span>
+                    {!isDesktop && (
+                      <span className="export-web-alert">
+                        <AlertTriangle size={11} aria-hidden="true" />
+                        {t('Espera aquí la descarga', 'Wait here for download')}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -424,8 +557,8 @@ export function ExportDialog({
                   </>
                 ) : (
                   <>
-                    <Download size={15} />
-                    <span>{t('Comenzar exportación', 'Start export')}</span>
+                    <Download size={14} />
+                    <span>{t('Exportar vídeo', 'Export video')}</span>
                   </>
                 )}
               </button>

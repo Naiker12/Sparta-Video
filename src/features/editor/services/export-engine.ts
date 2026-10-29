@@ -2,6 +2,7 @@ import type { Clip, MediaItem, Track } from '../model'
 import type { ExportPresetId, ExportSettings, RenderProgress, RenderResult } from './contracts'
 import { loadMediaSource } from './media-storage'
 import { getInterpolatedOpacity, getInterpolatedTransform } from './keyframe-interpolation'
+import { drawAnimatedTextClipToCanvas } from './text-presets'
 
 export const EXPORT_PRESETS: Record<ExportPresetId, {
   label: string
@@ -233,9 +234,22 @@ export async function renderSequence({
     if (audioBuffer) {
       blob = audioBufferToWavBlob(audioBuffer)
     } else {
-      const ctx = new (window.OfflineAudioContext || (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext }).webkitOfflineAudioContext)(2, 48000, 48000)
-      const silentBuffer = ctx.createBuffer(2, 48000, 48000)
-      blob = audioBufferToWavBlob(silentBuffer)
+      const OfflineCtx = window.OfflineAudioContext || (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext }).webkitOfflineAudioContext
+      if (OfflineCtx) {
+        const ctx = new OfflineCtx(2, 48000, 48000)
+        const silentBuffer = ctx.createBuffer(2, 48000, 48000)
+        blob = audioBufferToWavBlob(silentBuffer)
+      } else {
+        const emptySamples = Math.max(1, Math.ceil(duration * 48000))
+        const dummyBuffer = {
+          numberOfChannels: 2,
+          sampleRate: 48000,
+          length: emptySamples,
+          duration,
+          getChannelData: () => new Float32Array(emptySamples),
+        } as unknown as AudioBuffer
+        blob = audioBufferToWavBlob(dummyBuffer)
+      }
     }
 
     onProgress?.({ stage: 'completed', percent: 100, currentFrame: totalFrames, totalFrames, message: 'Mezcla completada con éxito.' })
@@ -338,26 +352,55 @@ export async function renderSequence({
 
   // Draw frame by frame
   const frameInterval = 1 / settings.frameRate
+  const targetFrameIntervalMs = 1000 / settings.frameRate
+  const renderStartTime = performance.now()
+  let lastFpsSampleTime = renderStartTime
+  let framesSinceLastSample = 0
+  let measuredFps = settings.frameRate
+
+  const canvasTrack = canvasStream.getVideoTracks()[0] as unknown as { requestFrame?: () => void }
+
   for (let frame = 0; frame < totalFrames; frame++) {
     if (signal?.aborted) {
       recorder.stop()
       throw new Error('Exportación cancelada.')
     }
 
+    const frameStartTime = performance.now()
     const time = frame * frameInterval
 
     // Background fill
     ctx.fillStyle = '#0a0a0c'
     ctx.fillRect(0, 0, settings.width, settings.height)
 
-    // Render active video clips in layer order (bottom to top)
-    const activeVideoTracks = tracks.filter((t) => t.kind === 'video')
-    for (const track of activeVideoTracks) {
-      for (const clip of track.clips) {
-        if (time >= clip.start && time < clip.start + clip.duration) {
-          drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), time, settings.width, settings.height)
-        }
+    // Render active video clips in layer order (base video first, then text/subtitle overlays on top)
+    const activeVideoTracks = tracks.filter((t) => t.kind === 'video' && !mutedTracks.includes(t.id))
+    const activeClips = activeVideoTracks.flatMap((track) =>
+      track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+    )
+    const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
+    const textClips = activeClips.filter((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay')
+
+    for (const clip of [...mediaClips, ...textClips]) {
+      drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), time, settings.width, settings.height)
+    }
+
+    // Force canvas capture frame if API is available
+    if (typeof canvasTrack?.requestFrame === 'function') {
+      try {
+        canvasTrack.requestFrame()
+      } catch {
+        /* fallback to stream automatic sampling */
       }
+    }
+
+    framesSinceLastSample++
+    const now = performance.now()
+    const elapsedSinceSample = now - lastFpsSampleTime
+    if (elapsedSinceSample >= 400 && framesSinceLastSample > 0) {
+      measuredFps = Math.round((framesSinceLastSample / (elapsedSinceSample / 1000)) * 10) / 10
+      lastFpsSampleTime = now
+      framesSinceLastSample = 0
     }
 
     const percent = Math.min(98, Math.round((frame / totalFrames) * 90) + 10)
@@ -366,11 +409,14 @@ export async function renderSequence({
       percent,
       currentFrame: frame + 1,
       totalFrames,
+      fps: measuredFps,
       message: `Renderizando cuadro ${frame + 1} de ${totalFrames}...`,
     })
 
-    // Yield to event loop to allow video frame capture
-    await new Promise((r) => setTimeout(r, 16))
+    // Dynamic pacing: ensure event loop yields without unnecessary delay
+    const computeTime = performance.now() - frameStartTime
+    const sleepMs = Math.max(1, Math.min(16, Math.round(targetFrameIntervalMs - computeTime)))
+    await new Promise((r) => setTimeout(r, sleepMs))
   }
 
   onProgress?.({ stage: 'encoding', percent: 99, currentFrame: totalFrames, totalFrames, message: 'Finalizando codificación de vídeo...' })
@@ -395,6 +441,11 @@ function drawClipToCanvas(
   canvasWidth: number,
   canvasHeight: number,
 ) {
+  if (clip.text !== undefined || clip.thumbnail === 'text-overlay') {
+    drawAnimatedTextClipToCanvas(ctx, clip, time, canvasWidth, canvasHeight)
+    return
+  }
+
   ctx.save()
 
   const opacity = getInterpolatedOpacity(clip, time) / 100

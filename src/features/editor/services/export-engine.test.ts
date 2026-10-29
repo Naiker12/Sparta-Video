@@ -83,4 +83,33 @@ describe('export engine', () => {
       }),
     ).rejects.toThrow(/cancelada/i)
   })
+
+  it('reports progress stages correctly for audio-only export', async () => {
+    const progressReports: Array<{ stage: string; percent: number }> = []
+    const settings: ExportSettings = {
+      preset: 'audio-only',
+      format: 'wav',
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrateMbps: 1.5,
+      fileName: 'master_mix.wav',
+      range: 'entire',
+    }
+
+    const result = await renderSequence({
+      tracks: [],
+      assets: [],
+      sequenceDuration: 0.5,
+      settings,
+      onProgress: (p) => {
+        progressReports.push({ stage: p.stage, percent: p.percent })
+      },
+    })
+
+    expect(result.fileName).toBe('master_mix.wav')
+    expect(result.sizeBytes).toBeGreaterThan(0)
+    expect(progressReports.length).toBeGreaterThan(0)
+    expect(progressReports.some((p) => p.stage === 'completed' && p.percent === 100)).toBe(true)
+  })
 })

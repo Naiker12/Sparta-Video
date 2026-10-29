@@ -1,7 +1,23 @@
 import { create } from 'zustand'
 import { persist, type PersistStorage } from 'zustand/middleware'
 import type { Clip, MediaItem, SequenceSettings, TimelineMarker, Track } from './model'
-import { getMediaTypeFromName } from './services/media-storage'
+import { getMediaTypeFromName, parseDurationFromDetail } from './services/media-storage'
+import { getDefaultTextAnimation, getDefaultTextStyle, getTextPreset, TEXT_STYLE_PRESETS } from './services/text-presets'
+
+export type AddTextClipOptions = {
+  text?: string
+  presetId?: string
+  at?: number
+  duration?: number
+  trackId?: string
+}
+
+export type SubtitleEntryInput = {
+  text: string
+  start: number
+  duration: number
+  presetId?: string
+}
 
 export type ProjectSnapshot = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks' | 'selectedClipId' | 'selectedMediaId'>
 export type EditorState = {
@@ -13,10 +29,18 @@ export type EditorState = {
   setActiveTool: (tool: 'select' | 'razor') => void
   selectClip: (id: string) => void; selectMedia: (id: string) => void; setPlayhead: (time: number) => void
   setZoom: (zoom: number) => void; setPlaying: (playing: boolean) => void; addAssets: (assets: MediaItem[]) => void
-  updateAsset: (assetId: string, changes: Partial<Pick<MediaItem, 'title' | 'type' | 'detail' | 'thumb' | 'status'>>) => void; removeAsset: (assetId: string) => void
-  addMedia: (asset: MediaItem, at?: number, trackId?: string) => string; updateClip: (clipId: string, changes: Partial<Clip>) => void
+  updateAsset: (assetId: string, changes: Partial<Pick<MediaItem, 'title' | 'type' | 'detail' | 'thumb' | 'status' | 'durationSeconds'>>) => void; removeAsset: (assetId: string) => void
+  addMedia: (asset: MediaItem, at?: number, trackId?: string) => string
+  addTextClip: (options?: AddTextClipOptions) => string
+  addSubtitleSequence: (entries: SubtitleEntryInput[], options?: { replaceExisting?: boolean }) => number
+  applyPresetToAllSubtitles: (presetId: string) => number
+  calibrateAllSubtitles: (sourceClipId: string) => number
+  nudgeAllSubtitlesTime: (deltaSeconds: number) => number
+  autoGenerateSubtitles: (presetId?: string, customScript?: string) => number
+  updateClip: (clipId: string, changes: Partial<Clip>) => void
   moveClip: (clipId: string, start: number, duration?: number) => void; moveClipToNewTrack: (clipId: string) => void; splitClip: (clipId: string, time: number) => void
-  deleteClip: (clipId: string) => void; addMarker: (time: number, label?: string) => void; removeMarker: (markerId: string) => void; toggleSnap: () => void; addTrack: (kind: 'video' | 'audio') => void
+  deleteClip: (clipId: string) => void; duplicateClip: (clipId: string) => string; ripplePackTrack: (trackId?: string) => number; autoAudioBalance: () => number; autoSceneMarkers: () => number
+  addMarker: (time: number, label?: string) => void; removeMarker: (markerId: string) => void; toggleSnap: () => void; addTrack: (kind: 'video' | 'audio') => void
   toggleMute: (id: string) => void; toggleLock: (id: string) => void; undo: () => void; redo: () => void
   loadProject: (project: PersistedProjectState) => void; resetProject: () => void
 }
@@ -26,7 +50,16 @@ let nextClip = 10
 let nextMarker = 1
 let lastHistoryGroup: string | null = null
 let lastHistoryGroupAt = 0
-const copyTracks = (tracks: Track[]) => tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => ({ ...clip, transform: clip.transform ? { ...clip.transform } : undefined, keyframes: clip.keyframes?.map((keyframe) => ({ ...keyframe })) })) }))
+const copyTracks = (tracks: Track[]): Track[] => tracks.map((track) => ({
+  ...track,
+  clips: track.clips.map((clip) => ({
+    ...clip,
+    transform: clip.transform ? { ...clip.transform } : undefined,
+    keyframes: clip.keyframes?.map((keyframe) => ({ ...keyframe })),
+    textStyle: clip.textStyle ? { ...clip.textStyle } : undefined,
+    textAnimation: clip.textAnimation ? { ...clip.textAnimation } : undefined,
+  })),
+}))
 const copyMarkers = (markers: TimelineMarker[]) => markers.map((marker) => ({ ...marker }))
 const copySnapshot = (state: ProjectSnapshot): ProjectSnapshot => ({ ...state, sequence: { ...state.sequence }, tracks: copyTracks(state.tracks), assets: state.assets.map((asset) => ({ ...asset })), markers: copyMarkers(state.markers), mutedTracks: [...state.mutedTracks], lockedTracks: [...state.lockedTracks] })
 const snapshot = (state: EditorState): ProjectSnapshot => copySnapshot(state)
@@ -125,7 +158,7 @@ const projectStorage: PersistStorage<PersistedProjectState> = {
   removeItem(name) { try { localStorage.removeItem(name); lastStoredProject = null; publishSaveStatus('unsaved') } catch { publishSaveStatus('error') } },
 }
 
-export const useEditorStore = create<EditorState>()(persist((set) => ({
+export const useEditorStore = create<EditorState>()(persist((set, get) => ({
   projectName: 'Sin título', sequence: { width: 1920, height: 1080, frameRate: 24 },
   tracks: emptyTracks(), assets: [], markers: [], selectedClipId: '', selectedMediaId: null,
   playhead: 0, zoom: 1, playing: false, snapToFrames: true, activeTool: 'select', mutedTracks: [], lockedTracks: [], past: [], future: [],
@@ -146,9 +179,30 @@ export const useEditorStore = create<EditorState>()(persist((set) => ({
     const current = state.assets.find((asset) => asset.id === assetId)
     if (!current || Object.entries(changes).every(([key, value]) => current[key as keyof MediaItem] === value)) return state
     const assets = state.assets.map((asset) => asset.id === assetId ? { ...asset, ...changes } : asset)
-    const tracks = changes.title ? copyTracks(state.tracks).map((track) => ({
+    const fps = state.sequence.frameRate
+    const nextDuration =
+      changes.durationSeconds && changes.durationSeconds > 0
+        ? (state.snapToFrames ? Math.round(changes.durationSeconds * fps) / fps : changes.durationSeconds)
+        : null
+    const shouldUpdateTracks = Boolean(changes.title || nextDuration)
+    const tracks = shouldUpdateTracks ? copyTracks(state.tracks).map((track) => ({
       ...track,
-      clips: track.clips.map((clip) => clip.sourceAssetId === assetId ? { ...clip, title: changes.title! } : clip),
+      clips: track.clips.map((clip) => {
+        if (clip.sourceAssetId !== assetId) return clip
+        const updatedClip: Clip = { ...clip }
+        if (changes.title) updatedClip.title = changes.title
+        if (
+          nextDuration &&
+          nextDuration > 0 &&
+          (Math.abs(clip.duration - 6) < 0.08 || Math.abs(clip.duration - 12) < 0.08)
+        ) {
+          updatedClip.duration = nextDuration
+          if (clip.start > 0 && clip.start <= 0.16 && track.clips.length === 1) {
+            updatedClip.start = 0
+          }
+        }
+        return updatedClip
+      }),
     })) : state.tracks
     return commit(state, { assets, tracks })
   }),
@@ -169,20 +223,317 @@ export const useEditorStore = create<EditorState>()(persist((set) => ({
       const requested = trackId ? state.tracks.find((track) => track.id === trackId) : undefined
       const target = requested?.kind === kind && !state.lockedTracks.includes(requested.id) ? requested : trackId ? undefined : state.tracks.find((track) => track.kind === kind && !state.lockedTracks.includes(track.id))
       if (!target) return state
+      const latestAsset = state.assets.find((item) => item.id === asset.id) ?? asset
+      const resolvedDuration =
+        latestAsset.durationSeconds ??
+        parseDurationFromDetail(latestAsset.detail) ??
+        (kind === 'audio' ? 12 : 6)
+      const fps = state.sequence.frameRate
+      const duration = Math.max(
+        1 / fps,
+        state.snapToFrames ? Math.round(resolvedDuration * fps) / fps : resolvedDuration,
+      )
       clipId = `c${nextClip++}`
       while (state.tracks.some((track) => track.clips.some((item) => item.id === clipId))) clipId = `c${nextClip++}`
-      const clip: Clip = { id: clipId, title: asset.title, sourceAssetId: asset.id, start: 0, duration: kind === 'audio' ? 12 : 6, color: asset.thumb === 'cliff' ? 'olive' : asset.thumb === 'harbor' ? 'blue' : 'sand', thumbnail: asset.thumb, kind, transform: { x: state.sequence.width / 2, y: state.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }, uniformScale: true, opacity: 100, blendMode: 'normal', volume: 100, fadeIn: 0, fadeOut: 0, keyframes: [] }
-      const rawStart = at ?? target.clips.reduce((end, item) => Math.max(end, item.start + item.duration), 0) + 0.15
-      const start = state.snapToFrames ? Math.round(rawStart * state.sequence.frameRate) / state.sequence.frameRate : rawStart
+      const clip: Clip = { id: clipId, title: latestAsset.title, sourceAssetId: latestAsset.id, start: 0, duration, color: latestAsset.thumb === 'cliff' ? 'olive' : latestAsset.thumb === 'harbor' ? 'blue' : 'sand', thumbnail: latestAsset.thumb, kind, transform: { x: state.sequence.width / 2, y: state.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }, uniformScale: true, opacity: 100, blendMode: 'normal', volume: 100, fadeIn: 0, fadeOut: 0, keyframes: [] }
+      const rawStart = at ?? (target.clips.length === 0 ? 0 : target.clips.reduce((end, item) => Math.max(end, item.start + item.duration), 0))
+      const start = state.snapToFrames ? Math.round(rawStart * fps) / fps : rawStart
       const tracks = copyTracks(state.tracks).map((track) => track.id === target.id ? { ...track, clips: [...track.clips, { ...clip, start }] } : track)
       return { ...commit(state, { tracks }), selectedClipId: clip.id, selectedMediaId: null }
     })
     return clipId
   },
+  addTextClip: (options) => {
+    let clipId = ''
+    set((state) => {
+      const preset = getTextPreset(options?.presetId)
+      const text = (options?.text ?? preset.sampleText).trim() || preset.sampleText
+      const duration = Math.max(0.5, options?.duration ?? preset.defaultDuration)
+      const fps = state.sequence.frameRate
+      const rawStart = options?.at ?? state.playhead ?? 0
+      const start = state.snapToFrames ? Math.round(Math.max(0, rawStart) * fps) / fps : Math.max(0, rawStart)
+
+      let tracks = copyTracks(state.tracks)
+      let target: Track | undefined
+      if (options?.trackId) {
+        const req = tracks.find((t) => t.id === options.trackId)
+        if (req && req.kind === 'video' && !state.lockedTracks.includes(req.id)) target = req
+      }
+      if (!target) {
+        // Prefer an existing unlocked video track that doesn't overlap at [start, start+duration], or a dedicated text track
+        target = tracks.find(
+          (t) =>
+            t.kind === 'video' &&
+            !state.lockedTracks.includes(t.id) &&
+            !t.clips.some((c) => start < c.start + c.duration && start + duration > c.start),
+        )
+      }
+      if (!target) {
+        // Create a dedicated overlay video track for titles/captions
+        let num = tracks.filter((t) => t.kind === 'video').length + 1
+        while (tracks.some((t) => t.id === `v${num}`)) num += 1
+        const newTrack: Track = { id: `v${num}`, name: `Texto ${String(num).padStart(2, '0')}`, kind: 'video', clips: [] }
+        tracks = [...tracks, newTrack]
+        target = newTrack
+      }
+
+      clipId = `c${nextClip++}`
+      while (tracks.some((track) => track.clips.some((item) => item.id === clipId))) clipId = `c${nextClip++}`
+
+      const shortTitle = text.length > 26 ? `${text.slice(0, 26)}…` : text
+      const clip: Clip = {
+        id: clipId,
+        title: shortTitle,
+        text,
+        textStyle: getDefaultTextStyle(preset.id),
+        textAnimation: getDefaultTextAnimation(preset.id),
+        start,
+        duration,
+        color: 'violet',
+        thumbnail: 'text-overlay',
+        kind: 'video',
+        transform: { x: state.sequence.width / 2, y: state.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 },
+        uniformScale: true,
+        opacity: 100,
+        blendMode: 'normal',
+        volume: 100,
+        fadeIn: 0,
+        fadeOut: 0,
+        keyframes: [],
+      }
+
+      tracks = tracks.map((track) => (track.id === target!.id ? { ...track, clips: [...track.clips, clip] } : track))
+      return { ...commit(state, { tracks }), selectedClipId: clip.id, selectedMediaId: null }
+    })
+    return clipId
+  },
+  addSubtitleSequence: (entries, options) => {
+    let added = 0
+    if (!entries.length) return 0
+    set((state) => {
+      const fps = state.sequence.frameRate
+      let tracks = copyTracks(state.tracks)
+      // Find or create a dedicated Subtitles track (like CapCut Pro's Captions lane)
+      let subTrack = tracks.find(
+        (t) =>
+          t.kind === 'video' &&
+          !state.lockedTracks.includes(t.id) &&
+          t.name.toLowerCase().includes('sub'),
+      )
+      if (!subTrack) {
+        let num = tracks.filter((t) => t.kind === 'video').length + 1
+        while (tracks.some((t) => t.id === `v${num}`)) num += 1
+        subTrack = { id: `v${num}`, name: 'Subtítulos IA', kind: 'video', clips: [] }
+        tracks = [...tracks, subTrack]
+      }
+
+      const newClips: Clip[] = []
+      let lastId = ''
+      for (const entry of entries) {
+        const cleanText = entry.text.trim()
+        if (!cleanText) continue
+        const preset = getTextPreset(entry.presetId ?? 'hormozi-karaoke')
+        const start = state.snapToFrames ? Math.round(Math.max(0, entry.start) * fps) / fps : Math.max(0, entry.start)
+        const duration = Math.max(0.4, state.snapToFrames ? Math.round(entry.duration * fps) / fps : entry.duration)
+        let id = `c${nextClip++}`
+        while (tracks.some((t) => t.clips.some((c) => c.id === id)) || newClips.some((c) => c.id === id)) id = `c${nextClip++}`
+        lastId = id
+        added += 1
+        newClips.push({
+          id,
+          title: cleanText.length > 26 ? `${cleanText.slice(0, 26)}…` : cleanText,
+          text: cleanText,
+          textStyle: getDefaultTextStyle(preset.id),
+          textAnimation: getDefaultTextAnimation(preset.id),
+          start,
+          duration,
+          color: 'violet',
+          thumbnail: 'text-overlay',
+          kind: 'video',
+          transform: { x: state.sequence.width / 2, y: state.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 },
+          uniformScale: true,
+          opacity: 100,
+          blendMode: 'normal',
+          volume: 100,
+          fadeIn: 0,
+          fadeOut: 0,
+          keyframes: [],
+        })
+      }
+      if (!newClips.length) return state
+      const sampleTexts = new Set(TEXT_STYLE_PRESETS.map((p) => p.sampleText.toUpperCase()))
+      tracks = tracks
+        .map((t) => {
+          if (t.id === subTrack!.id) {
+            return { ...t, clips: options?.replaceExisting ? newClips : [...t.clips, ...newClips] }
+          }
+          if (options?.replaceExisting) {
+            // Also clean up any single sample placeholder text clips on auxiliary text tracks
+            return {
+              ...t,
+              clips: t.clips.filter(
+                (c) => !(c.text && sampleTexts.has(c.text.trim().toUpperCase())),
+              ),
+            }
+          }
+          return t
+        })
+        .filter((t) => t.id === 'v1' || t.id === 'a1' || t.id === subTrack!.id || t.clips.length > 0)
+      return { ...commit(state, { tracks }), selectedClipId: lastId || state.selectedClipId, selectedMediaId: null }
+    })
+    return added
+  },
+  applyPresetToAllSubtitles: (presetId) => {
+    let updated = 0
+    set((state) => {
+      const preset = getTextPreset(presetId)
+      const nextStyle = getDefaultTextStyle(preset.id)
+      const nextAnim = getDefaultTextAnimation(preset.id)
+      const tracks = copyTracks(state.tracks).map((track) => {
+        if (state.lockedTracks.includes(track.id)) return track
+        const isSubOrTextTrack =
+          track.name.toLowerCase().includes('sub') || track.name.toLowerCase().includes('texto')
+        if (!isSubOrTextTrack && !track.clips.some((c) => c.text !== undefined)) return track
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            if (clip.text === undefined && clip.thumbnail !== 'text-overlay') return clip
+            updated += 1
+            return {
+              ...clip,
+              textStyle: { ...nextStyle, positionY: clip.textStyle?.positionY ?? nextStyle.positionY },
+              textAnimation: { ...nextAnim },
+            }
+          }),
+        }
+      })
+      return updated > 0 ? commit(state, { tracks }) : state
+    })
+    return updated
+  },
+  calibrateAllSubtitles: (sourceClipId) => {
+    let updated = 0
+    set((state) => {
+      const sourceClip = state.tracks.flatMap((t) => t.clips).find((c) => c.id === sourceClipId)
+      if (!sourceClip || (sourceClip.text === undefined && sourceClip.thumbnail !== 'text-overlay')) {
+        return state
+      }
+      const tracks = copyTracks(state.tracks).map((track) => {
+        if (state.lockedTracks.includes(track.id)) return track
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            if (clip.text === undefined && clip.thumbnail !== 'text-overlay') return clip
+            updated += 1
+            return {
+              ...clip,
+              opacity: sourceClip.opacity ?? clip.opacity,
+              transform: sourceClip.transform ? { ...sourceClip.transform } : clip.transform,
+              textStyle: sourceClip.textStyle ? { ...sourceClip.textStyle } : clip.textStyle,
+              textAnimation: sourceClip.textAnimation ? { ...sourceClip.textAnimation } : clip.textAnimation,
+            }
+          }),
+        }
+      })
+      return updated > 0 ? commit(state, { tracks }) : state
+    })
+    return updated
+  },
+  nudgeAllSubtitlesTime: (deltaSeconds) => {
+    let updated = 0
+    if (!Number.isFinite(deltaSeconds) || Math.abs(deltaSeconds) < 0.001) return 0
+    set((state) => {
+      const fps = state.sequence.frameRate
+      const tracks = copyTracks(state.tracks).map((track) => {
+        if (state.lockedTracks.includes(track.id)) return track
+        return {
+          ...track,
+          clips: track.clips.map((clip) => {
+            if (clip.text === undefined && clip.thumbnail !== 'text-overlay') return clip
+            updated += 1
+            const rawStart = Math.max(0, clip.start + deltaSeconds)
+            const nextStart = state.snapToFrames ? Math.round(rawStart * fps) / fps : Math.round(rawStart * 100) / 100
+            return {
+              ...clip,
+              start: nextStart,
+            }
+          }),
+        }
+      })
+      return updated > 0 ? commit(state, { tracks }) : state
+    })
+    return updated
+  },
+  autoGenerateSubtitles: (presetId = 'hormozi-karaoke', customScript) => {
+    const state = get()
+    const mediaClips = state.tracks
+      .flatMap((t) => t.clips.filter((c) => c.text === undefined && c.thumbnail !== 'text-overlay'))
+      .sort((a, b) => a.start - b.start)
+    const totalSeqDuration = Math.max(
+      9,
+      ...mediaClips.map((c) => c.start + c.duration),
+    )
+    if (customScript?.trim()) {
+      const lines = customScript
+        .split(/\r?\n|(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const sliceDur = Math.max(1.8, Math.min(3.4, totalSeqDuration / Math.max(1, lines.length)))
+      const entries: SubtitleEntryInput[] = lines.map((line, idx) => ({
+        text: line,
+        start: Math.round(idx * sliceDur * 100) / 100,
+        duration: Math.round((sliceDur - 0.08) * 100) / 100,
+        presetId,
+      }))
+      return get().addSubtitleSequence(entries, { replaceExisting: true })
+    }
+
+    const primaryTitle = (mediaClips[0]?.title || state.projectName || 'Secuencia')
+      .replace(/\.[a-z0-9]{2,4}$/i, '')
+      .replace(/[_-]+/g, ' ')
+      .trim()
+    const segmentStep = 2.6
+    const segmentCount = Math.max(4, Math.round(totalSeqDuration / segmentStep))
+    const actualStep = totalSeqDuration / segmentCount
+    const defaultPool = [
+      primaryTitle.toUpperCase(),
+      'Cada plano construye el pulso narrativo de la escena',
+      'El sonido marca la entrada de cada transición visual',
+      'La atmósfera se desarrolla siguiendo la cadencia de la voz',
+      'Observa cómo cambia la tensión en este punto del relato',
+      'Un corte limpio mantiene la atención en el mensaje central',
+      'La progresión visual acompaña el ritmo de la locución',
+      'Cada pausa en el audio respira antes de la siguiente idea',
+    ]
+    const entries: SubtitleEntryInput[] = Array.from({ length: segmentCount }, (_, idx) => ({
+      text: defaultPool[idx % defaultPool.length],
+      start: Math.round(idx * actualStep * 100) / 100,
+      duration: Math.round(Math.max(0.8, actualStep - 0.08) * 100) / 100,
+      presetId,
+    }))
+    return get().addSubtitleSequence(entries, { replaceExisting: true })
+  },
   updateClip: (clipId, changes) => set((state) => {
     const owner = state.tracks.find((track) => track.clips.some((clip) => clip.id === clipId))
     if (!owner || state.lockedTracks.includes(owner.id)) return state
-    const tracks = copyTracks(state.tracks).map((track) => ({ ...track, clips: track.clips.map((clip) => clip.id === clipId ? { ...clip, ...changes, transform: changes.transform ? { ...changes.transform } : clip.transform } : clip) }))
+    const tracks = copyTracks(state.tracks).map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => {
+        if (clip.id !== clipId) return clip
+        const nextTitle =
+          changes.text !== undefined && changes.title === undefined
+            ? changes.text.trim().slice(0, 26) || clip.title
+            : (changes.title ?? clip.title)
+        return {
+          ...clip,
+          ...changes,
+          title: nextTitle,
+          transform: changes.transform ? { ...changes.transform } : clip.transform,
+          textStyle: changes.textStyle ? { ...changes.textStyle } : clip.textStyle,
+          textAnimation: changes.textAnimation ? { ...changes.textAnimation } : clip.textAnimation,
+        }
+      }),
+    }))
     return JSON.stringify(tracks) === JSON.stringify(state.tracks) ? state : commit(state, { tracks }, `clip:${clipId}:${Object.keys(changes).sort().join(',')}`)
   }),
   moveClip: (clipId, start, duration) => set((state) => {
@@ -222,6 +573,105 @@ export const useEditorStore = create<EditorState>()(persist((set) => ({
     const tracks = copyTracks(state.tracks).map((track) => ({ ...track, clips: track.clips.filter((clip) => clip.id !== clipId) }))
     return JSON.stringify(tracks) === JSON.stringify(state.tracks) ? state : { ...commit(state, { tracks }), selectedClipId: state.selectedClipId === clipId ? '' : state.selectedClipId }
   }),
+  duplicateClip: (clipId) => {
+    let duplicatedId = ''
+    set((state) => {
+      const owner = state.tracks.find((track) => track.clips.some((clip) => clip.id === clipId))
+      const sourceClip = owner?.clips.find((clip) => clip.id === clipId)
+      if (!owner || !sourceClip || state.lockedTracks.includes(owner.id)) return state
+      let newId = `c${nextClip++}`
+      while (state.tracks.some((track) => track.clips.some((item) => item.id === newId))) newId = `c${nextClip++}`
+      duplicatedId = newId
+      const rawStart = sourceClip.start + sourceClip.duration
+      const start = state.snapToFrames ? Math.round(rawStart * state.sequence.frameRate) / state.sequence.frameRate : rawStart
+      const shift = start - sourceClip.start
+      const copy: Clip = {
+        ...sourceClip,
+        id: newId,
+        start,
+        transform: sourceClip.transform ? { ...sourceClip.transform } : undefined,
+        textStyle: sourceClip.textStyle ? { ...sourceClip.textStyle } : undefined,
+        textAnimation: sourceClip.textAnimation ? { ...sourceClip.textAnimation } : undefined,
+        keyframes: sourceClip.keyframes?.map((kf) => ({ ...kf, time: Math.round((kf.time + shift) * 1000) / 1000 })),
+      }
+      const tracks = copyTracks(state.tracks).map((track) => track.id === owner.id ? { ...track, clips: [...track.clips, copy] } : track)
+      return { ...commit(state, { tracks }), selectedClipId: newId }
+    })
+    return duplicatedId
+  },
+  ripplePackTrack: (trackId) => {
+    let movedCount = 0
+    set((state) => {
+      const fps = state.sequence.frameRate
+      const tracks = copyTracks(state.tracks).map((track) => {
+        if (state.lockedTracks.includes(track.id)) return track
+        if (trackId && track.id !== trackId) return track
+        if (!track.clips.length) return track
+        let cursor = 0
+        const sorted = [...track.clips].sort((a, b) => a.start - b.start)
+        const packed = sorted.map((clip) => {
+          const nextStart = state.snapToFrames ? Math.round(cursor * fps) / fps : cursor
+          const delta = nextStart - clip.start
+          if (Math.abs(delta) > 0.001) movedCount += 1
+          cursor = nextStart + clip.duration
+          return {
+            ...clip,
+            start: nextStart,
+            keyframes: clip.keyframes?.map((kf) => ({ ...kf, time: Math.max(0, Math.round((kf.time + delta) * 1000) / 1000) })),
+          }
+        })
+        return { ...track, clips: packed }
+      })
+      return movedCount > 0 ? commit(state, { tracks }) : state
+    })
+    return movedCount
+  },
+  autoAudioBalance: () => {
+    let updatedCount = 0
+    set((state) => {
+      const audioTracks = state.tracks.filter((t) => t.kind === 'audio')
+      const tracks = copyTracks(state.tracks).map((track) => {
+        if (state.lockedTracks.includes(track.id) || !track.clips.length) return track
+        const isSecondaryAudio = track.kind === 'audio' && audioTracks.findIndex((t) => t.id === track.id) > 0
+        const targetVol = track.kind === 'audio' ? (isSecondaryAudio ? 68 : 96) : 100
+        const clips = track.clips.map((clip) => {
+          const fade = Math.min(0.4, Math.max(0.1, Math.round(clip.duration * 0.12 * 10) / 10))
+          if (clip.volume === targetVol && clip.fadeIn === fade && clip.fadeOut === fade) return clip
+          updatedCount += 1
+          return { ...clip, volume: targetVol, fadeIn: fade, fadeOut: fade }
+        })
+        return { ...track, clips }
+      })
+      return updatedCount > 0 ? commit(state, { tracks }) : state
+    })
+    return updatedCount
+  },
+  autoSceneMarkers: () => {
+    let addedCount = 0
+    set((state) => {
+      const fps = state.sequence.frameRate
+      const cutTimes = new Set<number>()
+      for (const track of state.tracks) {
+        if (track.kind !== 'video') continue
+        for (const clip of track.clips) {
+          const start = state.snapToFrames ? Math.round(clip.start * fps) / fps : clip.start
+          cutTimes.add(Math.round(start * 100) / 100)
+        }
+      }
+      const existingTimes = new Set(state.markers.map((m) => Math.round(m.time * 100) / 100))
+      const sortedCuts = [...cutTimes].sort((a, b) => a - b).filter((time) => !existingTimes.has(time))
+      if (!sortedCuts.length) return state
+      const newMarkers: TimelineMarker[] = sortedCuts.map((time, idx) => {
+        let number = nextMarker++
+        while (state.markers.some((item) => item.id === `m${number}`) || idx < 0) number = nextMarker++
+        const label = time === 0 ? 'Inicio' : `Escena ${String(idx + 1).padStart(2, '0')}`
+        addedCount += 1
+        return { id: `m${number}`, time, label }
+      })
+      return commit(state, { markers: [...state.markers, ...newMarkers] })
+    })
+    return addedCount
+  },
   addMarker: (time, customLabel) => set((state) => {
     let number = nextMarker++
     while (state.markers.some((item) => item.id === `m${number}`)) number = nextMarker++

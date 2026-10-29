@@ -21,9 +21,15 @@ button, input, textarea, select {
   font: inherit;
 }
 
-:focus-visible {
+:where(button, [role="button"], a, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
 }
 
 ::selection {
@@ -99,7 +105,8 @@ button, input, textarea, select {
   content: "";
   animation: preferences-pill-in 180ms cubic-bezier(.2, .8, .2, 1) both;
 }
-.preferences-sidebar input:focus-visible { border-color: rgba(255, 255, 255, .24); background: rgba(255, 255, 255, .08); }
+.preferences-sidebar input:focus-visible { outline: none !important; border-color: rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .07); box-shadow: 0 0 0 2px rgba(59, 130, 246, .2); }
+.preferences-nav button:focus-visible { outline: none !important; box-shadow: 0 0 0 1px rgba(255, 255, 255, .25); }
 .preferences-main button, .preferences-sidebar button, .preferences-window input {
   transition-duration: 160ms;
 }

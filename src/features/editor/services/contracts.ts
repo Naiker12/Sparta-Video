@@ -39,6 +39,7 @@ export interface RenderProgress {
   percent: number
   currentFrame: number
   totalFrames: number
+  fps?: number
   message?: string
 }
 

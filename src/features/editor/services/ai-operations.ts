@@ -37,6 +37,60 @@ export const aiOperationSchema = z.discriminatedUnion('type', [
     type: z.literal('add_track'),
     kind: z.enum(['video', 'audio']),
   }),
+  z.object({
+    type: z.literal('set_clip_fades'),
+    clipId: z.string(),
+    fadeIn: z.number().min(0).max(10).optional(),
+    fadeOut: z.number().min(0).max(10).optional(),
+  }),
+  z.object({
+    type: z.literal('set_clip_transform'),
+    clipId: z.string(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    scaleX: z.number().min(5).max(500).optional(),
+    scaleY: z.number().min(5).max(500).optional(),
+    rotation: z.number().min(-360).max(360).optional(),
+  }),
+  z.object({
+    type: z.literal('set_clip_blend'),
+    clipId: z.string(),
+    blendMode: z.enum(['normal', 'multiply', 'screen', 'overlay']),
+  }),
+  z.object({
+    type: z.literal('duplicate_clip'),
+    clipId: z.string(),
+  }),
+  z.object({
+    type: z.literal('pack_clips'),
+    trackId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('set_sequence'),
+    width: z.number().int().min(128).max(7680),
+    height: z.number().int().min(128).max(7680),
+    frameRate: z.number().int().min(12).max(120),
+  }),
+  z.object({
+    type: z.literal('add_text_clip'),
+    text: z.string().min(1),
+    start: z.number().nonnegative(),
+    duration: z.number().positive().optional(),
+    presetId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('generate_subtitles'),
+    presetId: z.string().optional(),
+    entries: z
+      .array(
+        z.object({
+          text: z.string().min(1),
+          start: z.number().nonnegative(),
+          duration: z.number().positive(),
+        }),
+      )
+      .min(1),
+  }),
 ])
 
 export type AIOperation = z.infer<typeof aiOperationSchema>
@@ -152,6 +206,88 @@ export function applyAIOperations(operations: AIOperation[]): { applied: number;
           applied += 1
           break
         }
+        case 'set_clip_fades': {
+          const exists = store.tracks.some((trk) => trk.clips.some((c) => c.id === op.clipId))
+          if (exists) {
+            store.updateClip(op.clipId, {
+              ...(op.fadeIn !== undefined ? { fadeIn: op.fadeIn } : {}),
+              ...(op.fadeOut !== undefined ? { fadeOut: op.fadeOut } : {}),
+            })
+            applied += 1
+          } else {
+            failed += 1
+          }
+          break
+        }
+        case 'set_clip_transform': {
+          const clip = store.tracks.flatMap((trk) => trk.clips).find((c) => c.id === op.clipId)
+          if (clip) {
+            const current = clip.transform ?? { x: store.sequence.width / 2, y: store.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }
+            store.updateClip(op.clipId, {
+              transform: {
+                x: op.x ?? current.x,
+                y: op.y ?? current.y,
+                scaleX: op.scaleX ?? current.scaleX,
+                scaleY: op.scaleY ?? current.scaleY,
+                rotation: op.rotation ?? current.rotation,
+              },
+            })
+            applied += 1
+          } else {
+            failed += 1
+          }
+          break
+        }
+        case 'set_clip_blend': {
+          const exists = store.tracks.some((trk) => trk.clips.some((c) => c.id === op.clipId))
+          if (exists) {
+            store.updateClip(op.clipId, { blendMode: op.blendMode })
+            applied += 1
+          } else {
+            failed += 1
+          }
+          break
+        }
+        case 'duplicate_clip': {
+          const newId = store.duplicateClip(op.clipId)
+          if (newId) applied += 1
+          else failed += 1
+          break
+        }
+        case 'pack_clips': {
+          store.ripplePackTrack(op.trackId)
+          applied += 1
+          break
+        }
+        case 'set_sequence': {
+          store.setSequence({ width: op.width, height: op.height, frameRate: op.frameRate })
+          applied += 1
+          break
+        }
+        case 'add_text_clip': {
+          const id = store.addTextClip({
+            text: op.text,
+            at: op.start,
+            duration: op.duration,
+            presetId: op.presetId ?? 'hormozi-karaoke',
+          })
+          if (id) applied += 1
+          else failed += 1
+          break
+        }
+        case 'generate_subtitles': {
+          const count = store.addSubtitleSequence(
+            op.entries.map((entry) => ({
+              text: entry.text,
+              start: entry.start,
+              duration: entry.duration,
+              presetId: op.presetId ?? 'hormozi-karaoke',
+            })),
+          )
+          if (count > 0) applied += 1
+          else failed += 1
+          break
+        }
       }
     } catch {
       failed += 1
@@ -170,5 +306,13 @@ export function formatOperationLabel(op: AIOperation): string {
     case 'set_clip_volume': return `${t('Volumen de clip', 'Clip volume')} [${op.clipId}] = ${op.volume}%`
     case 'set_clip_opacity': return `${t('Opacidad de clip', 'Clip opacity')} [${op.clipId}] = ${op.opacity}%`
     case 'add_track': return `${t('Añadir pista de', 'Add track')} ${op.kind === 'video' ? t('video', 'video') : t('audio', 'audio')}`
+    case 'set_clip_fades': return `${t('Fundidos de clip', 'Clip fades')} [${op.clipId}] (${op.fadeIn ?? 0}s / ${op.fadeOut ?? 0}s)`
+    case 'set_clip_transform': return `${t('Transformar clip', 'Transform clip')} [${op.clipId}]`
+    case 'set_clip_blend': return `${t('Mezcla de clip', 'Clip blend')} [${op.clipId}] = ${op.blendMode}`
+    case 'duplicate_clip': return `${t('Duplicar clip', 'Duplicate clip')} [${op.clipId}]`
+    case 'pack_clips': return `${t('Empaquetar clips sin huecos', 'Pack clips without gaps')}`
+    case 'set_sequence': return `${t('Ajustar secuencia', 'Set sequence')} ${op.width}×${op.height} (${op.frameRate} fps)`
+    case 'add_text_clip': return `${t('Añadir texto animado', 'Add animated text')} "${op.text}" (${op.start}s)`
+    case 'generate_subtitles': return `${t('Generar secuencia de subtítulos Pro', 'Generate Pro subtitle sequence')} (${op.entries.length} ${t('bloques', 'blocks')})`
   }
 }

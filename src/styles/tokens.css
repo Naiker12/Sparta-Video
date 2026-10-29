@@ -9,15 +9,15 @@
   -moz-osx-font-smoothing: grayscale;
 
   /* Sparta Agent Elite Dark Surfaces */
-  --bg: #121316;
-  --bg-canvas: #121316;
-  --panel: #18191d;
-  --panel-raised: #1e2025;
-  --panel-elevated: #25272e;
-  --panel-hover: #292b34;
-  --line: #2b2d35;
-  --line-soft: #22242b;
-  --border: #2b2d35;
+  --bg: #0e1014;
+  --bg-canvas: #0a0b0e;
+  --panel: #14161b;
+  --panel-raised: #1b1e25;
+  --panel-elevated: #22262f;
+  --panel-hover: #282d37;
+  --line: #262a34;
+  --line-soft: #1d2028;
+  --border: #262a34;
 
   /* Text and interaction */
   --text: #ececec;

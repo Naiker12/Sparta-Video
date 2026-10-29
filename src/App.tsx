@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Clapperboard, FileDown, FileUp, Film, FolderOpen, Pencil, PlusCircle, Settings2, Sparkles, Undo2, Video } from 'lucide-react'
-import { AssistantPanel } from './features/editor/components/AssistantPanel'
+import { ChevronDown, FileDown, FileUp, Film, FolderOpen, Pencil, PlusCircle, Settings2, Undo2, Video } from 'lucide-react'
+import { AssistantPanel, type AssistantMode } from './features/editor/components/AssistantPanel'
+import {
+  IconNleBrandMark,
+  IconNlePanelRight,
+} from './features/editor/components/StudioIcons'
 import { IconButton } from './features/editor/components/controls'
 import { InspectorPanel } from './features/editor/components/InspectorPanel'
 import { MediaLibraryPanel } from './features/editor/components/MediaLibraryPanel'
@@ -13,7 +17,19 @@ import { ExportDialog } from './features/editor/components/ExportDialog'
 import { TimelineAudioEngine } from './features/editor/services/audio-playback'
 import { getProjectSaveStatus, subscribeProjectSaveStatus, useEditorStore } from './features/editor/editor-store'
 import type { MediaItem } from './features/editor/model'
-import { captureVideoThumbnail, getMediaMimeType, storeMediaFile, storeMediaPreview } from './features/editor/services/media-storage'
+import {
+  captureVideoThumbnail,
+  formatMediaDuration,
+  getMediaMimeType,
+  probeMediaDuration,
+  storeMediaFile,
+  storeMediaPreview,
+} from './features/editor/services/media-storage'
+import {
+  generateSubtitlesFromTimelineVideo,
+  repairTimelineAndAssetDurations,
+  type SubtitleLanguage,
+} from './features/editor/services/subtitle-generator'
 import { downloadProjectFile, exportProjectData, openProjectFromFile } from './features/editor/services/project-file'
 import { Group, Panel, Separator, useDefaultLayout, useGroupRef, usePanelRef } from 'react-resizable-panels'
 import { t, useLanguage } from './features/editor/services/locale'
@@ -53,6 +69,9 @@ function App() {
   const setPlaying = useEditorStore((state) => state.setPlaying)
   const setZoom = useEditorStore((state) => state.setZoom)
   const addMedia = useEditorStore((state) => state.addMedia)
+  const addTextClip = useEditorStore((state) => state.addTextClip)
+  const applyPresetToAllSubtitles = useEditorStore((state) => state.applyPresetToAllSubtitles)
+  const autoGenerateSubtitles = useEditorStore((state) => state.autoGenerateSubtitles)
   const moveClip = useEditorStore((state) => state.moveClip)
   const moveClipToNewTrack = useEditorStore((state) => state.moveClipToNewTrack)
   const addAssets = useEditorStore((state) => state.addAssets)
@@ -64,6 +83,12 @@ function App() {
   const updateClip = useEditorStore((state) => state.updateClip)
   const splitClip = useEditorStore((state) => state.splitClip)
   const deleteClip = useEditorStore((state) => state.deleteClip)
+  const duplicateClip = useEditorStore((state) => state.duplicateClip)
+  const calibrateAllSubtitles = useEditorStore((state) => state.calibrateAllSubtitles)
+  const nudgeAllSubtitlesTime = useEditorStore((state) => state.nudgeAllSubtitlesTime)
+  const ripplePackTrack = useEditorStore((state) => state.ripplePackTrack)
+  const autoAudioBalance = useEditorStore((state) => state.autoAudioBalance)
+  const autoSceneMarkers = useEditorStore((state) => state.autoSceneMarkers)
   const addMarker = useEditorStore((state) => state.addMarker)
   const removeMarker = useEditorStore((state) => state.removeMarker)
   const toggleSnap = useEditorStore((state) => state.toggleSnap)
@@ -80,19 +105,42 @@ function App() {
   const selectedClipTrack = tracks.find((track) => track.clips.some((clip) => clip.id === selectedClipId))
   const selectedClipReadOnly = !!selectedClipTrack && lockedTracks.includes(selectedClipTrack.id)
   const sequenceDuration = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration)))
-  const previewClip = tracks.filter((track) => track.kind === 'video').reduce<NonNullable<typeof selectedClip> | undefined>((active, track) => {
-    const current = track.clips.filter((clip) => playhead >= clip.start && playhead < clip.start + clip.duration).sort((left, right) => left.start - right.start).at(-1)
+  const previewClip = tracks.filter((track) => track.kind === 'video' && !mutedTracks.includes(track.id)).reduce<NonNullable<typeof selectedClip> | undefined>((active, track) => {
+    const current = track.clips
+      .filter((clip) => playhead >= clip.start && playhead < clip.start + clip.duration && clip.text === undefined && clip.thumbnail !== 'text-overlay')
+      .sort((left, right) => left.start - right.start)
+      .at(-1)
     return current ?? active
   }, undefined)
+  const activeTextOverlays = tracks
+    .filter((track) => track.kind === 'video' && !mutedTracks.includes(track.id))
+    .flatMap((track) =>
+      track.clips.filter(
+        (clip) =>
+          playhead >= clip.start &&
+          playhead < clip.start + clip.duration &&
+          (clip.text !== undefined || clip.thumbnail === 'text-overlay'),
+      ),
+    )
   const selectedMedia = assets.find((item) => item.id === selectedMediaId)
   const hasReadyAssets = assets.some((asset) => asset.status === 'ready')
+  const hasTextClips = tracks.some((track) => track.clips.some((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay'))
   const hasTimelineClips = tracks.some((track) => track.clips.length > 0)
-  const canExport = hasReadyAssets && hasTimelineClips && sequenceDuration > 0
+  const canExport = (hasReadyAssets || hasTextClips) && hasTimelineClips && sequenceDuration > 0
   const [chatOpen, setChatOpen] = useState(true)
+  const [assistantMode, setAssistantMode] = useState<AssistantMode>('edit')
   const [saveStatus, setSaveStatus] = useState(getProjectSaveStatus)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [extractingSubtitles, setExtractingSubtitles] = useState(false)
+  const [subtitleProgressText, setSubtitleProgressText] = useState('')
+  const [importStatus, setImportStatus] = useState<{
+    isImporting: boolean
+    current: number
+    total: number
+    currentFileName: string
+  } | null>(null)
   const audioEngineRef = useRef<TimelineAudioEngine | null>(null)
   const [timelineExpanded, setTimelineExpanded] = useState(false)
   const resolution = `${sequence.width} × ${sequence.height}`
@@ -108,6 +156,15 @@ function App() {
   const editorVerticalLayout = useDefaultLayout({ id: 'sparta-editor-vertical', panelIds: ['stage', 'timeline'], storage: layoutStorage })
 
   useEffect(() => subscribeProjectSaveStatus(setSaveStatus), [])
+
+  useEffect(() => {
+    const hasUnprobedReadyMedia = assets.some(
+      (a) => a.status === 'ready' && a.type !== 'image' && !a.durationSeconds,
+    )
+    if (hasUnprobedReadyMedia) {
+      void repairTimelineAndAssetDurations()
+    }
+  }, [assets])
 
   useEffect(() => {
     if (!playing || sequenceDuration <= 0) return
@@ -149,8 +206,14 @@ function App() {
   const toggleAssistant = () => {
     const panel = assistantPanelRef.current
     if (!panel) return
-    if (panel.isCollapsed()) { panel.expand(); setChatOpen(true) }
-    else { panel.collapse(); setChatOpen(false) }
+    if (panel.isCollapsed()) {
+      panel.expand()
+      shellGroupRef.current?.setLayout(window.innerWidth < 1100 ? { library: 18, editor: 58, assistant: 24 } : { library: 17, editor: 63, assistant: 20 })
+      setChatOpen(true)
+    } else {
+      panel.collapse()
+      setChatOpen(false)
+    }
   }
   useEffect(() => {
     const compactLayout = () => {
@@ -165,8 +228,8 @@ function App() {
     return () => window.removeEventListener('resize', compactLayout)
   }, [assistantPanelRef, shellGroupRef, upperGroupRef, editorVerticalGroupRef])
   const resetWorkspace = () => {
-    shellGroupRef.current?.setLayout(window.innerWidth < 1100 ? { library: 20, editor: 80, assistant: 0 } : { library: 16, editor: 67, assistant: 17 })
-    upperGroupRef.current?.setLayout(window.innerWidth < 1100 ? { monitor: 72, inspector: 28 } : { monitor: 76, inspector: 24 })
+    shellGroupRef.current?.setLayout(window.innerWidth < 1100 ? { library: 20, editor: 80, assistant: 0 } : { library: 17, editor: 63, assistant: 20 })
+    upperGroupRef.current?.setLayout(window.innerWidth < 1100 ? { monitor: 72, inspector: 28 } : { monitor: 75, inspector: 25 })
     editorVerticalGroupRef.current?.setLayout({ stage: 52, timeline: 48 })
     toast.success(t('Distribución de paneles restablecida', 'Panel layout reset'))
   }
@@ -198,19 +261,27 @@ function App() {
       if (event.key === 'Home') { event.preventDefault(); setPlayhead(0) }
       if (event.key === 'End') { event.preventDefault(); setPlayhead(sequenceDuration) }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo() }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { const id = useEditorStore.getState().selectedClipId; if (id) { event.preventDefault(); duplicateClip(id) } }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); document.querySelector<HTMLInputElement>('[aria-label="Buscar medios"]')?.focus() }
       if (event.key === 'Delete' || event.key === 'Backspace') { const id = useEditorStore.getState().selectedClipId; if (id) { event.preventDefault(); deleteClip(id) } }
+      if (event.key.toLowerCase() === 's' && !event.ctrlKey && !event.metaKey) { const st = useEditorStore.getState(); if (st.selectedClipId) { splitClip(st.selectedClipId, st.playhead) } }
       if (event.key.toLowerCase() === 'c') setActiveTool('razor')
       if (event.key.toLowerCase() === 'v') setActiveTool('select')
       if (event.key.toLowerCase() === 'm') addMarker(useEditorStore.getState().playhead)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [addMarker, deleteClip, moveClip, redo, renameOpen, sequenceDuration, setActiveTool, setPlayhead, settingsOpen, splitClip, undo])
+  }, [addMarker, deleteClip, duplicateClip, moveClip, redo, renameOpen, sequenceDuration, setActiveTool, setPlayhead, settingsOpen, splitClip, undo])
 
   const importFiles = async (files: FileList | File[] | null) => {
     if (!files?.length) return
     const sourceFiles = Array.from(files)
+    setImportStatus({
+      isImporting: true,
+      current: 0,
+      total: sourceFiles.length,
+      currentFileName: sourceFiles[0]?.name ?? '',
+    })
     const pending = sourceFiles.map((file) => {
       const mime = getMediaMimeType(file)
       const type: MediaItem['type'] = mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : 'video'
@@ -221,20 +292,28 @@ function App() {
     if (pending[0].asset.type !== 'audio') selectMedia(pending[0].asset.id)
     const importToast = toast.loading(sourceFiles.length === 1 ? t('Importando archivo…', 'Importing file…') : t(`Importando ${sourceFiles.length} archivos…`, `Importing ${sourceFiles.length} files…`), { description: sourceFiles.length === 1 ? sourceFiles[0].name : undefined })
     const { inspectMediaFile } = await import('./features/editor/services/media-catalog')
+    let processedCount = 0
     const results = await Promise.allSettled(pending.map(async ({ file, asset }) => {
+      setImportStatus((prev) => (prev ? { ...prev, currentFileName: file.name } : null))
       const metadata = await inspectMediaFile(file)
       await storeMediaFile(asset.id, file)
+      const probedDuration = asset.type !== 'image' ? await probeMediaDuration(file, asset.type) : null
       if (asset.type === 'video') {
         const preview = await captureVideoThumbnail(file)
         if (preview) await storeMediaPreview(asset.id, preview)
       }
+      const durationSuffix = probedDuration ? ` · ${formatMediaDuration(probedDuration)}` : ''
       updateAsset(asset.id, {
         title: metadata.name,
-        detail: `${asset.type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}`,
+        detail: `${asset.type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}${durationSuffix}`,
+        ...(probedDuration ? { durationSeconds: probedDuration } : {}),
         status: 'ready',
       })
+      processedCount++
+      setImportStatus((prev) => (prev ? { ...prev, current: processedCount } : null))
       return asset.id
     }))
+    setImportStatus(null)
     const failedNames = results.flatMap((result, index) => {
       if (result.status === 'fulfilled') return []
       const message = result.reason instanceof Error ? result.reason.message : t('No se pudo procesar el archivo.', 'Could not process the file.')
@@ -273,11 +352,20 @@ function App() {
       const metadata = await inspectMediaFile(file)
       const type: MediaItem['type'] = metadata.mimeType.startsWith('image/') ? 'image' : metadata.mimeType.startsWith('audio/') ? 'audio' : 'video'
       await storeMediaFile(assetId, file)
+      const probedDuration = type !== 'image' ? await probeMediaDuration(file, type) : null
       if (type === 'video') {
         const preview = await captureVideoThumbnail(file)
         if (preview) await storeMediaPreview(assetId, preview)
       }
-      updateAsset(assetId, { title: metadata.name, type, detail: `${type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}`, thumb: type === 'image' ? 'image-catalog' : type === 'audio' ? 'wave' : 'video-catalog', status: 'ready' })
+      const durationSuffix = probedDuration ? ` · ${formatMediaDuration(probedDuration)}` : ''
+      updateAsset(assetId, {
+        title: metadata.name,
+        type,
+        detail: `${type.toUpperCase()} · ${formatFileSize(metadata.sizeBytes)}${durationSuffix}`,
+        ...(probedDuration ? { durationSeconds: probedDuration } : {}),
+        thumb: type === 'image' ? 'image-catalog' : type === 'audio' ? 'wave' : 'video-catalog',
+        status: 'ready',
+      })
       toast.success(t('Medio vinculado', 'Media linked'), { description: metadata.name })
     } catch (error) {
       const message = errorMessage(error, t('No se pudo vincular el archivo.', 'Could not link the file.'))
@@ -303,10 +391,86 @@ function App() {
       toast.error(t('No se pudo acceder al portapapeles en este navegador.', 'Clipboard access is unavailable in this browser.'))
     }
   }
+  const handleGenerateVideoSubtitles = async (
+    presetId = 'hormozi-karaoke',
+    customScript?: string,
+    language: SubtitleLanguage = 'spanish',
+  ) => {
+    if (extractingSubtitles) return
+    setExtractingSubtitles(true)
+    setSubtitleProgressText(t('Extrayendo audio del video…', 'Extracting video audio…'))
+    const subToast = toast.loading(
+      t('Extrayendo subtítulos hablados del video…', 'Extracting spoken subtitles from video…'),
+    )
+    try {
+      const result = await generateSubtitlesFromTimelineVideo({
+        presetId,
+        customScript,
+        language,
+        onProgress: (status) => {
+          setSubtitleProgressText(status)
+        },
+      })
+      if (result.count > 0) {
+        const modeDesc =
+          result.mode === 'whisper-local'
+            ? t('Transcripción de voz Whisper IA (Audio real del video)', 'Whisper AI voice transcription (Real video audio)')
+            : result.mode === 'whisper'
+              ? t('Transcripción de voz IA en la nube', 'Cloud AI voice transcription')
+              : result.mode === 'ai-llm'
+                ? t('Sincronizado con IA y segmentos vocales', 'Synced with AI and voice segments')
+                : result.mode === 'waveform-vad'
+                  ? t('Sincronizado con detección de voz del video', 'Synced with video voice detection')
+                  : t('Sincronizado con la duración de la secuencia', 'Synced with sequence duration')
+        toast.success(
+          t(
+            `${result.count} subtítulos extraídos (${formatMediaDuration(result.durationSeconds)})`,
+            `${result.count} subtitles extracted (${formatMediaDuration(result.durationSeconds)})`,
+          ),
+          { id: subToast, description: modeDesc },
+        )
+      } else {
+        toast.warning(t('No se detectó voz en el video', 'No voice detected in video'), { id: subToast })
+      }
+    } catch {
+      const fallbackCount = autoGenerateSubtitles(presetId, customScript)
+      if (fallbackCount > 0) {
+        toast.success(t(`${fallbackCount} subtítulos generados en pista`, `${fallbackCount} subtitles generated on track`), {
+          id: subToast,
+        })
+      } else {
+        toast.error(t('Error al analizar el audio del video', 'Error analyzing video audio'), { id: subToast })
+      }
+    } finally {
+      setExtractingSubtitles(false)
+      setSubtitleProgressText('')
+    }
+  }
+
+  const handleApplyOrExtractSubtitlePreset = (presetId: string, language: SubtitleLanguage = 'spanish') => {
+    const currentTracks = useEditorStore.getState().tracks
+    const existingSubClips = currentTracks.flatMap((t) =>
+      t.clips.filter((c) => c.text !== undefined || c.thumbnail === 'text-overlay'),
+    )
+    if (existingSubClips.length > 1) {
+      const count = applyPresetToAllSubtitles(presetId)
+      if (count > 0) {
+        toast.success(
+          t(
+            `Estilo aplicado a ${count} subtítulos de la secuencia`,
+            `Style applied to ${count} sequence subtitles`,
+          ),
+        )
+      }
+      return
+    }
+    void handleGenerateVideoSubtitles(presetId, undefined, language)
+  }
+
   return <main className="app-shell">
     <header className="titlebar">
       <div className="brand">
-        <div className="brand-mark"><Clapperboard size={15} /></div><span>SPARTA</span><span className="brand-video">VIDEO</span><span className="brand-divider" />
+        <div className="brand-mark"><IconNleBrandMark size={15} /></div><span>SPARTA</span><span className="brand-video">VIDEO</span><span className="brand-divider" />
         <ActionMenu label={t('Acciones del proyecto', 'Project actions')} triggerClass="project-menu-trigger" items={[
           { heading: t('PROYECTO', 'PROJECT') },
           { label: t('Nuevo proyecto', 'New project'), icon: PlusCircle, onSelect: () => { useEditorStore.getState().resetProject(); toast.info(t('Nuevo proyecto creado', 'New project created')) } },
@@ -324,23 +488,23 @@ function App() {
     </header>
     <input ref={fileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" multiple accept="video/*,audio/*,image/*" tabIndex={-1} aria-hidden="true" onChange={(event) => { void importFiles(event.target.files); event.target.value = '' }} />
     <input ref={projectFileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" accept=".sparta,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProjectFromFile(file); event.target.value = '' }} />
-    <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 16, editor: 67, assistant: 17 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
-      <Panel id="library" defaultSize="16%" minSize="190px" maxSize="25%" className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
+    <Group id="sparta-workspace" groupRef={shellGroupRef} className="workspace" orientation="horizontal" defaultLayout={shellLayout.defaultLayout ?? { library: 17, editor: 63, assistant: 20 }} onLayoutChanged={(layout, meta) => { shellLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
+      <Panel id="library" defaultSize="17%" minSize="190px" maxSize="25%" className="resize-panel-content"><MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} /></Panel>
       <Separator id="library-separator" className="panel-separator" aria-label={t('Redimensionar biblioteca de medios','Resize media library')} />
-      <Panel id="editor" defaultSize="67%" minSize="45%" className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
-        <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia','Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia','Sequence resolution') }, ...[{ label: '1920 × 1080', width: 1920, height: 1080 }, { label: '1280 × 720', width: 1280, height: 720 }, { label: '1080 × 1920', width: 1080, height: 1920 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })) , { separator: true }, { heading: t('Fotogramas por segundo','Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer','Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)','Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente','Close assistant panel') : t('Abrir panel asistente','Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><Sparkles size={16} /></IconButton><button type="button" className="export-button" disabled={!canExport} title={canExport ? t('Exportar secuencia de vídeo', 'Export video sequence') : t('El motor de exportación se habilita al tener medios listos en la línea de tiempo', 'The export engine is enabled when ready media is on the timeline')} aria-label={canExport ? t('Exportar vídeo', 'Export video') : t('Exportación no disponible', 'Export unavailable')} onClick={() => setExportOpen(true)}><Video size={15} /> {t('Exportar', 'Export')} <span className="sr-only">{canExport ? 'Export video' : 'Export'}</span></button></div></div>
+      <Panel id="editor" defaultSize="63%" minSize="45%" className="resize-panel-content"><section className={`edit-area ${timelineExpanded ? 'timeline-expanded' : ''}`}>
+        <div className="toolbar"><div className="toolbar-left"><span className="sequence-icon"><Film size={15} /></span><ActionMenu label={t('Ajustes de secuencia','Sequence settings')} triggerClass="sequence-menu-trigger" items={[{ heading: t('Resolución de secuencia','Sequence resolution') }, ...[{ label: '1920 × 1080', width: 1920, height: 1080 }, { label: '1280 × 720', width: 1280, height: 720 }, { label: '1080 × 1920', width: 1080, height: 1920 }].map((value) => ({ label: value.label, checked: sequence.width === value.width && sequence.height === value.height, onSelect: () => setSequence({ ...sequence, width: value.width, height: value.height }) })) , { separator: true }, { heading: t('Fotogramas por segundo','Frame rate') }, ...[24, 30, 60].map((value) => ({ label: `${value} fps`, checked: frameRate === value, onSelect: () => setSequence({ ...sequence, frameRate: value }) }))]}><strong>Secuencia 01 <span className="sr-only">Sequence 01</span></strong><ChevronDown size={13} /></ActionMenu><span className="toolbar-slash">/</span><span className="muted">{resolution} · {frameRate} fps</span></div><div className="toolbar-right"><IconButton label={t('Deshacer','Undo')} onClick={undo} active={past.length > 0} disabled={!past.length}><Undo2 size={16} /></IconButton><IconButton label={t('Rehacer (Ctrl+Mayús+Z)','Redo (Ctrl+Shift+Z)')} onClick={redo} active={future.length > 0} disabled={!future.length}><Undo2 size={16} className="redo-icon" /></IconButton><span className="toolbar-divider" /><IconButton label={chatOpen ? t('Cerrar panel asistente','Close assistant panel') : t('Abrir panel asistente','Open assistant panel')} onClick={toggleAssistant} active={chatOpen}><IconNlePanelRight size={15} /></IconButton><button type="button" className="export-button" disabled={!canExport} title={canExport ? t('Exportar secuencia de vídeo', 'Export video sequence') : t('El motor de exportación se habilita al tener medios listos en la línea de tiempo', 'The export engine is enabled when ready media is on the timeline')} aria-label={canExport ? t('Exportar vídeo', 'Export video') : t('Exportación no disponible', 'Export unavailable')} onClick={() => setExportOpen(true)}><Video size={15} /> {t('Exportar', 'Export')} <span className="sr-only">{canExport ? 'Export video' : 'Export'}</span></button></div></div>
         <Group id="sparta-editor-vertical" groupRef={editorVerticalGroupRef} className="editor-vertical-group" orientation="vertical" defaultLayout={editorVerticalLayout.defaultLayout ?? { stage: 52, timeline: 48 }} onLayoutChanged={editorVerticalLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
           <Panel id="stage" defaultSize="52%" minSize="26%" maxSize="78%" className="resize-panel-content">
-            <div className="upper-workspace"><Group id="sparta-preview-inspector" groupRef={upperGroupRef} className="preview-inspector-group" orientation="horizontal" defaultLayout={upperLayout.defaultLayout ?? { monitor: 76, inspector: 24 }} onLayoutChanged={upperLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}><Panel id="monitor" defaultSize="76%" minSize="55%" className="resize-panel-content"><PreviewMonitor playhead={playhead} markers={markers} onSeek={setPlayhead} frameRate={frameRate} duration={sequenceDuration} clip={previewClip} media={!previewClip ? selectedMedia : undefined} sequenceSize={sequence} playing={playing} onTogglePlay={togglePlayback} /></Panel><Separator id="monitor-splitter" className="panel-separator" aria-label={t('Redimensionar monitor e inspector','Resize preview and inspector')} /><Panel id="inspector" defaultSize="24%" minSize="18%" maxSize="40%" className="resize-panel-content"><InspectorPanel clip={selectedClip} selectedMedia={selectedMedia} assets={assets} playhead={playhead} sequenceSize={sequence} onSeek={setPlayhead} readOnly={selectedClipReadOnly} onAddSelected={() => { if (selectedMedia) addMediaToTimeline(selectedMedia, playhead) }} onUpdateClip={updateClip} onCopyClipName={(name) => void copyClipName(name)} onResetClip={() => { if (selectedClip && !selectedClipReadOnly) updateClip(selectedClip.id, { transform: { x: sequence.width / 2, y: sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }, opacity: 100, blendMode: 'normal', volume: 100, fadeIn: 0, fadeOut: 0, uniformScale: true, keyframes: [] }) }} /></Panel></Group></div>
+            <div className="upper-workspace"><Group id="sparta-preview-inspector" groupRef={upperGroupRef} className="preview-inspector-group" orientation="horizontal" defaultLayout={upperLayout.defaultLayout ?? { monitor: 75, inspector: 25 }} onLayoutChanged={upperLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}><Panel id="monitor" defaultSize="75%" minSize="55%" className="resize-panel-content"><PreviewMonitor playhead={playhead} markers={markers} onSeek={setPlayhead} frameRate={frameRate} duration={sequenceDuration} clip={previewClip} textOverlays={activeTextOverlays} selectedClipId={selectedClipId} onSelectClip={selectClip} onUpdateClip={updateClip} media={!previewClip ? selectedMedia : undefined} sequenceSize={sequence} playing={playing} onTogglePlay={togglePlayback} /></Panel><Separator id="monitor-splitter" className="panel-separator" aria-label={t('Redimensionar monitor e inspector','Resize preview and inspector')} /><Panel id="inspector" defaultSize="25%" minSize="18%" maxSize="40%" className="resize-panel-content"><InspectorPanel clip={selectedClip} selectedMedia={selectedMedia} assets={assets} playhead={playhead} sequenceSize={sequence} onSeek={setPlayhead} readOnly={selectedClipReadOnly} onAddSelected={() => { if (selectedMedia) addMediaToTimeline(selectedMedia, playhead) }} onAddTextClip={(presetId) => { addTextClip({ presetId, at: playhead }); toast.success(t('Capa de texto Pro añadida', 'Pro text layer added')) }} onUpdateClip={updateClip} onCopyClipName={(name) => void copyClipName(name)} onSplitAtPlayhead={() => { if (selectedClip && !selectedClipReadOnly) splitClip(selectedClip.id, playhead) }} onDuplicateClip={() => { if (selectedClip && !selectedClipReadOnly) { duplicateClip(selectedClip.id); toast.success(t('Clip duplicado', 'Clip duplicated')) } }} onCalibrateAllSubtitles={(id) => { const n = calibrateAllSubtitles(id); if (n > 0) toast.success(t(`Calibración aplicada a ${n} subtítulos`, `Calibration applied to ${n} subtitles`)) }} onNudgeAllSubtitlesTime={(delta) => { const n = nudgeAllSubtitlesTime(delta); if (n > 0) toast.success(t(`Sincronización ${delta > 0 ? '+' : ''}${delta}s en ${n} subtítulos`, `Sync ${delta > 0 ? '+' : ''}${delta}s on ${n} subtitles`)) }} onResetClip={() => { if (selectedClip && !selectedClipReadOnly) updateClip(selectedClip.id, { transform: { x: sequence.width / 2, y: sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }, opacity: 100, blendMode: 'normal', volume: 100, fadeIn: 0, fadeOut: 0, uniformScale: true, keyframes: [] }) }} /></Panel></Group></div>
           </Panel>
           <Separator id="stage-timeline-splitter" className="panel-separator panel-separator-horizontal" aria-label={t('Redimensionar monitor y línea de tiempo', 'Resize monitor and timeline')} />
           <Panel id="timeline" defaultSize="48%" minSize="22%" className="resize-panel-content">
-            <TimelinePanel tracks={tracks} assets={assets} markers={markers} selected={selectedClipId} playhead={playhead} zoom={zoom} frameRate={frameRate} snap={snapToFrames} expanded={timelineExpanded} tool={activeTool} mutedTracks={mutedTracks} lockedTracks={lockedTracks} onMuteTrack={toggleMute} onLockTrack={toggleLock} onSelect={selectClip} onSeek={setPlayhead} onZoom={setZoom} onAddTrack={addTrack} onAddMedia={addMediaToTimeline} onMoveClip={moveClip} onMoveClipToNewTrack={moveClipToNewTrack} onSplitClip={splitClip} onAddMarker={addMarker} onRemoveMarker={removeMarker} onToggleSnap={toggleSnap} onToggleExpanded={toggleTimelineExpanded} onSetTool={setActiveTool} />
+            <TimelinePanel tracks={tracks} assets={assets} markers={markers} selected={selectedClipId} playhead={playhead} zoom={zoom} frameRate={frameRate} snap={snapToFrames} expanded={timelineExpanded} tool={activeTool} mutedTracks={mutedTracks} lockedTracks={lockedTracks} onMuteTrack={toggleMute} onLockTrack={toggleLock} onSelect={selectClip} onSeek={setPlayhead} onZoom={setZoom} onAddTrack={addTrack} onAddMedia={addMediaToTimeline} onMoveClip={moveClip} onMoveClipToNewTrack={moveClipToNewTrack} onSplitClip={splitClip} onDeleteClip={deleteClip} onDuplicateClip={(id) => { duplicateClip(id); toast.success(t('Clip duplicado', 'Clip duplicated')) }} onAddTextClip={() => { addTextClip({ presetId: 'hormozi-karaoke', at: playhead }); toast.success(t('Texto animado Pro añadido en el cabezal', 'Pro animated text added at playhead')) }} onAutoSubtitles={() => { void handleGenerateVideoSubtitles('hormozi-karaoke') }} onPackClips={() => { const n = ripplePackTrack(); if (n > 0) toast.success(t(`${n} clip(s) compactados sin huecos`, `${n} clip(s) packed without gaps`)); else toast.info(t('No hay huecos que compactar', 'No gaps to pack')) }} onAutoMarkers={() => { const n = autoSceneMarkers(); if (n > 0) toast.success(t(`${n} marcador(es) añadidos en cortes`, `${n} marker(s) added at cuts`)); else toast.info(t('Ya existen marcadores en los cortes', 'Cut markers already exist')) }} onAutoAudio={() => { const n = autoAudioBalance(); if (n > 0) toast.success(t(`Mezcla y fundidos aplicados a ${n} clip(s)`, `Mix and fades applied to ${n} clip(s)`)); else toast.info(t('Añade clips para nivelar audio', 'Add clips to balance audio')) }} onAddMarker={addMarker} onRemoveMarker={removeMarker} onToggleSnap={toggleSnap} onToggleExpanded={toggleTimelineExpanded} onSetTool={setActiveTool} />
           </Panel>
         </Group>
       </section></Panel>
       <Separator id="assistant-separator" className="panel-separator" aria-label={t('Redimensionar panel del asistente','Resize assistant panel')} />
-      <Panel id="assistant" panelRef={assistantPanelRef} defaultSize="17%" minSize="13%" maxSize="28%" collapsedSize="0%" collapsible className="resize-panel-content"><AssistantPanel open onClose={toggleAssistant} projectName={projectName} /></Panel>
+      <Panel id="assistant" panelRef={assistantPanelRef} defaultSize="20%" minSize="14%" maxSize="30%" collapsedSize="0%" collapsible className="resize-panel-content"><AssistantPanel open onClose={toggleAssistant} projectName={projectName} activeMode={assistantMode} onModeChange={setAssistantMode} /></Panel>
     </Group>
     <PreferencesSheet open={settingsOpen} onOpenChange={setSettingsOpen} onResetLayout={resetWorkspace} snapToFrames={snapToFrames} onToggleSnap={toggleSnap} saveStatus={saveStatus} />
     <RenameProjectDialog open={renameOpen} name={projectName} onOpenChange={setRenameOpen} onSave={(name) => { setProjectName(name); toast.success(t('Proyecto renombrado', 'Project renamed'), { description: name }) }} />

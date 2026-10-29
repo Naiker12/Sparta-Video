@@ -28,7 +28,8 @@ export async function storeMediaFile(id: string, file: File): Promise<void> {
 
 export const storeImageFile = storeMediaFile
 
-export async function loadMediaSource(id: string): Promise<string | null> {
+export async function loadMediaBlob(id: string): Promise<Blob | null> {
+  if (typeof window === 'undefined' || !('indexedDB' in window)) return null
   const database = await openDatabase()
   try {
     const blob = await new Promise<Blob | undefined>((resolve, reject) => {
@@ -36,10 +37,15 @@ export async function loadMediaSource(id: string): Promise<string | null> {
       request.onsuccess = () => resolve(request.result as Blob | undefined)
       request.onerror = () => reject(request.error ?? new Error('No se pudo leer el medio original.'))
     })
-    return blob ? URL.createObjectURL(blob) : null
+    return blob ?? null
   } finally {
     database.close()
   }
+}
+
+export async function loadMediaSource(id: string): Promise<string | null> {
+  const blob = await loadMediaBlob(id)
+  return blob ? URL.createObjectURL(blob) : null
 }
 
 export async function storeMediaPreview(id: string, preview: Blob): Promise<void> {
@@ -150,4 +156,114 @@ export function getMediaMimeTypeFromName(name: string): string {
 export function getMediaTypeFromName(name: string): 'video' | 'audio' | 'image' | null {
   const mime = getMediaMimeTypeFromName(name)
   return mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : null
+}
+
+export function formatMediaDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '00:00'
+  const totalSeconds = Math.max(1, Math.round(seconds))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const secs = totalSeconds % 60
+  if (hours > 0) {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+  }
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
+
+export function parseDurationFromDetail(detail?: string): number | null {
+  if (!detail) return null
+  const hmsMatch = detail.match(/\b(\d{1,2}):(\d{2}):(\d{2})\b/)
+  if (hmsMatch) {
+    const h = Number(hmsMatch[1])
+    const m = Number(hmsMatch[2])
+    const s = Number(hmsMatch[3])
+    const total = h * 3600 + m * 60 + s
+    return total > 0 ? total : null
+  }
+  const msMatch = detail.match(/\b(\d{2}):(\d{2})\b/)
+  if (msMatch) {
+    const m = Number(msMatch[1])
+    const s = Number(msMatch[2])
+    const total = m * 60 + s
+    return total > 0 ? total : null
+  }
+  return null
+}
+
+export async function probeMediaDuration(
+  fileOrBlob: Blob,
+  type?: 'video' | 'audio' | 'image',
+): Promise<number | null> {
+  const resolvedType =
+    type ??
+    (fileOrBlob.type.startsWith('image/')
+      ? 'image'
+      : fileOrBlob.type.startsWith('audio/')
+        ? 'audio'
+        : 'video')
+  if (resolvedType === 'image') return null
+  if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    return null
+  }
+
+  const url = URL.createObjectURL(fileOrBlob)
+  const element = document.createElement(resolvedType === 'audio' ? 'audio' : 'video')
+  element.muted = true
+  element.preload = 'metadata'
+  if (element instanceof HTMLVideoElement) {
+    element.playsInline = true
+  }
+
+  const isJsdom = typeof navigator !== 'undefined' && /jsdom/i.test(navigator.userAgent)
+  const timeoutMs = isJsdom ? 60 : 10_000
+
+  try {
+    const duration = await new Promise<number | null>((resolve) => {
+      let settled = false
+      const finish = (value: number | null) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        resolve(value && Number.isFinite(value) && value > 0 ? Math.round(value * 100) / 100 : null)
+      }
+      const timer = window.setTimeout(() => finish(null), timeoutMs)
+      element.onerror = () => finish(null)
+      element.onloadedmetadata = () => {
+        if (Number.isFinite(element.duration) && element.duration > 0) {
+          finish(element.duration)
+          return
+        }
+        if (element.duration === Infinity) {
+          element.ontimeupdate = () => {
+            element.ontimeupdate = null
+            const resolved = element.duration
+            try { element.currentTime = 0 } catch { /* ignore */ }
+            finish(resolved)
+          }
+          element.ondurationchange = () => {
+            if (Number.isFinite(element.duration) && element.duration > 0) {
+              finish(element.duration)
+            }
+          }
+          try {
+            element.currentTime = 1e101
+          } catch {
+            finish(null)
+          }
+          return
+        }
+        finish(null)
+      }
+      element.src = url
+      try { element.load() } catch { finish(null) }
+    })
+    return duration
+  } finally {
+    try {
+      element.pause()
+      element.removeAttribute('src')
+      element.load()
+    } catch { /* ignore */ }
+    URL.revokeObjectURL(url)
+  }
 }

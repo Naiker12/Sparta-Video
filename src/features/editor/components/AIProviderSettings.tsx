@@ -223,7 +223,30 @@ export function AIProviderSettings() {
           <button type="button" onClick={startNew} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-semibold text-white hover:bg-blue-400"><Plus size={14} />{t('Agregar', 'Add provider')}</button>
         </div>
 
-        {!registry.profiles.length && <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-6 text-center text-xs text-white/50">{t('Todavía no hay proveedores. Agrega uno para consultar sus modelos.', 'No providers yet. Add one to load its models.')}</div>}
+        {!registry.profiles.length && (
+          <div className="ai-provider-empty-hub">
+            <p className="text-xs text-white/60">
+              {t('Todavía no hay proveedores. Agrega uno para consultar sus modelos.', 'No providers yet. Add one to load its models.')}
+            </p>
+            <div className="ai-provider-quick-grid">
+              {providerKinds.slice(0, 6).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="ai-provider-quick-card"
+                  onClick={() => {
+                    startNew()
+                    chooseKind(item.id)
+                  }}
+                >
+                  <span className="ai-provider-quick-tag">{item.id.toUpperCase()}</span>
+                  <strong>{item.name}</strong>
+                  <span className="ai-provider-quick-url">{item.defaultUrl.replace(/^https?:\/\//, '')}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-2">
           {registry.profiles.map((profile) => <article key={profile.id} className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-3.5">
             <div className="flex items-start justify-between gap-3">
@@ -263,18 +286,68 @@ export function AIProviderSettings() {
       <div className="flex items-start gap-2.5 rounded-xl border border-amber-400/15 bg-amber-400/[0.045] p-3 text-[11px] leading-relaxed text-white/55"><KeyRound size={14} className="mt-0.5 shrink-0 text-amber-300/80" /><p>{isTauri() ? t('Las claves se guardan en el llavero de Windows. La lista de modelos y asignaciones queda en este equipo; quitar un proveedor elimina también su credencial.', 'Keys are stored in the Windows Credential Manager. Model lists and assignments stay on this device; removing a provider also deletes its credential.') : t('En la vista web las claves solo permanecen en memoria hasta cerrar o recargar. Para guardar claves con protección del sistema y evitar restricciones CORS, abre la versión Tauri de escritorio.', 'In the web preview, keys stay in memory only until the app closes or reloads. Open the Tauri desktop build to store keys in the system vault and avoid CORS restrictions.')}</p></div>
 
       <Dialog open={editing} onOpenChange={(open) => { if (open) setEditing(true); else cancelEdit() }}>
-        <DialogContent hideClose overlayClassName="ai-provider-overlay" className="ai-provider-modal flex max-h-[min(82vh,760px)] w-[min(92vw,672px)] max-w-2xl flex-col bg-[#191a1d] p-0 text-white">
-          <header className="flex items-start justify-between gap-4 border-b border-white/[0.07] px-5 py-4"><div><DialogTitle id="ai-provider-title" className="text-base font-semibold text-white">{editingId ? t('Configurar proveedor', 'Configure provider') : t('Agregar proveedor', 'Add provider')}</DialogTitle><DialogDescription className="mt-1 text-[11px] text-white/45">{t('Carga los modelos primero; después guarda el perfil.', 'Load models first, then save the provider.')}</DialogDescription></div><button type="button" aria-label={t('Cerrar', 'Close')} onClick={cancelEdit} className="rounded-md p-1.5 text-white/50 hover:bg-white/10 hover:text-white"><X size={17} /></button></header>
-          <div className="flex flex-col gap-4 overflow-auto px-5 py-4">
-            <label className="dialog-field">{t('Proveedor', 'Provider')}<select disabled={Boolean(editingId && registry.profiles.some((profile) => profile.id === editingId))} value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className="ai-provider-field-select h-9 rounded-lg border border-white/10 bg-[#121316] px-2.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-60">{providerKinds.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
-            <label className="dialog-field">{t('Nombre visible', 'Display name')}<input value={name} onChange={(event) => setName(event.target.value)} placeholder={selectedKind.name} /></label>
-            <label className="dialog-field">{t('URL base', 'Base URL')}<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} spellCheck={false} /></label>
-            <label className="dialog-field">{t('Clave API', 'API key')} {selectedKind.keyRequired && <span className="text-white/35">{t('(requerida)', '(required)')}</span>}<input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={editingId && hasSessionKey(editingId) ? t('Clave disponible en esta sesión', 'Key available in this session') : selectedKind.keyRequired ? 'sk-…' : t('Opcional para servicios locales', 'Optional for local services')} /></label>
-            <button type="button" disabled={loading} onClick={() => void loadModels()} className="inline-flex h-9 w-fit items-center gap-2 rounded-lg border border-blue-400/25 bg-blue-400/10 px-3 text-xs font-semibold text-blue-100 hover:bg-blue-400/15 disabled:opacity-50">{loading ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCw size={14} />}{loading ? t('Consultando catálogo…', 'Loading catalog…') : t('Cargar modelos', 'Load models')}</button>
-            {error && <p role="alert" className="text-xs text-amber-200">{error}</p>}
-            {loadedModels.length > 0 && <div className="flex min-h-0 flex-col gap-2"><div className="flex items-center justify-between"><h3 className="text-xs font-semibold text-white/85">{t('Modelos y capacidades', 'Models and capabilities')}</h3><span className="text-[10px] text-white/40">{loadedModels.length} {t('encontrados', 'found')}</span></div><p className="text-[10px] leading-relaxed text-white/45">{t('Los catálogos no siempre publican capacidades. Confirma los usos disponibles con tu cuenta y marca los adecuados.', 'Catalogs do not always publish capabilities. Confirm availability with your account and mark the supported uses.')}</p><div className="max-h-64 overflow-auto rounded-lg border border-white/[0.08]">{loadedModels.slice(0, 100).map((model) => <div key={model.id} className="flex flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 last:border-0 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><strong className="block truncate text-[11px] text-white/85">{model.name}</strong><span className="block truncate font-mono text-[9px] text-white/35">{model.id}</span></div><div className="flex flex-wrap gap-1">{AI_TASKS.map((capability) => <button key={capability} type="button" aria-pressed={model.capabilities.includes(capability)} onClick={() => toggleCapability(model.id, capability)} className={`rounded-md border px-1.5 py-0.5 text-[9px] ${model.capabilities.includes(capability) ? 'border-blue-400/35 bg-blue-400/10 text-blue-200' : 'border-white/[0.07] text-white/35 hover:text-white/70'}`}>{t(...capabilityNames[capability])}</button>)}</div></div>)}</div></div>}
+        <DialogContent hideClose overlayClassName="ai-provider-overlay" className="ai-provider-modal flex max-h-[min(85vh,780px)] w-[min(92vw,680px)] max-w-2xl flex-col bg-[#14161b] p-0 text-white border border-white/10 shadow-2xl">
+          <header className="flex items-start justify-between gap-4 border-b border-white/[0.07] bg-[#181b22] px-5 py-3.5">
+            <div>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-blue-400">SPARTA AI ENGINE · NODO DE CONEXIÓN</span>
+              <DialogTitle id="ai-provider-title" className="mt-0.5 text-base font-semibold text-white">{editingId ? t('Configurar proveedor', 'Configure provider') : t('Agregar proveedor', 'Add provider')}</DialogTitle>
+              <DialogDescription className="mt-0.5 text-[11px] text-white/45">{t('Carga los modelos primero; después guarda el perfil.', 'Load models first, then save the provider.')}</DialogDescription>
+            </div>
+            <button type="button" aria-label={t('Cerrar', 'Close')} onClick={cancelEdit} className="rounded-md p-1.5 text-white/50 hover:bg-white/10 hover:text-white"><X size={17} /></button>
+          </header>
+          <div className="flex flex-col gap-3.5 overflow-auto px-5 py-4">
+            {!(editingId && registry.profiles.some((profile) => profile.id === editingId)) && (
+              <div className="ai-provider-kind-pills" role="group" aria-label={t('Selección rápida de proveedor', 'Quick provider selection')}>
+                {providerKinds.map((provider) => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    onClick={() => chooseKind(provider.id)}
+                    className={`ai-kind-pill ${kind === provider.id ? 'active' : ''}`}
+                  >
+                    {provider.name.split(' · ')[0]}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="ai-provider-form-grid">
+              <label className="dialog-field">
+                {t('Proveedor', 'Provider')}
+                <select disabled={Boolean(editingId && registry.profiles.some((profile) => profile.id === editingId))} value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className="ai-provider-field-select h-9 rounded-lg border border-white/10 bg-[#0f1115] px-2.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-60">
+                  {providerKinds.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+                </select>
+              </label>
+              <label className="dialog-field">
+                {t('Nombre visible', 'Display name')}
+                <input value={name} onChange={(event) => setName(event.target.value)} placeholder={selectedKind.name} />
+              </label>
+            </div>
+            <label className="dialog-field">
+              <span className="flex items-center justify-between">
+                <span>{t('URL base', 'Base URL')}</span>
+                <span className="font-mono text-[9px] text-white/35">{baseUrl.startsWith('http://localhost') ? 'LOCAL ENDPOINT' : 'REST API HTTPS'}</span>
+              </span>
+              <input className="font-mono text-[11px]" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} spellCheck={false} />
+            </label>
+            <label className="dialog-field">
+              <span className="flex items-center justify-between">
+                <span>{t('Clave API', 'API key')} {selectedKind.keyRequired && <span className="text-white/35">{t('(requerida)', '(required)')}</span>}</span>
+                <span className="text-[10px] text-emerald-300/75">{isTauri() ? t('Protegida en llavero del sistema', 'Stored in system vault') : t('Sesión en memoria', 'In-memory session')}</span>
+              </span>
+              <input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={editingId && hasSessionKey(editingId) ? t('Clave disponible en esta sesión', 'Key available in this session') : selectedKind.keyRequired ? 'sk-…' : t('Opcional para servicios locales', 'Optional for local services')} />
+            </label>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+              <span className="text-[11px] text-white/55">
+                {loadedModels.length > 0
+                  ? `${loadedModels.length} ${t('modelos sincronizados desde el servidor', 'models synced from server')}`
+                  : t('Verifica la conexión consultando el catálogo de modelos del proveedor.', 'Verify connection by querying the provider model catalog.')}
+              </span>
+              <button type="button" disabled={loading} onClick={() => void loadModels()} className="inline-flex h-8 shrink-0 items-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/15 px-3 text-xs font-semibold text-blue-100 hover:bg-blue-500/25 disabled:opacity-50">{loading ? <LoaderCircle size={13} className="animate-spin" /> : <RefreshCw size={13} />}{loading ? t('Consultando catálogo…', 'Loading catalog…') : t('Cargar modelos', 'Load models')}</button>
+            </div>
+            {error && <p role="alert" className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">{error}</p>}
+            {loadedModels.length > 0 && <div className="flex min-h-0 flex-col gap-2"><div className="flex items-center justify-between"><h3 className="text-xs font-semibold text-white/85">{t('Modelos y capacidades', 'Models and capabilities')}</h3><span className="text-[10px] text-white/40">{loadedModels.length} {t('encontrados', 'found')}</span></div><p className="text-[10px] leading-relaxed text-white/45">{t('Los catálogos no siempre publican capacidades. Confirma los usos disponibles con tu cuenta y marca los adecuados.', 'Catalogs do not always publish capabilities. Confirm availability with your account and mark the supported uses.')}</p><div className="max-h-56 overflow-auto rounded-lg border border-white/[0.08] bg-[#0f1115]">{loadedModels.slice(0, 100).map((model) => <div key={model.id} className="flex flex-col gap-2 border-b border-white/[0.06] px-3 py-2 last:border-0 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><strong className="block truncate text-[11px] text-white/85">{model.name}</strong><span className="block truncate font-mono text-[9px] text-white/35">{model.id}</span></div><div className="flex flex-wrap gap-1">{AI_TASKS.map((capability) => <button key={capability} type="button" aria-pressed={model.capabilities.includes(capability)} onClick={() => toggleCapability(model.id, capability)} className={`rounded-md border px-1.5 py-0.5 text-[9px] ${model.capabilities.includes(capability) ? 'border-blue-400/35 bg-blue-400/10 text-blue-200' : 'border-white/[0.07] text-white/35 hover:text-white/70'}`}>{t(...capabilityNames[capability])}</button>)}</div></div>)}</div></div>}
           </div>
-          <footer className="flex justify-end gap-2 border-t border-white/[0.07] px-5 py-3"><button type="button" onClick={cancelEdit} className="h-8 rounded-lg px-3 text-xs text-white/60 hover:bg-white/[0.06]">{t('Cancelar', 'Cancel')}</button><button type="button" disabled={!loadedModels.length || loading} onClick={() => void saveProvider()} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40"><Save size={13} />{t('Guardar proveedor', 'Save provider')}</button></footer>
+          <footer className="flex justify-end gap-2 border-t border-white/[0.07] bg-[#181b22] px-5 py-3"><button type="button" onClick={cancelEdit} className="h-8 rounded-lg border border-white/10 px-3 text-xs text-white/70 hover:bg-white/[0.06]">{t('Cancelar', 'Cancel')}</button><button type="button" disabled={!loadedModels.length || loading} onClick={() => void saveProvider()} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-500 px-3.5 text-xs font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40"><Save size={13} />{t('Guardar proveedor', 'Save provider')}</button></footer>
         </DialogContent>
       </Dialog>
     </div>

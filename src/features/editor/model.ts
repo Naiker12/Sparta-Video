@@ -8,6 +8,50 @@ export type Keyframe = {
   valueY?: number
 }
 
+export type TextAnimationIn =
+  | 'none'
+  | 'pop'
+  | 'fade-up'
+  | 'typewriter'
+  | 'karaoke'
+  | 'slide-left'
+  | 'bounce'
+  | 'glitch'
+  | 'zoom-in'
+
+export type TextAnimationOut = 'none' | 'fade-out' | 'pop-out' | 'slide-down'
+
+export type TextAnimationLoop = 'none' | 'pulse' | 'float' | 'neon-flicker'
+
+export type TextStyle = {
+  presetId: string
+  fontFamily: string
+  fontSize: number
+  fontWeight: number
+  color: string
+  accentColor: string
+  strokeColor: string
+  strokeWidth: number
+  backgroundColor: string
+  backgroundOpacity: number
+  backgroundRadius: number
+  shadowColor: string
+  shadowBlur: number
+  align: 'left' | 'center' | 'right'
+  positionY: number
+  uppercase: boolean
+  italic: boolean
+  letterSpacing: number
+}
+
+export type TextAnimation = {
+  in: TextAnimationIn
+  out: TextAnimationOut
+  loop: TextAnimationLoop
+  inDuration: number
+  outDuration: number
+}
+
 export type Clip = {
   id: string
   title: string
@@ -25,6 +69,9 @@ export type Clip = {
   fadeIn?: number
   fadeOut?: number
   keyframes?: Keyframe[]
+  text?: string
+  textStyle?: TextStyle
+  textAnimation?: TextAnimation
 }
 
 export type Track = {
@@ -40,6 +87,7 @@ export type MediaItem = {
   detail: string
   thumb: string
   type: 'video' | 'audio' | 'image'
+  durationSeconds?: number
   sourcePath?: string
   status?: 'catalog-only' | 'ready' | 'missing' | 'processing' | 'error'
 }

@@ -157,4 +157,47 @@ describe('editor project operations', () => {
     const newClipId = useEditorStore.getState().addMedia(demoMedia[0], 1)
     expect(useEditorStore.getState().tracks[1].clips.some((clip) => clip.id === newClipId)).toBe(true)
   })
+
+  it('duplicates a clip, packs gaps, auto-balances audio, and generates scene markers', () => {
+    const store = useEditorStore.getState()
+    const dupId = store.duplicateClip('c1')
+    expect(dupId).toBeTruthy()
+    expect(useEditorStore.getState().tracks[0].clips.some((clip) => clip.id === dupId)).toBe(true)
+
+    const packed = useEditorStore.getState().ripplePackTrack('v1')
+    expect(packed).toBeGreaterThanOrEqual(1)
+
+    const markersAdded = useEditorStore.getState().autoSceneMarkers()
+    expect(markersAdded).toBeGreaterThanOrEqual(1)
+
+    const audioUpdated = useEditorStore.getState().autoAudioBalance()
+    expect(audioUpdated).toBeGreaterThanOrEqual(1)
+  })
+
+  it('adds animated CapCut Pro text clips and generates synchronized subtitle tracks with full undo support', () => {
+    const store = useEditorStore.getState()
+    const textClipId = store.addTextClip({
+      text: 'EL SECRETO DEL MONTAJE',
+      presetId: 'hormozi-karaoke',
+      at: 2.0,
+      duration: 3.0,
+    })
+    expect(textClipId).toBeTruthy()
+    const addedClip = useEditorStore.getState().tracks.flatMap((t) => t.clips).find((c) => c.id === textClipId)
+    expect(addedClip?.text).toBe('EL SECRETO DEL MONTAJE')
+    expect(addedClip?.textStyle?.presetId).toBe('hormozi-karaoke')
+    expect(addedClip?.textAnimation?.in).toBe('karaoke')
+
+    const generatedCount = useEditorStore.getState().autoGenerateSubtitles(
+      'capcut-pop-pill',
+      'Primera línea de impacto\nSegunda línea dinámica\nTercera línea final',
+    )
+    expect(generatedCount).toBe(3)
+    const subTrack = useEditorStore.getState().tracks.find((t) => t.name === 'Subtítulos IA')
+    expect(subTrack?.clips.length).toBeGreaterThanOrEqual(3)
+
+    useEditorStore.getState().undo()
+    const afterUndo = useEditorStore.getState().tracks.flatMap((t) => t.clips)
+    expect(afterUndo.some((c) => c.text === 'Primera línea de impacto')).toBe(false)
+  })
 })
