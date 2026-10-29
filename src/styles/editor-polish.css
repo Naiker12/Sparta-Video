@@ -2399,17 +2399,24 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
   height: 27px;
-  padding: 0 8px;
+  padding: 0 6px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.14s ease;
+  white-space: nowrap;
+}
+
+.dock-switch-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2434,7 +2441,8 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  gap: 8px;
+  gap: 6px;
+  container-type: inline-size;
 }
 
 .auto-captions-card {
@@ -2502,8 +2510,9 @@
 
 .auto-captions-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .auto-captions-select {
@@ -2568,28 +2577,9 @@
   cursor: not-allowed;
 }
 
-.text-preset-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.text-presets-grid {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-right: 2px;
-}
-
 .text-preset-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 7px 8px;
-  border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--panel-raised);
   color: var(--text);
@@ -2598,36 +2588,18 @@
   transition: all 0.14s ease;
 }
 
-.text-preset-card:hover {
-  border-color: rgba(56, 189, 248, 0.5);
-  background: var(--panel-elevated);
-  transform: translateY(-1px);
-}
-
 .text-preset-stage {
   position: relative;
-  height: 46px;
-  border-radius: 6px;
   background: radial-gradient(circle at center, #1b202c 0%, #0d0f14 100%);
   border: 1px solid rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  padding: 0 8px;
 }
 
 .text-preset-badge {
   position: absolute;
-  top: 4px;
-  right: 5px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #93c5fd;
-  font: 8px ui-monospace, monospace;
-  font-weight: 700;
 }
 
 .text-preset-sample {
@@ -3246,17 +3218,16 @@
   flex-shrink: 0;
 }
 
-/* Barra de categorías segmentada (antes salía como texto sin estilo) */
+/* Barra de categorías segmentada compacta y responsive */
 .text-preset-filters {
   display: flex;
-  flex-wrap: nowrap;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 3px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: 7px;
   background: #0d0f13;
   border: 1px solid var(--line);
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow-x: hidden;
 }
 
 .text-preset-filters::-webkit-scrollbar {
@@ -3264,17 +3235,19 @@
 }
 
 .text-preset-filters .filter-chip {
-  flex: 1 0 auto;
-  height: 24px;
-  padding: 0 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-dim);
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  text-align: center;
   transition: color 0.12s ease, background 0.12s ease;
 }
 
@@ -3289,10 +3262,42 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
-/* Tarjetas de plantilla */
+/* Tarjetas de plantilla compactas y responsivas */
+.text-presets-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+@container (min-width: 310px) {
+  .text-presets-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+}
+
+.media-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 6px 2px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 .text-preset-card {
-  padding: 6px;
-  gap: 6px;
+  padding: 4px 6px;
+  gap: 3px;
+  border-radius: 6px;
 }
 
 .text-preset-card:hover {
@@ -3306,37 +3311,53 @@
 }
 
 .text-preset-stage {
-  height: 54px;
+  height: 34px;
   background: #0a0c10;
+  border-radius: 5px;
+  padding: 0 40px 0 8px;
 }
 
 .text-preset-badge {
-  background: transparent;
+  top: 3px;
+  right: 4px;
+  background: rgba(15, 23, 42, 0.7);
   border-color: rgba(255, 255, 255, 0.1);
   color: var(--text-dim);
-  font-weight: 600;
+  font: 7.5px ui-monospace, monospace;
+  font-weight: 700;
+  padding: 1px 3.5px;
+  border-radius: 3px;
 }
 
 .text-preset-hover-hint {
-  position: absolute;
-  left: 5px;
-  top: 4px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  font: 8px ui-monospace, monospace;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  display: none;
 }
 
-.text-preset-card:hover .text-preset-hover-hint,
-.text-preset-card:focus-visible .text-preset-hover-hint {
-  opacity: 1;
+.text-preset-sample {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.text-preset-meta {
+  gap: 4px;
+}
+
+.text-preset-meta strong {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.text-preset-meta span {
+  font-size: 8px;
+  font-family: ui-monospace, monospace;
+  color: var(--text-dim);
 }
 
 .text-preset-add {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
   background: transparent;
   border-color: var(--line);
   color: var(--text-dim);

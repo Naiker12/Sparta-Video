@@ -9,6 +9,17 @@ import { formatMediaDuration, loadMediaPreview, parseDurationFromDetail, pruneSt
 import type { SubtitleLanguage } from '../services/subtitle-generator'
 import { TEXT_STYLE_PRESETS, type TextPresetCategory } from '../services/text-presets'
 
+const PRESET_COMPACT_PREVIEW: Record<string, string> = {
+  'hormozi-karaoke': 'VOZ EN VIVO',
+  'capcut-pop-pill': 'POP DINÁMICO',
+  'cine-sub-minimal': 'CINE 4K PRO',
+  'editorial-hook': 'CAPÍTULO 01',
+  'kinetic-neon-glow': 'CYBER NEÓN',
+  'lower-third-studio': 'DIRECCIÓN PRO',
+  'typewriter-docu': 'DOCU ARCHIVO',
+  'bounce-viral': 'REELS VIRAL',
+}
+
 type Props = {
   assets: MediaItem[]
   selectedMedia: string | null
@@ -330,7 +341,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                           preset.style.backgroundOpacity > 0
                             ? preset.style.backgroundColor
                             : 'transparent',
-                        padding: preset.style.backgroundOpacity > 0 ? '3px 8px' : '0',
+                        padding: preset.style.backgroundOpacity > 0 ? '2px 6px' : '0',
                         borderRadius: `${Math.min(6, preset.style.backgroundRadius)}px`,
                         textShadow:
                           preset.style.strokeWidth > 0
@@ -340,7 +351,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                               : 'none',
                       }}
                     >
-                      {(preset.id === 'hormozi-karaoke' ? 'VOZ EN VIVO' : preset.sampleText.slice(0, 22))
+                      {(PRESET_COMPACT_PREVIEW[preset.id] ?? preset.sampleText.split(/\s+/).slice(0, 2).join(' '))
                         .split(/\s+/)
                         .filter(Boolean)
                         .map((word, idx, arr) => (
