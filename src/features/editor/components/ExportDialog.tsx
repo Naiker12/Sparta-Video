@@ -165,6 +165,7 @@ export function ExportDialog({
         tracks,
         assets,
         sequenceDuration,
+        sequenceSize: { width: sequenceSize.width, height: sequenceSize.height, frameRate: sequenceSize.frameRate },
         settings,
         mutedTracks,
         signal: controller.signal,

@@ -223,6 +223,7 @@ export interface RenderSequenceParams {
   tracks: Track[]
   assets: MediaItem[]
   sequenceDuration: number
+  sequenceSize?: { width: number; height: number; frameRate?: number }
   settings: ExportSettings
   mutedTracks?: string[]
   onProgress?: (progress: RenderProgress) => void
@@ -238,6 +239,7 @@ async function renderWithWebCodecs({
   assets,
   duration,
   totalFrames,
+  sequenceSize,
   settings,
   mutedTracks,
   onProgress,
@@ -251,6 +253,7 @@ async function renderWithWebCodecs({
   assets: MediaItem[]
   duration: number
   totalFrames: number
+  sequenceSize?: { width: number; height: number; frameRate?: number }
   settings: ExportSettings
   mutedTracks: string[]
   onProgress?: (progress: RenderProgress) => void
@@ -468,7 +471,15 @@ async function renderWithWebCodecs({
 
     for (const clip of [...mediaClips, ...textClips]) {
       const aId = resolveClipAssetId(clip, assets)
-      drawClipToCanvas(ctx, clip, aId ? visualAssets.get(aId) : undefined, time, settings.width, settings.height)
+      drawClipToCanvas(
+        ctx,
+        clip,
+        aId ? visualAssets.get(aId) : undefined,
+        time,
+        settings.width,
+        settings.height,
+        sequenceSize?.width,
+      )
     }
 
     const timestampMicros = Math.round(time * 1_000_000)
@@ -542,6 +553,7 @@ export async function renderSequence({
   tracks,
   assets,
   sequenceDuration,
+  sequenceSize,
   settings,
   mutedTracks = [],
   onProgress,
@@ -687,6 +699,7 @@ export async function renderSequence({
         assets,
         duration,
         totalFrames,
+        sequenceSize,
         settings,
         mutedTracks,
         onProgress,
@@ -720,7 +733,15 @@ export async function renderSequence({
   const initialText = initialClips.filter((c) => c.text !== undefined || c.thumbnail === 'text-overlay')
   for (const clip of [...initialMedia, ...initialText]) {
     const aId = resolveClipAssetId(clip, assets)
-    drawClipToCanvas(ctx, clip, aId ? visualAssets.get(aId) : undefined, 0, settings.width, settings.height)
+    drawClipToCanvas(
+      ctx,
+      clip,
+      aId ? visualAssets.get(aId) : undefined,
+      0,
+      settings.width,
+      settings.height,
+      sequenceSize?.width,
+    )
   }
 
   // Start initial media videos playing
@@ -854,7 +875,15 @@ export async function renderSequence({
 
       for (const clip of [...mediaClips, ...textClips]) {
         const aId = resolveClipAssetId(clip, assets)
-        drawClipToCanvas(ctx, clip, aId ? visualAssets.get(aId) : undefined, time, settings.width, settings.height)
+        drawClipToCanvas(
+          ctx,
+          clip,
+          aId ? visualAssets.get(aId) : undefined,
+          time,
+          settings.width,
+          settings.height,
+          sequenceSize?.width,
+        )
       }
 
       // Force canvas capture frame if API is available
@@ -937,9 +966,10 @@ function drawClipToCanvas(
   time: number,
   canvasWidth: number,
   canvasHeight: number,
+  sequenceWidth?: number,
 ) {
   if (clip.text !== undefined || clip.thumbnail === 'text-overlay') {
-    drawAnimatedTextClipToCanvas(ctx, clip, time, canvasWidth, canvasHeight)
+    drawAnimatedTextClipToCanvas(ctx, clip, time, canvasWidth, canvasHeight, sequenceWidth)
     return
   }
 

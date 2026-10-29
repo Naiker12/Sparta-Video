@@ -136,5 +136,43 @@ describe('CapCut Pro text presets & animation engine', () => {
     expect(filledWords.length).toBeGreaterThan(5)
     expect(mockCtx.restore).toHaveBeenCalled()
   })
+
+  it('anchors subtitles precisely at center and custom positionY on vertical 1080x1920 canvas', () => {
+    const clip = makeTextClip('hormozi-karaoke', 'Y TU CÓDIGO SERÁ LIMPIO', 0, 3)
+    clip.textStyle = { ...clip.textStyle!, positionY: 25 }
+    clip.transform = { x: 540, y: 480, scaleX: 100, scaleY: 100, rotation: 0 }
+
+    const mockCtx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      rotate: vi.fn(),
+      scale: vi.fn(),
+      measureText: vi.fn((str: string) => ({ width: str.length * 16 })),
+      beginPath: vi.fn(),
+      roundRect: vi.fn(),
+      rect: vi.fn(),
+      fill: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn(),
+      globalAlpha: 1,
+      font: '',
+      textBaseline: 'middle',
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 0,
+      lineJoin: 'round',
+      shadowColor: '',
+      shadowBlur: 0,
+      shadowOffsetY: 0,
+      textAlign: 'left',
+    } as unknown as CanvasRenderingContext2D
+
+    drawAnimatedTextClipToCanvas(mockCtx, clip, 1.0, 1080, 1920, 1080)
+    expect(mockCtx.translate).toHaveBeenCalled()
+    const [transX, transY] = (mockCtx.translate as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(transX).toBeCloseTo(540, 0)
+    expect(transY).toBeCloseTo(480, 0)
+  })
 })
 

@@ -158,8 +158,9 @@ export function PreviewMonitor({
   const zoomRatio = zoom === 'fit' ? 1 : zoom === '50%' ? 0.5 : zoom === '100%' ? 1 : 2
   const boxWidth = zoom === 'fit' ? fitWidth : Math.round(sequenceSize.width * zoomRatio)
   const boxHeight = boxWidth / sequenceAspect
-  // Mismo factor que el render de exportación (canvasHeight / 1080) llevado a píxeles del monitor
-  const textUnit = boxHeight > 0 ? boxHeight / 1080 : 0.42
+  // Mismo factor que el render de exportación adaptado a la orientación (horizontal 1080 o vertical 1920)
+  const refSequenceHeight = sequenceSize.height > sequenceSize.width ? 1920 : 1080
+  const textUnit = boxHeight > 0 ? boxHeight / refSequenceHeight : 0.42
   const canvasBoxStyle = boxWidth > 0
     ? { width: `${Math.round(boxWidth)}px`, height: `${Math.round(boxHeight)}px` }
     : { aspectRatio: `${sequenceSize.width}/${sequenceSize.height}` }

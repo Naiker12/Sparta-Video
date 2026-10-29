@@ -74,7 +74,11 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
     const preset = getTextPreset(presetId)
     onUpdateClip(clip.id, {
       text: clip.text ?? preset.sampleText,
-      textStyle: { ...preset.style },
+      textStyle: {
+        ...preset.style,
+        positionY: textStyle.positionY ?? preset.style.positionY,
+        fontSize: textStyle.fontSize ?? preset.style.fontSize,
+      },
       textAnimation: { ...preset.animation },
     })
   }
@@ -193,7 +197,13 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                 rows={2}
                 disabled={readOnly}
                 value={clip.text ?? clip.title}
-                onChange={(e) => onUpdateClip(clip.id, { text: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value
+                  onUpdateClip(clip.id, {
+                    text: val,
+                    title: val.trim().length > 26 ? `${val.trim().slice(0, 26)}…` : (val.trim() || t('Subtítulo', 'Subtitle')),
+                  })
+                }}
               />
               <div className="subtitle-calib-grid">
                 <div className="calib-slider-card">
@@ -349,7 +359,15 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                 disabled={readOnly}
                 placeholder={t('Escribe el texto o subtítulo aquí…', 'Type text or subtitle here…')}
                 value={clip.text ?? clip.title}
-                onChange={(e) => onUpdateClip(clip.id, { text: e.target.value, textStyle, textAnimation })}
+                onChange={(e) => {
+                  const val = e.target.value
+                  onUpdateClip(clip.id, {
+                    text: val,
+                    title: val.trim().length > 26 ? `${val.trim().slice(0, 26)}…` : (val.trim() || t('Subtítulo', 'Subtitle')),
+                    textStyle,
+                    textAnimation,
+                  })
+                }}
               />
               {isTextClip && onCalibrateAllSubtitles && (
                 <button

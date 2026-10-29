@@ -503,6 +503,15 @@ function App() {
           ),
           { id: subToast, description: modeDesc },
         )
+
+        // Seleccionar automáticamente el primer subtítulo para que el usuario pueda calibrarlo y modificarlo de inmediato en el Inspector
+        const currentTracks = useEditorStore.getState().tracks
+        const subTrack = currentTracks.find((t) => t.name.toLowerCase().includes('sub'))
+        const firstClip = subTrack?.clips.find((c) => c.text !== undefined || c.thumbnail === 'text-overlay')
+        if (firstClip) {
+          selectClip(firstClip.id)
+          setPlayhead(firstClip.start)
+        }
       } else {
         toast.warning(t('No se detectó voz en el video', 'No voice detected in video'), { id: subToast })
       }
