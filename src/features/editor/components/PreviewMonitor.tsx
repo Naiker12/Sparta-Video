@@ -111,8 +111,8 @@ export function PreviewMonitor({
 
   useEffect(() => {
     const video = videoRef.current
-    if (!video || !sourceUrl || !isVideo || clipStart === undefined) return
-    const sourceTime = Math.max(0, playhead - clipStart)
+    if (!video || !sourceUrl || !isVideo) return
+    const sourceTime = clipStart !== undefined ? Math.max(0, playhead - clipStart) : Math.max(0, playhead)
     if (video.readyState >= 1 && Math.abs(video.currentTime - sourceTime) > (playing ? 0.35 : 0.04)) {
       try { video.currentTime = sourceTime } catch { /* The media element will seek when metadata is ready. */ }
     }
@@ -270,17 +270,22 @@ export function PreviewMonitor({
           const video = event.currentTarget
           video.volume = Math.max(0, Math.min(1, volume))
           video.muted = isMuted
-          if (!clip) return
-          if (Math.abs(clip.duration - 6) < 0.08 && Number.isFinite(video.duration) && video.duration > 6.5) {
+          if (clip && Math.abs(clip.duration - 6) < 0.08 && Number.isFinite(video.duration) && video.duration > 6.5) {
             const realDur = Math.round(video.duration * frameRate) / frameRate
             onUpdateClip?.(clip.id, {
               duration: realDur,
               ...(clip.start > 0 && clip.start <= 0.16 ? { start: 0 } : {}),
             })
           }
-          try { video.currentTime = Math.max(0, playhead - clip.start) } catch { /* The browser will seek when metadata is ready. */ }
+          const seekTime = clipStart !== undefined ? Math.max(0, playhead - clipStart) : Math.max(0, playhead)
+          try { video.currentTime = seekTime } catch { /* The browser will seek when metadata is ready. */ }
           if (playing) void video.play().catch(() => { })
-        }} onTimeUpdate={(event) => { if (playing && clip) { const next = clip.start + event.currentTarget.currentTime; if (Math.abs(next - playhead) > 0.12) onSeek(Math.min(duration, next)) } }} />}
+        }} onTimeUpdate={(event) => {
+          if (playing) {
+            const next = clipStart !== undefined ? clipStart + event.currentTarget.currentTime : event.currentTarget.currentTime
+            if (Math.abs(next - playhead) > 0.12) onSeek(duration > 0 ? Math.min(duration, next) : next)
+          }
+        }} />}
         {!sourceUrl && !hasActiveTextOverlays && (
           <div className="preview-empty-copy">
             {sourceLoading ? <LoaderCircle size={20} className="spin" aria-hidden="true" /> : <Film size={20} strokeWidth={1.6} aria-hidden="true" />}

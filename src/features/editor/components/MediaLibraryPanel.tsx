@@ -465,7 +465,9 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                   <button
                     className={`media-card ${selectedMedia === item.id ? 'media-selected' : ''}`}
                     draggable
+                    onPointerDown={() => onSelect(item)}
                     onDragStart={(event) => {
+                      onSelect(item)
                       event.dataTransfer.effectAllowed = 'copyMove'
                       event.dataTransfer.setData('application/sparta-media', item.id)
                       event.dataTransfer.setData('text/plain', item.id)
@@ -487,7 +489,25 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                         {item.type === 'audio' ? <AudioLines size={13} /> : item.type === 'image' ? <ImageIcon size={13} /> : <Video size={13} />}
                       </span>
                       <span className="duration" aria-label={knownTime ?? t('Duración no disponible', 'Duration unavailable')}>{knownTime ?? '—'}</span>
-                      <span className="media-add"><Plus size={15} /></span>
+                      <span
+                        className="media-add"
+                        role="button"
+                        tabIndex={0}
+                        title={t('Añadir a la línea de tiempo', 'Add to timeline')}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onAdd(item)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.stopPropagation()
+                            event.preventDefault()
+                            onAdd(item)
+                          }
+                        }}
+                      >
+                        <Plus size={15} />
+                      </span>
                     </div>
                     <div className="media-title" title={item.title}>{item.title}</div>
                     <div className="media-detail">{details[0]}</div>

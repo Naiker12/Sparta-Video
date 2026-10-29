@@ -259,7 +259,7 @@ export function parseDurationFromDetail(detail?: string): number | null {
     const total = h * 3600 + m * 60 + s
     return total > 0 ? total : null
   }
-  const msMatch = detail.match(/\b(\d{2}):(\d{2})\b/)
+  const msMatch = detail.match(/\b(\d{1,2}):(\d{2})\b/)
   if (msMatch) {
     const m = Number(msMatch[1])
     const s = Number(msMatch[2])

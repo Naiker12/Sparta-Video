@@ -124,6 +124,7 @@ function App() {
       ),
     )
   const selectedMedia = assets.find((item) => item.id === selectedMediaId)
+  const effectiveDuration = sequenceDuration > 0 ? sequenceDuration : (selectedMedia?.durationSeconds ?? 0)
   const hasReadyAssets = assets.some((asset) => asset.status === 'ready')
   const hasTextClips = tracks.some((track) => track.clips.some((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay'))
   const hasTimelineClips = tracks.some((track) => track.clips.length > 0)
@@ -168,7 +169,7 @@ function App() {
   }, [assets])
 
   useEffect(() => {
-    if (!playing || sequenceDuration <= 0) return
+    if (!playing || effectiveDuration <= 0) return
     let lastFrameAt = performance.now()
     let animationFrame = 0
     const advance = (now: number) => {
@@ -176,8 +177,8 @@ function App() {
       if (elapsed < 1 / frameRate) { animationFrame = requestAnimationFrame(advance); return }
       lastFrameAt = now
       const next = useEditorStore.getState().playhead + elapsed
-      if (next >= sequenceDuration) {
-        setPlayhead(sequenceDuration)
+      if (next >= effectiveDuration) {
+        setPlayhead(effectiveDuration)
         setPlaying(false)
         return
       }
@@ -186,7 +187,7 @@ function App() {
     }
     animationFrame = requestAnimationFrame(advance)
     return () => cancelAnimationFrame(animationFrame)
-  }, [playing, sequenceDuration, frameRate, setPlayhead, setPlaying])
+  }, [playing, effectiveDuration, frameRate, setPlayhead, setPlaying])
 
   useEffect(() => {
     if (!audioEngineRef.current) audioEngineRef.current = new TimelineAudioEngine()
@@ -277,7 +278,7 @@ function App() {
       if (event.key === 'ArrowLeft') setPlayhead(useEditorStore.getState().playhead - (event.shiftKey ? 1 : 1 / useEditorStore.getState().sequence.frameRate))
       if (event.key === 'ArrowRight') setPlayhead(useEditorStore.getState().playhead + (event.shiftKey ? 1 : 1 / useEditorStore.getState().sequence.frameRate))
       if (event.key === 'Home') { event.preventDefault(); setPlayhead(0) }
-      if (event.key === 'End') { event.preventDefault(); setPlayhead(sequenceDuration) }
+      if (event.key === 'End') { event.preventDefault(); setPlayhead(effectiveDuration) }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo() }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') { const id = useEditorStore.getState().selectedClipId; if (id) { event.preventDefault(); duplicateClip(id) } }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); document.querySelector<HTMLInputElement>('[aria-label="Buscar medios"]')?.focus() }
@@ -290,7 +291,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [addMarker, deleteClip, duplicateClip, handleClearSubtitles, moveClip, redo, renameOpen, sequenceDuration, setActiveTool, setPlayhead, settingsOpen, splitClip, undo])
+  }, [addMarker, deleteClip, duplicateClip, effectiveDuration, handleClearSubtitles, moveClip, redo, renameOpen, setActiveTool, setPlayhead, settingsOpen, splitClip, undo])
 
   const importFiles = async (files: FileList | File[] | null) => {
     if (!files?.length) return
@@ -415,7 +416,7 @@ function App() {
     })
   }
   const togglePlayback = () => {
-    if (!playing && sequenceDuration > 0 && playhead >= sequenceDuration) setPlayhead(0)
+    if (!playing && effectiveDuration > 0 && playhead >= effectiveDuration) setPlayhead(0)
     setPlaying(!playing)
   }
   const relinkMedia = async (assetId: string, file: File) => {
@@ -579,7 +580,7 @@ function App() {
                   markers={markers}
                   onSeek={setPlayhead}
                   frameRate={frameRate}
-                  duration={sequenceDuration}
+                  duration={effectiveDuration}
                   clip={previewClip}
                   textOverlays={activeTextOverlays}
                   selectedClipId={selectedClipId}

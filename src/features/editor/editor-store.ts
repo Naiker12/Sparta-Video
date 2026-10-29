@@ -222,8 +222,23 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
     let clipId = ''
     set((state) => {
       const requested = trackId ? state.tracks.find((track) => track.id === trackId) : undefined
-      const target = requested?.kind === kind && !state.lockedTracks.includes(requested.id) ? requested : trackId ? undefined : state.tracks.find((track) => track.kind === kind && !state.lockedTracks.includes(track.id))
-      if (!target) return state
+      let target = requested?.kind === kind && !state.lockedTracks.includes(requested.id) ? requested : undefined
+      if (!target) {
+        target = state.tracks.find((track) => track.kind === kind && !state.lockedTracks.includes(track.id))
+      }
+      let tracks = copyTracks(state.tracks)
+      if (!target) {
+        let num = tracks.filter((t) => t.kind === kind).length + 1
+        const prefix = kind === 'video' ? 'v' : 'a'
+        while (tracks.some((t) => t.id === `${prefix}${num}`)) num += 1
+        target = {
+          id: `${prefix}${num}`,
+          name: kind === 'video' ? `Vídeo ${String(num).padStart(2, '0')}` : `Audio ${String(num).padStart(2, '0')}`,
+          kind,
+          clips: [],
+        }
+        tracks.push(target)
+      }
       const latestAsset = state.assets.find((item) => item.id === asset.id) ?? asset
       const resolvedDuration =
         latestAsset.durationSeconds ??
@@ -235,11 +250,28 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
         state.snapToFrames ? Math.round(resolvedDuration * fps) / fps : resolvedDuration,
       )
       clipId = `c${nextClip++}`
-      while (state.tracks.some((track) => track.clips.some((item) => item.id === clipId))) clipId = `c${nextClip++}`
-      const clip: Clip = { id: clipId, title: latestAsset.title, sourceAssetId: latestAsset.id, start: 0, duration, color: latestAsset.thumb === 'cliff' ? 'olive' : latestAsset.thumb === 'harbor' ? 'blue' : 'sand', thumbnail: latestAsset.thumb, kind, transform: { x: state.sequence.width / 2, y: state.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }, uniformScale: true, opacity: 100, blendMode: 'normal', volume: 100, fadeIn: 0, fadeOut: 0, keyframes: [] }
+      while (tracks.some((track) => track.clips.some((item) => item.id === clipId))) clipId = `c${nextClip++}`
+      const clip: Clip = {
+        id: clipId,
+        title: latestAsset.title,
+        sourceAssetId: latestAsset.id,
+        start: 0,
+        duration,
+        color: latestAsset.thumb === 'cliff' ? 'olive' : latestAsset.thumb === 'harbor' ? 'blue' : 'sand',
+        thumbnail: latestAsset.thumb,
+        kind,
+        transform: { x: state.sequence.width / 2, y: state.sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 },
+        uniformScale: true,
+        opacity: 100,
+        blendMode: 'normal',
+        volume: 100,
+        fadeIn: 0,
+        fadeOut: 0,
+        keyframes: [],
+      }
       const rawStart = at ?? (target.clips.length === 0 ? 0 : target.clips.reduce((end, item) => Math.max(end, item.start + item.duration), 0))
       const start = state.snapToFrames ? Math.round(rawStart * fps) / fps : rawStart
-      const tracks = copyTracks(state.tracks).map((track) => track.id === target.id ? { ...track, clips: [...track.clips, { ...clip, start }] } : track)
+      tracks = tracks.map((track) => track.id === target!.id ? { ...track, clips: [...track.clips, { ...clip, start }] } : track)
       return { ...commit(state, { tracks }), selectedClipId: clip.id, selectedMediaId: null }
     })
     return clipId
@@ -364,21 +396,30 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
       if (!newClips.length) return state
 
       // Sort and sanitize durations to eliminate any overlapping subtitles (SOLAPE)
-      newClips.sort((a, b) => a.start - b.start)
+      const sampleTexts = new Set(TEXT_STYLE_PRESETS.map((p) => p.sampleText.toUpperCase()))
       const frameDelta = 1 / fps
-      for (let i = 0; i < newClips.length - 1; i++) {
-        const cur = newClips[i]
-        const nxt = newClips[i + 1]
+      const baseTrackClips = options?.replaceExisting
+        ? []
+        : (tracks.find((t) => t.id === subTrack!.id)?.clips.filter((c) => !newClips.some((nc) => nc.id === c.id)) ?? [])
+      const combinedClips = [...baseTrackClips, ...newClips]
+      combinedClips.sort((a, b) => a.start - b.start)
+
+      for (let i = 0; i < combinedClips.length - 1; i++) {
+        const cur = combinedClips[i]
+        const nxt = combinedClips[i + 1]
+        if (nxt.start < cur.start + frameDelta) {
+          nxt.start = cur.start + frameDelta
+        }
         if (cur.start + cur.duration > nxt.start) {
-          const maxDur = nxt.start - cur.start - frameDelta
-          cur.duration = Math.max(0.3, state.snapToFrames ? Math.round(maxDur * fps) / fps : Math.round(maxDur * 1000) / 1000)
+          const maxDur = Math.max(frameDelta, nxt.start - cur.start)
+          cur.duration = state.snapToFrames ? Math.round(maxDur * fps) / fps : maxDur
         }
       }
-      const sampleTexts = new Set(TEXT_STYLE_PRESETS.map((p) => p.sampleText.toUpperCase()))
+
       tracks = tracks
         .map((t) => {
           if (t.id === subTrack!.id) {
-            return { ...t, clips: options?.replaceExisting ? newClips : [...t.clips, ...newClips] }
+            return { ...t, clips: combinedClips }
           }
           if (options?.replaceExisting) {
             // Also clean up any single sample placeholder text clips on auxiliary text tracks
