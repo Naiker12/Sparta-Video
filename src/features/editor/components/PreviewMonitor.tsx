@@ -24,6 +24,8 @@ type Props = {
   onTogglePlay: () => void
   onSelectClip?: (clipId: string) => void
   onUpdateClip?: (clipId: string, changes: Partial<Clip>) => void
+  isMuted?: boolean
+  volume?: number
 }
 type ZoomPreset = 'fit' | '50%' | '100%' | '200%'
 
@@ -57,6 +59,8 @@ export function PreviewMonitor({
   onTogglePlay,
   onSelectClip,
   onUpdateClip,
+  isMuted = false,
+  volume = 1,
 }: Props) {
   const [safeMargins, setSafeMargins] = useState(false)
   const [thirds, setThirds] = useState(false)
@@ -112,9 +116,20 @@ export function PreviewMonitor({
     if (video.readyState >= 1 && Math.abs(video.currentTime - sourceTime) > (playing ? 0.35 : 0.04)) {
       try { video.currentTime = sourceTime } catch { /* The media element will seek when metadata is ready. */ }
     }
-    if (playing) void video.play().catch(() => { })
-    else video.pause()
-  }, [sourceUrl, isVideo, clipStart, clip?.id, playhead, playing])
+    video.volume = Math.max(0, Math.min(1, volume))
+    video.muted = isMuted
+    if (playing) {
+      void video.play().catch(() => {
+        // Fallback if browser policy blocks unmuted autoplay without prior interaction
+        if (!video.muted) {
+          video.muted = true
+          void video.play().catch(() => {})
+        }
+      })
+    } else {
+      video.pause()
+    }
+  }, [sourceUrl, isVideo, clipStart, clip?.id, playhead, playing, volume, isMuted])
 
   const toggleFullscreen = async () => {
     if (!stageRef.current) return
@@ -251,8 +266,10 @@ export function PreviewMonitor({
     <div className={`preview-stage ${zoom !== 'fit' ? 'is-zoomed' : ''}`} ref={stageRef}>
       <div ref={canvasBoxRef} className={`preview-image ${sourceUrl || hasActiveTextOverlays ? 'preview-image-loaded' : 'preview-empty-image'}`} style={canvasBoxStyle}>
         {sourceUrl && isImage && <img className="preview-media-image" style={mediaTransform} src={sourceUrl} alt={previewTitle ?? ''} />}
-        {sourceUrl && isVideo && <video key={`${sourceAssetId}-${clip?.id ?? 'library'}`} ref={videoRef} className="preview-media-image" style={mediaTransform} src={sourceUrl} muted playsInline preload="auto" onLoadedMetadata={(event) => {
+        {sourceUrl && isVideo && <video key={`${sourceAssetId}-${clip?.id ?? 'library'}`} ref={videoRef} className="preview-media-image" style={mediaTransform} src={sourceUrl} muted={isMuted} playsInline preload="auto" onLoadedMetadata={(event) => {
           const video = event.currentTarget
+          video.volume = Math.max(0, Math.min(1, volume))
+          video.muted = isMuted
           if (!clip) return
           if (Math.abs(clip.duration - 6) < 0.08 && Number.isFinite(video.duration) && video.duration > 6.5) {
             const realDur = Math.round(video.duration * frameRate) / frameRate

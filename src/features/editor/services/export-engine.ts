@@ -126,13 +126,21 @@ export function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
  */
 export async function renderAudioMixdown(
   tracks: Track[],
-  _assets: MediaItem[],
+  assets: MediaItem[] = [],
   duration: number,
   mutedTracks: string[] = [],
   sampleRate = 48000,
 ): Promise<AudioBuffer | null> {
-  const audioTracks = tracks.filter((t) => t.kind === 'audio' && !mutedTracks.includes(t.id))
-  const audioClips = audioTracks.flatMap((t) => t.clips).filter((c) => c.duration > 0)
+  const unmutedTracks = tracks.filter((t) => !mutedTracks.includes(t.id))
+  const audioClips = unmutedTracks.flatMap((t) =>
+    t.clips.filter((c) => {
+      if (c.duration <= 0 || !c.sourceAssetId) return false
+      if (c.text !== undefined || c.thumbnail === 'text-overlay' || c.thumbnail === 'image-catalog') return false
+      const asset = assets.find((a) => a.id === c.sourceAssetId)
+      if (asset?.type === 'image') return false
+      return true
+    }),
+  )
   if (audioClips.length === 0 || duration <= 0) return null
 
   const lengthSamples = Math.max(1, Math.ceil(duration * sampleRate))
