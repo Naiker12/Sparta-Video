@@ -304,7 +304,8 @@ export function PreviewMonitor({
             scaleY: 100,
             rotation: 0,
           }
-          const customOffsetXPercent = ((tTransform.x / sequenceSize.width) - 0.5) * 100
+          const posXPercent = Math.max(6, Math.min(94, Math.round((tTransform.x / Math.max(1, sequenceSize.width)) * 1000) / 10))
+          const posYPercent = Math.max(6, Math.min(94, style.positionY ?? 78))
           const customScaleX = (tTransform.scaleX ?? 100) / 100
           const customScaleY = (tTransform.scaleY ?? 100) / 100
           const customRot = tTransform.rotation ?? 0
@@ -330,8 +331,9 @@ export function PreviewMonitor({
               data-testid={`preview-text-overlay-${textClip.id}`}
               className={`preview-text-overlay-anchor align-${style.align} ${isSelected ? 'selected' : ''}`}
               style={{
-                top: `${style.positionY}%`,
-                left: `calc(50% + ${Math.round(customOffsetXPercent * 10) / 10}%)`,
+                top: `${posYPercent}%`,
+                left: `${posXPercent}%`,
+                transform: 'translate(-50%, -50%)',
                 opacity: anim.opacity * clipAlpha,
               }}
               onPointerDown={(e) => startTextOverlayDrag(e, textClip)}

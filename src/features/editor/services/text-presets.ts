@@ -612,13 +612,25 @@ export function drawAnimatedTextClipToCanvas(
 
     // Posicionamiento horizontal seguro con clamping para que NUNCA se salga de pantalla
     let targetX = canvasWidth * 0.5
-    if (style.align === 'left') targetX = canvasWidth * 0.08 + maxKLineWidth / 2
-    else if (style.align === 'right') targetX = canvasWidth * 0.92 - maxKLineWidth / 2
 
-    // Si el clip tiene desplazamiento personalizado en X, aplicarlo pero clamped
-    if (clip.transform && Math.abs(clip.transform.x - canvasWidth / 2) > 5) {
-      targetX = clip.transform.x
+    if (clip.transform && typeof clip.transform.x === 'number') {
+      const baseWidth = clip.transform.x > 1400 ? 1920 : clip.transform.x > 800 ? 1280 : 1080
+      const relativeXRatio = clip.transform.x / baseWidth
+      if (Math.abs(relativeXRatio - 0.5) > 0.02) {
+        targetX = canvasWidth * relativeXRatio
+      } else {
+        targetX = canvasWidth * 0.5
+      }
     }
+
+    // Los subtítulos por defecto siempre se centran horizontalmente en el eje seguro.
+    // Solo titulares o cintillos con align 'left'/'right' explícito se mueven a los laterales:
+    if (!isSubtitle && style.align === 'left' && (!clip.transform || Math.abs(clip.transform.x - canvasWidth / 2) <= 5)) {
+      targetX = canvasWidth * 0.08 + maxKLineWidth / 2
+    } else if (!isSubtitle && style.align === 'right' && (!clip.transform || Math.abs(clip.transform.x - canvasWidth / 2) <= 5)) {
+      targetX = canvasWidth * 0.92 - maxKLineWidth / 2
+    }
+
     const halfWidth = (maxKLineWidth / 2) * calibScaleX
     const safeAnchorX = Math.max(canvasWidth * 0.06 + halfWidth, Math.min(canvasWidth * 0.94 - halfWidth, targetX))
 
@@ -722,12 +734,23 @@ export function drawAnimatedTextClipToCanvas(
     }
 
     let targetX = canvasWidth * 0.5
-    if (style.align === 'left') targetX = canvasWidth * 0.08 + maxLineWidth / 2
-    else if (style.align === 'right') targetX = canvasWidth * 0.92 - maxLineWidth / 2
 
-    if (clip.transform && Math.abs(clip.transform.x - canvasWidth / 2) > 5) {
-      targetX = clip.transform.x
+    if (clip.transform && typeof clip.transform.x === 'number') {
+      const baseWidth = clip.transform.x > 1400 ? 1920 : clip.transform.x > 800 ? 1280 : 1080
+      const relativeXRatio = clip.transform.x / baseWidth
+      if (Math.abs(relativeXRatio - 0.5) > 0.02) {
+        targetX = canvasWidth * relativeXRatio
+      } else {
+        targetX = canvasWidth * 0.5
+      }
     }
+
+    if (!isSubtitle && style.align === 'left' && (!clip.transform || Math.abs(clip.transform.x - canvasWidth / 2) <= 5)) {
+      targetX = canvasWidth * 0.08 + maxLineWidth / 2
+    } else if (!isSubtitle && style.align === 'right' && (!clip.transform || Math.abs(clip.transform.x - canvasWidth / 2) <= 5)) {
+      targetX = canvasWidth * 0.92 - maxLineWidth / 2
+    }
+
     const halfWidth = (maxLineWidth / 2) * calibScaleX
     const safeAnchorX = Math.max(canvasWidth * 0.06 + halfWidth, Math.min(canvasWidth * 0.94 - halfWidth, targetX))
 

@@ -3,6 +3,8 @@ import type { ExportPresetId, ExportSettings, RenderProgress, RenderResult } fro
 import { loadMediaSource } from './media-storage'
 import { getInterpolatedOpacity, getInterpolatedTransform } from './keyframe-interpolation'
 import { drawAnimatedTextClipToCanvas } from './text-presets'
+import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4ArrayBufferTarget } from 'mp4-muxer'
+import { Muxer as WebmMuxer, ArrayBufferTarget as WebmArrayBufferTarget } from 'webm-muxer'
 
 export const EXPORT_PRESETS: Record<ExportPresetId, {
   label: string
@@ -14,40 +16,40 @@ export const EXPORT_PRESETS: Record<ExportPresetId, {
   format: 'webm' | 'mp4' | 'wav'
 }> = {
   'web-1080p': {
-    label: '1080p Full HD (Web / YouTube)',
-    description: '1920 × 1080 · 30 fps · 8 Mbps',
+    label: '1080p Full HD (MP4 / Web)',
+    description: '1920 × 1080 · 30 fps · 8 Mbps MP4',
     width: 1920,
     height: 1080,
     frameRate: 30,
     bitrateMbps: 8,
-    format: 'webm',
+    format: 'mp4',
   },
   'social-vertical': {
     label: '1080p Vertical (TikTok / Reels / Shorts)',
-    description: '1080 × 1920 · 30 fps · 8 Mbps',
+    description: '1080 × 1920 · 30 fps · 8 Mbps MP4',
     width: 1080,
     height: 1920,
     frameRate: 30,
     bitrateMbps: 8,
-    format: 'webm',
+    format: 'mp4',
   },
   'uhd-4k': {
     label: '4K Ultra HD (Master)',
-    description: '3840 × 2160 · 30 fps · 25 Mbps',
+    description: '3840 × 2160 · 30 fps · 25 Mbps MP4',
     width: 3840,
     height: 2160,
     frameRate: 30,
     bitrateMbps: 25,
-    format: 'webm',
+    format: 'mp4',
   },
   'fast-720p': {
     label: '720p HD Rápido (Borrador)',
-    description: '1280 × 720 · 30 fps · 4 Mbps',
+    description: '1280 × 720 · 30 fps · 4 Mbps MP4',
     width: 1280,
     height: 720,
     frameRate: 30,
     bitrateMbps: 4,
-    format: 'webm',
+    format: 'mp4',
   },
   'audio-only': {
     label: 'Audio Master (Mixdown estéreo)',
@@ -227,6 +229,312 @@ export interface RenderSequenceParams {
   signal?: AbortSignal
 }
 
+async function renderWithWebCodecs({
+  canvas,
+  ctx,
+  visualAssets,
+  audioBuffer,
+  tracks,
+  assets,
+  duration,
+  totalFrames,
+  settings,
+  mutedTracks,
+  onProgress,
+  signal,
+}: {
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+  visualAssets: Map<string, HTMLImageElement | HTMLVideoElement>
+  audioBuffer: AudioBuffer | null
+  tracks: Track[]
+  assets: MediaItem[]
+  duration: number
+  totalFrames: number
+  settings: ExportSettings
+  mutedTracks: string[]
+  onProgress?: (progress: RenderProgress) => void
+  signal?: AbortSignal
+}): Promise<RenderResult> {
+  const isMp4 = settings.format === 'mp4'
+
+  // Determinar códec de vídeo óptimo con aceleración por hardware
+  let videoCodec = isMp4 ? 'avc1.4d002a' : 'vp09.00.10.08'
+  if (isMp4) {
+    const isSupported = await VideoEncoder.isConfigSupported({
+      codec: 'avc1.4d002a',
+      width: settings.width,
+      height: settings.height,
+      bitrate: settings.bitrateMbps * 1_000_000,
+      framerate: settings.frameRate,
+    }).catch(() => null)
+    if (!isSupported?.supported) {
+      const isBaselineSupported = await VideoEncoder.isConfigSupported({
+        codec: 'avc1.42001e',
+        width: settings.width,
+        height: settings.height,
+        bitrate: settings.bitrateMbps * 1_000_000,
+        framerate: settings.frameRate,
+      }).catch(() => null)
+      videoCodec = isBaselineSupported?.supported ? 'avc1.42001e' : 'avc1.640028'
+    }
+  } else {
+    const isVp9Supported = await VideoEncoder.isConfigSupported({
+      codec: 'vp09.00.10.08',
+      width: settings.width,
+      height: settings.height,
+      bitrate: settings.bitrateMbps * 1_000_000,
+      framerate: settings.frameRate,
+    }).catch(() => null)
+    if (!isVp9Supported?.supported) {
+      videoCodec = 'vp8'
+    }
+  }
+
+  // Verificar soporte de códec de audio
+  let canEncodeAudio = false
+  let audioCodec = isMp4 ? 'mp4a.40.2' : 'opus'
+  if (audioBuffer && typeof AudioEncoder !== 'undefined') {
+    const isAudioSupported = await AudioEncoder.isConfigSupported({
+      codec: audioCodec,
+      sampleRate: audioBuffer.sampleRate,
+      numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+      bitrate: 192_000,
+    }).catch(() => null)
+    canEncodeAudio = !!isAudioSupported?.supported
+    if (!canEncodeAudio && isMp4) {
+      const isAacSupported = await AudioEncoder.isConfigSupported({
+        codec: 'aac',
+        sampleRate: audioBuffer.sampleRate,
+        numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+        bitrate: 192_000,
+      }).catch(() => null)
+      if (isAacSupported?.supported) {
+        audioCodec = 'aac'
+        canEncodeAudio = true
+      }
+    }
+  }
+
+  const mp4Target = isMp4 ? new Mp4ArrayBufferTarget() : null
+  const webmTarget = !isMp4 ? new WebmArrayBufferTarget() : null
+
+  const muxer = isMp4
+    ? new Mp4Muxer({
+        target: mp4Target!,
+        video: {
+          codec: 'avc',
+          width: settings.width,
+          height: settings.height,
+        },
+        audio: canEncodeAudio && audioBuffer
+          ? {
+              codec: 'aac',
+              numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+              sampleRate: audioBuffer.sampleRate,
+            }
+          : undefined,
+        fastStart: 'in-memory',
+      })
+    : new WebmMuxer({
+        target: webmTarget!,
+        video: {
+          codec: videoCodec.startsWith('vp09') ? 'V_VP9' : 'V_VP8',
+          width: settings.width,
+          height: settings.height,
+          frameRate: settings.frameRate,
+        },
+        audio: canEncodeAudio && audioBuffer
+          ? {
+              codec: 'A_OPUS',
+              numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+              sampleRate: audioBuffer.sampleRate,
+            }
+          : undefined,
+      })
+
+  const videoEncoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (err) => console.error('WebCodecs VideoEncoder Error:', err),
+  })
+
+  videoEncoder.configure({
+    codec: videoCodec,
+    width: settings.width,
+    height: settings.height,
+    bitrate: settings.bitrateMbps * 1_000_000,
+    framerate: settings.frameRate,
+    hardwareAcceleration: 'prefer-hardware',
+  })
+
+  // Codificación ultrarrápida del audio mixdown en memoria
+  if (canEncodeAudio && audioBuffer) {
+    onProgress?.({
+      stage: 'preparing',
+      percent: 12,
+      currentFrame: 0,
+      totalFrames,
+      fps: 0,
+      message: 'Codificando mezcla de audio estéreo...',
+    })
+
+    const audioEncoder = new AudioEncoder({
+      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+      error: (err) => console.error('WebCodecs AudioEncoder Error:', err),
+    })
+    audioEncoder.configure({
+      codec: audioCodec,
+      sampleRate: audioBuffer.sampleRate,
+      numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+      bitrate: 192_000,
+    })
+
+    const sampleRate = audioBuffer.sampleRate
+    const numChannels = Math.min(2, audioBuffer.numberOfChannels)
+    const totalSamples = audioBuffer.length
+    const chunkSize = 2048
+    const planar = new Float32Array(chunkSize * numChannels)
+
+    for (let offset = 0; offset < totalSamples; offset += chunkSize) {
+      const curSize = Math.min(chunkSize, totalSamples - offset)
+      for (let ch = 0; ch < numChannels; ch++) {
+        const chData = audioBuffer.getChannelData(ch)
+        const chOffset = ch * curSize
+        for (let i = 0; i < curSize; i++) {
+          planar[chOffset + i] = chData[offset + i]
+        }
+      }
+      const audioData = new AudioData({
+        format: 'f32-planar',
+        sampleRate,
+        numberOfChannels: numChannels,
+        numberOfFrames: curSize,
+        timestamp: Math.round((offset / sampleRate) * 1_000_000),
+        data: planar.subarray(0, curSize * numChannels),
+      })
+      audioEncoder.encode(audioData)
+      audioData.close()
+    }
+
+    await audioEncoder.flush()
+    audioEncoder.close()
+  }
+
+  const activeVideoTracks = tracks.filter((t) => t.kind === 'video' && !mutedTracks.includes(t.id))
+  const frameInterval = 1 / settings.frameRate
+  const renderStartTime = performance.now()
+  let lastFpsSampleTime = renderStartTime
+  let framesSinceLastSample = 0
+  let measuredFps = settings.frameRate
+  let lastYieldTime = renderStartTime
+
+  for (let frame = 0; frame < totalFrames; frame++) {
+    if (signal?.aborted) {
+      try { videoEncoder.close() } catch { /* ignore */ }
+      throw new Error('Exportación cancelada.')
+    }
+
+    const time = frame * frameInterval
+
+    // Sincronizar vídeo clips para el cuadro exacto
+    const activeClips = activeVideoTracks.flatMap((track) =>
+      track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+    )
+    const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
+    const textClips = activeClips.filter((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay')
+
+    for (const [assetId, element] of visualAssets) {
+      if (element instanceof HTMLVideoElement) {
+        const activeClip = mediaClips.find((c) => resolveClipAssetId(c, assets) === assetId)
+        if (activeClip) {
+          const expectedSourceTime = Math.max(0, time - activeClip.start)
+          if (Math.abs(element.currentTime - expectedSourceTime) > 0.04) {
+            await new Promise<void>((r) => {
+              const onDone = () => {
+                element.removeEventListener('seeked', onDone)
+                r()
+              }
+              element.addEventListener('seeked', onDone, { once: true })
+              setTimeout(onDone, 30)
+              element.currentTime = expectedSourceTime
+            })
+          }
+        }
+      }
+    }
+
+    ctx.fillStyle = '#000000'
+    ctx.fillRect(0, 0, settings.width, settings.height)
+
+    for (const clip of [...mediaClips, ...textClips]) {
+      const aId = resolveClipAssetId(clip, assets)
+      drawClipToCanvas(ctx, clip, aId ? visualAssets.get(aId) : undefined, time, settings.width, settings.height)
+    }
+
+    const timestampMicros = Math.round(time * 1_000_000)
+    const videoFrame = new VideoFrame(canvas, { timestamp: timestampMicros })
+    const isKeyFrame = frame % (settings.frameRate * 2) === 0
+    videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame })
+    videoFrame.close()
+
+    framesSinceLastSample++
+    const now = performance.now()
+    if (now - lastFpsSampleTime >= 400 && framesSinceLastSample > 0) {
+      measuredFps = Math.round((framesSinceLastSample / ((now - lastFpsSampleTime) / 1000)) * 10) / 10
+      lastFpsSampleTime = now
+      framesSinceLastSample = 0
+    }
+
+    if (now - lastYieldTime > 60 || frame === totalFrames - 1) {
+      lastYieldTime = now
+      const percent = Math.min(98, Math.round((frame / totalFrames) * 85) + 12)
+      onProgress?.({
+        stage: 'rendering',
+        percent,
+        currentFrame: frame + 1,
+        totalFrames,
+        fps: measuredFps,
+        message: `Renderizado acelerado (${measuredFps} fps) · Cuadro ${frame + 1} de ${totalFrames}`,
+      })
+      await new Promise((r) => setTimeout(r, 0))
+    }
+  }
+
+  onProgress?.({
+    stage: 'encoding',
+    percent: 99,
+    currentFrame: totalFrames,
+    totalFrames,
+    fps: measuredFps,
+    message: 'Finalizando empaquetado de vídeo acelerado...',
+  })
+
+  await videoEncoder.flush()
+  videoEncoder.close()
+  muxer.finalize()
+
+  const rawBuffer = isMp4 ? mp4Target!.buffer : webmTarget!.buffer
+  const finalBlob = new Blob([rawBuffer], {
+    type: isMp4 ? 'video/mp4' : 'video/webm',
+  })
+
+  onProgress?.({
+    stage: 'completed',
+    percent: 100,
+    currentFrame: totalFrames,
+    totalFrames,
+    fps: measuredFps,
+    message: 'Exportación completada a máxima velocidad.',
+  })
+
+  return {
+    blob: finalBlob,
+    fileName: settings.fileName,
+    durationSeconds: duration,
+    sizeBytes: finalBlob.size,
+  }
+}
+
 /**
  * Main export rendering pipeline. Renders timeline tracks to a video (WebM/MP4) or audio (WAV) file.
  */
@@ -289,15 +597,6 @@ export async function renderSequence({
   canvas.height = settings.height
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('No se pudo inicializar el contexto 2D para renderizar la secuencia.')
-
-  // Check MediaRecorder support
-  if (typeof MediaRecorder === 'undefined') {
-    throw new Error('MediaRecorder no está disponible en este entorno.')
-  }
-
-  let mimeType = 'video/webm;codecs=vp9'
-  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm'
-  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = ''
 
   // Pre-render audio track if present
   onProgress?.({ stage: 'preparing', percent: 5, currentFrame: 0, totalFrames, message: 'Procesando mezcla de audio del proyecto...' })
@@ -369,6 +668,46 @@ export async function renderSequence({
       visualAssets.set(assetId, vid)
     }
   }
+
+  // 1. Intentar renderizado acelerado por hardware con WebCodecs (ultrarrápido)
+  const canUseWebCodecs =
+    typeof VideoEncoder !== 'undefined' &&
+    typeof AudioEncoder !== 'undefined' &&
+    typeof VideoFrame !== 'undefined' &&
+    typeof AudioData !== 'undefined'
+
+  if (canUseWebCodecs) {
+    try {
+      return await renderWithWebCodecs({
+        canvas,
+        ctx,
+        visualAssets,
+        audioBuffer,
+        tracks,
+        assets,
+        duration,
+        totalFrames,
+        settings,
+        mutedTracks,
+        onProgress,
+        signal,
+      })
+    } catch (err) {
+      if (signal?.aborted) throw err
+      console.warn('WebCodecs rendering failed, falling back to MediaRecorder:', err)
+    }
+  }
+
+  // 2. Fallback de compatibilidad: MediaRecorder
+  if (typeof MediaRecorder === 'undefined') {
+    throw new Error('MediaRecorder no está disponible en este entorno.')
+  }
+
+  let mimeType = settings.format === 'mp4' && MediaRecorder.isTypeSupported('video/mp4')
+    ? 'video/mp4'
+    : 'video/webm;codecs=vp9'
+  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm'
+  if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = ''
 
   // Pre-render frame 0 onto canvas so captureStream has pixels ready
   ctx.fillStyle = '#000000'
@@ -547,12 +886,16 @@ export async function renderSequence({
       })
 
       // Drift-free real-time pacing synchronized with wall clock, video playback and audio stream
-      const targetWallClockTime = renderStartTime + (frame + 1) * targetFrameIntervalMs
-      const remainingMs = targetWallClockTime - performance.now()
-      if (remainingMs > 0) {
-        await new Promise((r) => setTimeout(r, remainingMs))
-      } else {
+      if (!audioBuffer) {
         await new Promise((r) => setTimeout(r, 0))
+      } else {
+        const targetWallClockTime = renderStartTime + (frame + 1) * targetFrameIntervalMs
+        const remainingMs = targetWallClockTime - performance.now()
+        if (remainingMs > 0) {
+          await new Promise((r) => setTimeout(r, remainingMs))
+        } else {
+          await new Promise((r) => setTimeout(r, 0))
+        }
       }
     }
 

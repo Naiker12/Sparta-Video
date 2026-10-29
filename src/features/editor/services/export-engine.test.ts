@@ -13,7 +13,7 @@ describe('export engine', () => {
       width: 1920,
       height: 1080,
       frameRate: 30,
-      format: 'webm',
+      format: 'mp4',
     })
     expect(EXPORT_PRESETS['social-vertical']).toMatchObject({
       width: 1080,
@@ -26,7 +26,7 @@ describe('export engine', () => {
 
   it('generates sanitized default export settings from project name', () => {
     const settings = getDefaultExportSettings('Coastal Film 2026! @#$', 'web-1080p')
-    expect(settings.fileName).toBe('Coastal_Film_2026.webm')
+    expect(settings.fileName).toBe('Coastal_Film_2026.mp4')
     expect(settings.width).toBe(1920)
     expect(settings.height).toBe(1080)
     expect(settings.range).toBe('entire')
