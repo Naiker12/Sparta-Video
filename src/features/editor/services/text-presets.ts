@@ -557,71 +557,32 @@ export function drawAnimatedTextClipToCanvas(
   ctx.globalAlpha = state.opacity * clipAlpha
 
   const scaleFactor = canvasHeight / 1080
-  const scaledFontSize = Math.max(14, Math.round(style.fontSize * scaleFactor))
-  // Calibración horizontal: transform.x está en coordenadas de secuencia (centro = width / 2)
-  const calibOffsetX = clip.transform ? clip.transform.x - canvasWidth / 2 : 0
-  const calibScaleX = (clip.transform?.scaleX ?? 100) / 100
-  const calibScaleY = (clip.transform?.scaleY ?? 100) / 100
-  const calibRotation = clip.transform?.rotation ?? 0
-  const anchorX =
-    (style.align === 'left'
-      ? canvasWidth * 0.08
-      : style.align === 'right'
-        ? canvasWidth * 0.92
-        : canvasWidth * 0.5) + calibOffsetX
-  const anchorY = (style.positionY / 100) * canvasHeight
-
-  ctx.translate(
-    anchorX + (state.translateXPx + state.glitchShiftPx) * scaleFactor,
-    anchorY + state.translateYPx * scaleFactor,
-  )
-  const totalRotation = state.rotationDeg + calibRotation
-  if (totalRotation) {
-    ctx.rotate((totalRotation * Math.PI) / 180)
-  }
-  ctx.scale(state.scaleX * calibScaleX, state.scaleY * calibScaleY)
+  const isSubtitle =
+    clip.thumbnail === 'text-overlay' ||
+    (clip.textStyle?.presetId ?? '').includes('karaoke') ||
+    (clip.textStyle?.presetId ?? '').includes('pop') ||
+    (clip.textStyle?.presetId ?? '').includes('sub')
+  const maxFontSize = isSubtitle ? 44 : 68
+  const baseFontSize = Math.min(maxFontSize, style.fontSize || 42)
+  const scaledFontSize = Math.max(14, Math.round(baseFontSize * scaleFactor))
 
   const fontStyle = style.italic ? 'italic ' : ''
   ctx.font = `${fontStyle}${style.fontWeight} ${scaledFontSize}px ${style.fontFamily}`
   ctx.textBaseline = 'middle'
 
-  const lineHeight = scaledFontSize * 1.24
-  const maxAllowedWidth = Math.round(canvasWidth * 0.84)
+  const lineHeight = scaledFontSize * 1.22
+  const maxAllowedWidth = Math.round(canvasWidth * 0.82)
 
-  // Smart word wrapping for non-karaoke or multi-line text
-  const rawLines = state.displayText.split('\n')
-  const lines: string[] = []
-  for (const rawLine of rawLines) {
-    const trimmed = rawLine.trim()
-    if (!trimmed) continue
-    const words = trimmed.split(/\s+/)
-    if (words.length <= 1) {
-      lines.push(trimmed)
-      continue
-    }
-    let currentLine = words[0]
-    for (let i = 1; i < words.length; i++) {
-      const candidate = `${currentLine} ${words[i]}`
-      if (ctx.measureText(candidate).width > maxAllowedWidth) {
-        lines.push(currentLine)
-        currentLine = words[i]
-      } else {
-        currentLine = candidate
-      }
-    }
-    if (currentLine) lines.push(currentLine)
-  }
-  if (!lines.length && state.displayText.trim()) {
-    lines.push(state.displayText.trim())
-  }
-  const totalHeight = lines.length * lineHeight
+  // Calibraciones del clip
+  const calibScaleX = (clip.transform?.scaleX ?? 100) / 100
+  const calibScaleY = (clip.transform?.scaleY ?? 100) / 100
+  const calibRotation = clip.transform?.rotation ?? 0
 
-  // Karaoke word-by-word rendering with auto-wrapping vs standard line rendering
   if (state.isKaraoke && state.words.length > 0) {
     const spaceWidth = ctx.measureText(' ').width
     const wordWidths = state.words.map((w) => ctx.measureText(w).width)
 
-    // Partition words into lines that stay inside maxAllowedWidth
+    // Particionar palabras en renglones que quepan dentro de maxAllowedWidth
     type KaraokeLine = { words: string[]; wordIndices: number[]; lineWidth: number }
     const karaokeLines: KaraokeLine[] = []
     let curLineWords: string[] = []
@@ -647,20 +608,41 @@ export function drawAnimatedTextClipToCanvas(
     }
 
     const kTotalHeight = karaokeLines.length * lineHeight
-
-    // Measure widest line for background pill
     const maxKLineWidth = Math.max(...karaokeLines.map((l) => l.lineWidth), 0)
+
+    // Posicionamiento horizontal seguro con clamping para que NUNCA se salga de pantalla
+    let targetX = canvasWidth * 0.5
+    if (style.align === 'left') targetX = canvasWidth * 0.08 + maxKLineWidth / 2
+    else if (style.align === 'right') targetX = canvasWidth * 0.92 - maxKLineWidth / 2
+
+    // Si el clip tiene desplazamiento personalizado en X, aplicarlo pero clamped
+    if (clip.transform && Math.abs(clip.transform.x - canvasWidth / 2) > 5) {
+      targetX = clip.transform.x
+    }
+    const halfWidth = (maxKLineWidth / 2) * calibScaleX
+    const safeAnchorX = Math.max(canvasWidth * 0.06 + halfWidth, Math.min(canvasWidth * 0.94 - halfWidth, targetX))
+
+    // Posicionamiento vertical seguro: los subtítulos deben quedar sobre los controles de vídeo (entre 72% y 82%)
+    const rawPosYPercent = isSubtitle ? Math.min(80, Math.max(20, style.positionY || 78)) : (style.positionY || 50)
+    const targetY = (rawPosYPercent / 100) * canvasHeight
+    const halfHeight = (kTotalHeight / 2) * calibScaleY
+    const safeAnchorY = Math.max(canvasHeight * 0.08 + halfHeight, Math.min(canvasHeight * 0.86 - halfHeight, targetY))
+
+    ctx.translate(
+      safeAnchorX + (state.translateXPx + state.glitchShiftPx) * scaleFactor,
+      safeAnchorY + state.translateYPx * scaleFactor,
+    )
+    const totalRotation = state.rotationDeg + calibRotation
+    if (totalRotation) ctx.rotate((totalRotation * Math.PI) / 180)
+    ctx.scale(state.scaleX * calibScaleX, state.scaleY * calibScaleY)
+
+    // Dibujar caja de fondo redondeada si aplica
     if (style.backgroundOpacity > 0 && maxKLineWidth > 0) {
-      const padX = Math.round(22 * scaleFactor)
-      const padY = Math.round(12 * scaleFactor)
+      const padX = Math.round(20 * scaleFactor)
+      const padY = Math.round(10 * scaleFactor)
       const boxW = maxKLineWidth + padX * 2
       const boxH = kTotalHeight + padY * 2
-      const boxX =
-        style.align === 'left'
-          ? -padX
-          : style.align === 'right'
-            ? -boxW + padX
-            : -boxW / 2
+      const boxX = -boxW / 2
       const boxY = -kTotalHeight / 2 - padY
       const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * scaleFactor))
 
@@ -683,12 +665,7 @@ export function drawAnimatedTextClipToCanvas(
     ctx.textAlign = 'left'
     karaokeLines.forEach((lineObj, lIdx) => {
       const lineY = -kTotalHeight / 2 + lineHeight * (lIdx + 0.5)
-      let cursorX =
-        style.align === 'left'
-          ? 0
-          : style.align === 'right'
-            ? -lineObj.lineWidth
-            : -lineObj.lineWidth / 2
+      let cursorX = -lineObj.lineWidth / 2
 
       for (let k = 0; k < lineObj.words.length; k++) {
         const word = lineObj.words[k]
@@ -699,7 +676,7 @@ export function drawAnimatedTextClipToCanvas(
 
         if (style.strokeWidth > 0) {
           ctx.strokeStyle = style.strokeColor
-          ctx.lineWidth = style.strokeWidth * scaleFactor
+          ctx.lineWidth = Math.min(5, style.strokeWidth) * scaleFactor
           ctx.lineJoin = 'round'
           ctx.strokeText(word, cursorX, lineY)
         }
@@ -710,25 +687,69 @@ export function drawAnimatedTextClipToCanvas(
       }
     })
   } else {
-    // Measure widest line for background pill
+    // Texto estándar / multilínea con ajuste inteligente
+    const rawLines = state.displayText.split('\n')
+    const lines: string[] = []
+    for (const rawLine of rawLines) {
+      const trimmed = rawLine.trim()
+      if (!trimmed) continue
+      const words = trimmed.split(/\s+/)
+      if (words.length <= 1) {
+        lines.push(trimmed)
+        continue
+      }
+      let currentLine = words[0]
+      for (let i = 1; i < words.length; i++) {
+        const candidate = `${currentLine} ${words[i]}`
+        if (ctx.measureText(candidate).width > maxAllowedWidth) {
+          lines.push(currentLine)
+          currentLine = words[i]
+        } else {
+          currentLine = candidate
+        }
+      }
+      if (currentLine) lines.push(currentLine)
+    }
+    if (!lines.length && state.displayText.trim()) {
+      lines.push(state.displayText.trim())
+    }
+    const totalHeight = lines.length * lineHeight
+
     let maxLineWidth = 0
     for (const line of lines) {
       const m = ctx.measureText(line)
       if (m.width > maxLineWidth) maxLineWidth = m.width
     }
 
-    // Draw rounded background box if backgroundOpacity > 0
+    let targetX = canvasWidth * 0.5
+    if (style.align === 'left') targetX = canvasWidth * 0.08 + maxLineWidth / 2
+    else if (style.align === 'right') targetX = canvasWidth * 0.92 - maxLineWidth / 2
+
+    if (clip.transform && Math.abs(clip.transform.x - canvasWidth / 2) > 5) {
+      targetX = clip.transform.x
+    }
+    const halfWidth = (maxLineWidth / 2) * calibScaleX
+    const safeAnchorX = Math.max(canvasWidth * 0.06 + halfWidth, Math.min(canvasWidth * 0.94 - halfWidth, targetX))
+
+    const rawPosYPercent = isSubtitle ? Math.min(80, Math.max(20, style.positionY || 78)) : (style.positionY || 50)
+    const targetY = (rawPosYPercent / 100) * canvasHeight
+    const halfHeight = (totalHeight / 2) * calibScaleY
+    const safeAnchorY = Math.max(canvasHeight * 0.08 + halfHeight, Math.min(canvasHeight * 0.86 - halfHeight, targetY))
+
+    ctx.translate(
+      safeAnchorX + (state.translateXPx + state.glitchShiftPx) * scaleFactor,
+      safeAnchorY + state.translateYPx * scaleFactor,
+    )
+    const totalRotation = state.rotationDeg + calibRotation
+    if (totalRotation) ctx.rotate((totalRotation * Math.PI) / 180)
+    ctx.scale(state.scaleX * calibScaleX, state.scaleY * calibScaleY)
+
     if (style.backgroundOpacity > 0 && maxLineWidth > 0) {
-      const padX = Math.round(22 * scaleFactor)
-      const padY = Math.round(12 * scaleFactor)
+      const padX = Math.round(20 * scaleFactor)
+      const padY = Math.round(10 * scaleFactor)
       const boxW = maxLineWidth + padX * 2
       const boxH = totalHeight + padY * 2
-      const boxX =
-        style.align === 'left'
-          ? -padX
-          : style.align === 'right'
-            ? -boxW + padX
-            : -boxW / 2
+      const boxX = -boxW / 2
       const boxY = -totalHeight / 2 - padY
       const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * scaleFactor))
 
@@ -742,19 +763,18 @@ export function drawAnimatedTextClipToCanvas(
       ctx.fill()
     }
 
-    // Configure drop shadow / neon glow
     if (style.shadowBlur > 0) {
       ctx.shadowColor = style.shadowColor
       ctx.shadowBlur = style.shadowBlur * scaleFactor
       ctx.shadowOffsetY = 3 * scaleFactor
     }
 
-    ctx.textAlign = style.align
+    ctx.textAlign = 'center'
     lines.forEach((line, idx) => {
       const y = -totalHeight / 2 + lineHeight * (idx + 0.5)
       if (style.strokeWidth > 0) {
         ctx.strokeStyle = style.strokeColor
-        ctx.lineWidth = style.strokeWidth * scaleFactor
+        ctx.lineWidth = Math.min(5, style.strokeWidth) * scaleFactor
         ctx.lineJoin = 'round'
         ctx.strokeText(line, 0, y)
       }

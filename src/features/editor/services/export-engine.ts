@@ -295,7 +295,9 @@ export async function renderSequence({
   const hiddenContainer = typeof document !== 'undefined' ? document.createElement('div') : null
   if (hiddenContainer) {
     hiddenContainer.setAttribute('aria-hidden', 'true')
-    hiddenContainer.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;'
+    // Real dimensions, in-viewport and tiny opacity so Chrome keeps GPU video decoding active
+    hiddenContainer.style.cssText =
+      'position:fixed;bottom:8px;right:8px;width:320px;height:180px;opacity:0.01;pointer-events:none;z-index:999999;overflow:hidden;'
     document.body.appendChild(hiddenContainer)
   }
 
@@ -323,6 +325,7 @@ export async function renderSequence({
       vid.preload = 'auto'
       vid.muted = true
       vid.playsInline = true
+      vid.style.cssText = 'width:100%;height:100%;object-fit:contain;'
       vid.src = url
       if (hiddenContainer) hiddenContainer.appendChild(vid)
       await new Promise<void>((res) => {
@@ -336,10 +339,18 @@ export async function renderSequence({
         vid.addEventListener('loadeddata', done, { once: true })
         vid.addEventListener('canplay', done, { once: true })
         vid.addEventListener('error', done, { once: true })
-        setTimeout(done, 2500)
+        setTimeout(done, 3000)
         try { vid.load() } catch { /* ignore */ }
       })
-      try { vid.currentTime = 0 } catch { /* ignore */ }
+      await new Promise<void>((res) => {
+        const onSeeked = () => {
+          vid.removeEventListener('seeked', onSeeked)
+          res()
+        }
+        vid.addEventListener('seeked', onSeeked, { once: true })
+        setTimeout(onSeeked, 300)
+        try { vid.currentTime = 0 } catch { res() }
+      })
       visualAssets.set(assetId, vid)
     }
   }
@@ -355,6 +366,15 @@ export async function renderSequence({
   const initialText = initialClips.filter((c) => c.text !== undefined || c.thumbnail === 'text-overlay')
   for (const clip of [...initialMedia, ...initialText]) {
     drawClipToCanvas(ctx, clip, visualAssets.get(clip.sourceAssetId ?? ''), 0, settings.width, settings.height)
+  }
+
+  // Start initial media videos playing
+  for (const clip of initialMedia) {
+    const vid = visualAssets.get(clip.sourceAssetId ?? '')
+    if (vid instanceof HTMLVideoElement) {
+      try { vid.currentTime = 0 } catch { /* ignore */ }
+      void vid.play().catch(() => {})
+    }
   }
 
   // Create stream from canvas
@@ -443,11 +463,27 @@ export async function renderSequence({
           const activeClip = mediaClips.find((c) => c.sourceAssetId === assetId)
           if (activeClip) {
             const expectedSourceTime = Math.max(0, time - activeClip.start)
-            if (Math.abs(element.currentTime - expectedSourceTime) > 0.25) {
-              try { element.currentTime = expectedSourceTime } catch { /* ignore */ }
-            }
-            if (element.paused) {
-              void element.play().catch(() => {})
+            if (!element.paused) {
+              if (Math.abs(element.currentTime - expectedSourceTime) > 0.6) {
+                try { element.currentTime = expectedSourceTime } catch { /* ignore */ }
+              }
+            } else {
+              const playPromise = element.play()
+              if (playPromise) {
+                void playPromise.catch(async () => {
+                  if (Math.abs(element.currentTime - expectedSourceTime) > 0.04) {
+                    await new Promise<void>((r) => {
+                      const onDone = () => {
+                        element.removeEventListener('seeked', onDone)
+                        r()
+                      }
+                      element.addEventListener('seeked', onDone, { once: true })
+                      setTimeout(onDone, 60)
+                      element.currentTime = expectedSourceTime
+                    })
+                  }
+                })
+              }
             }
           } else {
             if (!element.paused) {
@@ -494,6 +530,21 @@ export async function renderSequence({
       const sleepMs = Math.max(1, Math.min(20, Math.round(targetFrameIntervalMs - computeTime)))
       await new Promise((r) => setTimeout(r, sleepMs))
     }
+
+    onProgress?.({ stage: 'encoding', percent: 99, currentFrame: totalFrames, totalFrames, message: 'Finalizando codificación de vídeo...' })
+    try {
+      recorder.stop()
+    } catch { /* ignore */ }
+
+    const finalBlob = await completionPromise
+    onProgress?.({ stage: 'completed', percent: 100, currentFrame: totalFrames, totalFrames, message: 'Exportación completada con éxito.' })
+
+    return {
+      blob: finalBlob,
+      fileName: settings.fileName,
+      durationSeconds: duration,
+      sizeBytes: finalBlob.size,
+    }
   } finally {
     try {
       for (const element of visualAssets.values()) {
@@ -508,19 +559,6 @@ export async function renderSequence({
         void audioCtx.close().catch(() => {})
       }
     } catch { /* ignore */ }
-  }
-
-  onProgress?.({ stage: 'encoding', percent: 99, currentFrame: totalFrames, totalFrames, message: 'Finalizando codificación de vídeo...' })
-  recorder.stop()
-
-  const finalBlob = await completionPromise
-  onProgress?.({ stage: 'completed', percent: 100, currentFrame: totalFrames, totalFrames, message: 'Exportación completada con éxito.' })
-
-  return {
-    blob: finalBlob,
-    fileName: settings.fileName,
-    durationSeconds: duration,
-    sizeBytes: finalBlob.size,
   }
 }
 
