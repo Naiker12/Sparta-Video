@@ -174,5 +174,45 @@ describe('CapCut Pro text presets & animation engine', () => {
     expect(transX).toBeCloseTo(540, 0)
     expect(transY).toBeCloseTo(480, 0)
   })
+
+  it('constrains vertical sequence subtitles inside pillarboxed viewport when exported to horizontal 1920x1080 canvas', () => {
+    const clip = makeTextClip('hormozi-karaoke', 'TUTORIALES DINÁMICOS', 0, 3)
+    clip.textStyle = { ...clip.textStyle!, positionY: 78 }
+    clip.transform = { x: 540, y: 1497, scaleX: 100, scaleY: 100, rotation: 0 }
+
+    const mockCtx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      rotate: vi.fn(),
+      scale: vi.fn(),
+      measureText: vi.fn((str: string) => ({ width: str.length * 10 })),
+      beginPath: vi.fn(),
+      roundRect: vi.fn(),
+      rect: vi.fn(),
+      fill: vi.fn(),
+      strokeText: vi.fn(),
+      fillText: vi.fn(),
+      globalAlpha: 1,
+      font: '',
+      textBaseline: 'middle',
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 0,
+      lineJoin: 'round',
+      shadowColor: '',
+      shadowBlur: 0,
+      shadowOffsetY: 0,
+      textAlign: 'left',
+    } as unknown as CanvasRenderingContext2D
+
+    drawAnimatedTextClipToCanvas(mockCtx, clip, 1.0, 1920, 1080, { width: 1080, height: 1920 })
+    expect(mockCtx.translate).toHaveBeenCalled()
+    const [transX, transY] = (mockCtx.translate as ReturnType<typeof vi.fn>).mock.calls[0]
+    // 1920 canvas with 1080x1920 centered: viewW = 1080*(1080/1920) = 607.5. viewX = (1920 - 607.5) / 2 = 656.25.
+    // Center is 656.25 + 607.5 * 0.5 = 960 (canvas center).
+    expect(transX).toBeCloseTo(960, 0)
+    expect(transY).toBeCloseTo(842.4, 0)
+  })
 })
 

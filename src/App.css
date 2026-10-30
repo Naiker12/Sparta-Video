@@ -31,12 +31,17 @@
   padding: 0 16px;
   background: var(--card) !important;
   z-index: 10;
+  flex-wrap: nowrap !important;
+  white-space: nowrap !important;
 }
 
 .titlebar-left {
   display: flex !important;
   align-items: center !important;
   gap: 20px !important;
+  flex-shrink: 0 !important;
+  flex-wrap: nowrap !important;
+  white-space: nowrap !important;
 }
 
 .sparta-logo-wrap {
@@ -44,12 +49,16 @@
   align-items: center !important;
   gap: 8px !important;
   user-select: none;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
 }
 
 .sparta-menu-nav {
   display: flex !important;
   align-items: center !important;
-  gap: 8px !important;
+  gap: 6px !important;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
 }
 
 .sparta-menu-btn {
@@ -59,8 +68,11 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 4px 6px;
+  padding: 4px 8px !important;
+  margin: 0 1px !important;
   border-radius: 4px;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
   transition: color 0.15s ease, background 0.15s ease;
 }
 

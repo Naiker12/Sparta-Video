@@ -54,9 +54,12 @@ export function ExportDialog({
   onOpenChange,
 }: Props) {
   useLanguage()
-  const [preset, setPreset] = useState<ExportPresetId>('web-1080p')
+  const isVerticalSequence = sequenceSize.height > sequenceSize.width
+  const recommendedPresetId: ExportPresetId = isVerticalSequence ? 'social-vertical' : 'web-1080p'
+
+  const [preset, setPreset] = useState<ExportPresetId>(recommendedPresetId)
   const [settings, setSettings] = useState<ExportSettings>(() =>
-    getDefaultExportSettings(projectName, 'web-1080p'),
+    getDefaultExportSettings(projectName, recommendedPresetId),
   )
   const [isExporting, setIsExporting] = useState(false)
   const [progress, setProgress] = useState<RenderProgress | null>(null)
@@ -64,6 +67,19 @@ export function ExportDialog({
   const [savePath, setSavePath] = useState('C:\\Usuarios\\Naiker\\Videos\\')
   const [previewThumb, setPreviewThumb] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Auto-adapt default preset when opening the dialog if not actively exporting (CapCut parity)
+  useEffect(() => {
+    if (open && !isExporting) {
+      const bestPreset: ExportPresetId = sequenceSize.height > sequenceSize.width ? 'social-vertical' : 'web-1080p'
+      setPreset(bestPreset)
+      const p = EXPORT_PRESETS[bestPreset]
+      setSettings((prev) => ({
+        ...getDefaultExportSettings(projectName, bestPreset),
+        fileName: prev.fileName ? prev.fileName.replace(/\.[a-z0-9]+$/i, `.${p.format}`) : `${projectName.trim() || 'Mi_proyecto'}.${p.format}`,
+      }))
+    }
+  }, [open, sequenceSize.width, sequenceSize.height, projectName])
 
   useEffect(() => {
     let cancelled = false
@@ -328,7 +344,7 @@ export function ExportDialog({
                             <span className="export-preset-title">{item.label}</span>
                             <span className="export-preset-desc">{item.description}</span>
                           </div>
-                          {id === 'web-1080p' && (
+                          {id === recommendedPresetId && (
                             <span className="export-recommended-badge">
                               {t('Recomendado', 'Recommended')}
                             </span>

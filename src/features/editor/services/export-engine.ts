@@ -448,7 +448,7 @@ async function renderWithWebCodecs({
 
     const time = frame * frameInterval
 
-    // Sincronizar vídeo clips para el cuadro exacto
+    // Sincronizar vídeo clips para el cuadro exacto con precisión milimétrica (sin cuadros congelados ni desfasados)
     const activeClips = activeVideoTracks.flatMap((track) =>
       track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
     )
@@ -461,15 +461,22 @@ async function renderWithWebCodecs({
           const expectedSourceTime = activeClip.freezeTime !== undefined
             ? activeClip.freezeTime
             : Math.max(0, (time - activeClip.start) * (activeClip.speed ?? 1.0))
-          if (Math.abs(element.currentTime - expectedSourceTime) > 0.04) {
+          if (Math.abs(element.currentTime - expectedSourceTime) >= 0.002) {
             await new Promise<void>((r) => {
+              let settled = false
               const onDone = () => {
+                if (settled) return
+                settled = true
                 element.removeEventListener('seeked', onDone)
                 r()
               }
               element.addEventListener('seeked', onDone, { once: true })
-              setTimeout(onDone, 30)
-              element.currentTime = expectedSourceTime
+              setTimeout(onDone, 400)
+              try {
+                element.currentTime = expectedSourceTime
+              } catch {
+                onDone()
+              }
             })
           }
         }
@@ -479,12 +486,33 @@ async function renderWithWebCodecs({
     ctx.fillStyle = '#000000'
     ctx.fillRect(0, 0, settings.width, settings.height)
 
-    const activeTimelineClips = [...activeVideoTracks].reverse().flatMap((track) =>
-      track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+    // Pipeline estándar NLE (estilo CapCut / Premiere):
+    // 1. Clips visuales de fondo (vídeos e imágenes) ordenados de pista inferior a superior
+    // 2. Capas de ajuste y efectos de corrección global
+    // 3. Títulos y subtítulos dinámicos en la capa superior (NUNCA tapados por el vídeo)
+    const activeClipsWithTrack = activeVideoTracks.flatMap((track) =>
+      track.clips
+        .filter((clip) => time >= clip.start && time < clip.start + clip.duration)
+        .map((clip) => ({ clip, track })),
     )
-    const visualAndTextClips = activeTimelineClips.filter((clip) => clip.kind !== 'adjustment')
-    const activeAdjustmentLayers = activeTimelineClips.filter((clip) => clip.kind === 'adjustment')
-    for (const clip of [...visualAndTextClips, ...activeAdjustmentLayers]) {
+
+    const baseVisualClips = activeClipsWithTrack.filter(
+      ({ clip }) => clip.kind !== 'adjustment' && clip.text === undefined && clip.thumbnail !== 'text-overlay',
+    )
+    const adjustmentClips = activeClipsWithTrack.filter(
+      ({ clip }) => clip.kind === 'adjustment',
+    )
+    const textAndSubtitleClips = activeClipsWithTrack.filter(
+      ({ clip }) => clip.text !== undefined || clip.thumbnail === 'text-overlay',
+    )
+
+    const orderedClips = [
+      ...baseVisualClips.map((c) => c.clip),
+      ...adjustmentClips.map((c) => c.clip),
+      ...textAndSubtitleClips.map((c) => c.clip),
+    ]
+
+    for (const clip of orderedClips) {
       const aId = resolveClipAssetId(clip, assets)
       drawClipToCanvas(
         ctx,
@@ -635,9 +663,9 @@ export async function renderSequence({
   const hiddenContainer = typeof document !== 'undefined' ? document.createElement('div') : null
   if (hiddenContainer) {
     hiddenContainer.setAttribute('aria-hidden', 'true')
-    // Real dimensions, in-viewport, safe z-index behind dialog backdrop so Chrome keeps GPU video decoding active
+    // In-viewport tiny element with z-index behind everything so Chrome keeps GPU hardware video decoding active without blocking UI
     hiddenContainer.style.cssText =
-      'position:fixed;bottom:8px;right:8px;width:320px;height:180px;opacity:0.99;pointer-events:none;z-index:50;overflow:hidden;border-radius:8px;'
+      'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-999;overflow:hidden;'
     document.body.appendChild(hiddenContainer)
   }
 
@@ -895,12 +923,30 @@ export async function renderSequence({
         }
       }
 
-      const activeTimelineClips = [...activeVideoTracks].reverse().flatMap((track) =>
-        track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+      // Pipeline estándar NLE: Base visual -> Capas de ajuste -> Subtítulos y texto en la capa superior
+      const activeClipsWithTrack = activeVideoTracks.flatMap((track) =>
+        track.clips
+          .filter((clip) => time >= clip.start && time < clip.start + clip.duration)
+          .map((clip) => ({ clip, track })),
       )
-      const visualAndTextClips = activeTimelineClips.filter((clip) => clip.kind !== 'adjustment')
-      const activeAdjustmentLayers = activeTimelineClips.filter((clip) => clip.kind === 'adjustment')
-      for (const clip of [...visualAndTextClips, ...activeAdjustmentLayers]) {
+
+      const baseVisualClips = activeClipsWithTrack.filter(
+        ({ clip }) => clip.kind !== 'adjustment' && clip.text === undefined && clip.thumbnail !== 'text-overlay',
+      )
+      const adjustmentClips = activeClipsWithTrack.filter(
+        ({ clip }) => clip.kind === 'adjustment',
+      )
+      const textAndSubtitleClips = activeClipsWithTrack.filter(
+        ({ clip }) => clip.text !== undefined || clip.thumbnail === 'text-overlay',
+      )
+
+      const orderedClips = [
+        ...baseVisualClips.map((c) => c.clip),
+        ...adjustmentClips.map((c) => c.clip),
+        ...textAndSubtitleClips.map((c) => c.clip),
+      ]
+
+      for (const clip of orderedClips) {
         const aId = resolveClipAssetId(clip, assets)
         drawClipToCanvas(
           ctx,
@@ -1007,7 +1053,7 @@ export function drawClipToCanvas(
         : canvasHeight
 
   if (clip.text !== undefined || clip.thumbnail === 'text-overlay') {
-    drawAnimatedTextClipToCanvas(ctx, clip, time, canvasWidth, canvasHeight, resolvedSeqW)
+    drawAnimatedTextClipToCanvas(ctx, clip, time, canvasWidth, canvasHeight, { width: resolvedSeqW, height: resolvedSeqH })
     return
   }
 

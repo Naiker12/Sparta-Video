@@ -597,7 +597,7 @@ export function drawAnimatedTextClipToCanvas(
   time: number,
   canvasWidth: number,
   canvasHeight: number,
-  sequenceWidth?: number,
+  sequenceSize?: { width: number; height: number } | number,
 ): void {
   const style = clip.textStyle ?? getDefaultTextStyle()
   const state = computeTextAnimationState(clip, time)
@@ -607,10 +607,51 @@ export function drawAnimatedTextClipToCanvas(
   const clipAlpha = Math.max(0, Math.min(1, (clip.opacity ?? 100) / 100))
   ctx.globalAlpha = state.opacity * clipAlpha
 
-  // Escala tipográfica adaptativa según orientación (horizontal 1080p o vertical 1080p Reels/TikTok)
   const isVertical = canvasHeight > canvasWidth
-  const refHeight = isVertical ? 1920 : 1080
-  const scaleFactor = canvasHeight / refHeight
+  const seqW =
+    typeof sequenceSize === 'object' && sequenceSize?.width
+      ? sequenceSize.width
+      : typeof sequenceSize === 'number'
+        ? sequenceSize
+        : isVertical
+          ? 1080
+          : 1920
+
+  const seqH =
+    typeof sequenceSize === 'object' && sequenceSize?.height
+      ? sequenceSize.height
+      : typeof sequenceSize === 'number'
+        ? Math.round(sequenceSize * (canvasHeight / canvasWidth))
+        : isVertical
+          ? 1920
+          : 1080
+
+  // Calculate sequence viewport within export canvas (handles letterboxing/pillarboxing)
+  const seqAspect = seqW / Math.max(1, seqH)
+  const canvasAspect = canvasWidth / Math.max(1, canvasHeight)
+
+  let viewW = canvasWidth
+  let viewH = canvasHeight
+  let viewX = 0
+  let viewY = 0
+
+  if (Math.abs(canvasAspect - seqAspect) > 0.01) {
+    if (canvasAspect > seqAspect) {
+      // Pillarbox (vertical video centered on widescreen horizontal export)
+      viewH = canvasHeight
+      viewW = viewH * seqAspect
+      viewX = (canvasWidth - viewW) / 2
+      viewY = 0
+    } else {
+      // Letterbox
+      viewW = canvasWidth
+      viewH = viewW / seqAspect
+      viewX = 0
+      viewY = (canvasHeight - viewH) / 2
+    }
+  }
+
+  const exportTextUnit = viewH / Math.max(1, seqH)
   const isSubtitle =
     clip.thumbnail === 'text-overlay' ||
     (clip.textStyle?.presetId ?? '').includes('karaoke') ||
@@ -618,34 +659,24 @@ export function drawAnimatedTextClipToCanvas(
     (clip.textStyle?.presetId ?? '').includes('sub')
 
   const baseFontSize = style.fontSize || (isSubtitle ? 42 : 52)
-  const scaledFontSize = Math.max(14, Math.round(baseFontSize * scaleFactor))
+  const scaledFontSize = Math.max(12, Math.round(baseFontSize * exportTextUnit))
 
   const fontStyle = style.italic ? 'italic ' : ''
   ctx.font = `${fontStyle}${style.fontWeight} ${scaledFontSize}px ${style.fontFamily}`
   ctx.textBaseline = 'middle'
 
   const lineHeight = scaledFontSize * 1.24
-  const maxAllowedWidth = Math.round(canvasWidth * 0.86)
+  const maxAllowedWidth = Math.round(viewW * 0.86)
 
   // Calibraciones del clip
   const calibScaleX = (clip.transform?.scaleX ?? 100) / 100
   const calibScaleY = (clip.transform?.scaleY ?? 100) / 100
   const calibRotation = clip.transform?.rotation ?? 0
 
-  // Cálculo normalizado del anclaje horizontal (0.0 a 1.0)
+  // Cálculo normalizado del anclaje horizontal relativo a la secuencia (0.0 a 1.0)
   let normX = 0.5
   if (clip.transform && typeof clip.transform.x === 'number') {
-    const seqW =
-      sequenceWidth && sequenceWidth > 0
-        ? sequenceWidth
-        : clip.transform.x > 1400
-          ? 1920
-          : clip.transform.x > 600 && isVertical
-            ? 1080
-            : clip.transform.x > 800
-              ? 1920
-              : 1080
-    const ratio = clip.transform.x / seqW
+    const ratio = clip.transform.x / Math.max(1, seqW)
     if (Math.abs(ratio - 0.5) <= 0.02) {
       normX = 0.5
     } else {
@@ -653,10 +684,10 @@ export function drawAnimatedTextClipToCanvas(
     }
   }
 
-  // Cálculo normalizado del anclaje vertical (coincide exactamente con PreviewMonitor: style.positionY ?? 78)
+  // Cálculo normalizado del anclaje vertical relativo al viewport activo
   const defaultPosY = isSubtitle ? 78 : 50
   const posYPercent = Math.max(6, Math.min(94, style.positionY ?? defaultPosY))
-  const targetY = (posYPercent / 100) * canvasHeight
+  const targetY = viewY + (posYPercent / 100) * viewH
 
   if (state.isKaraoke && state.words.length > 0) {
     const spaceWidth = ctx.measureText(' ').width
@@ -690,19 +721,19 @@ export function drawAnimatedTextClipToCanvas(
     const kTotalHeight = karaokeLines.length * lineHeight
     const maxKLineWidth = Math.max(...karaokeLines.map((l) => l.lineWidth), 0)
 
-    let targetX = canvasWidth * normX
+    let targetX = viewX + viewW * normX
     if (!isSubtitle && style.align === 'left' && normX === 0.5) {
-      targetX = canvasWidth * 0.08 + maxKLineWidth / 2
+      targetX = viewX + viewW * 0.08 + maxKLineWidth / 2
     } else if (!isSubtitle && style.align === 'right' && normX === 0.5) {
-      targetX = canvasWidth * 0.92 - maxKLineWidth / 2
+      targetX = viewX + viewW * 0.92 - maxKLineWidth / 2
     }
 
-    // Anclaje horizontal seguro: si está centrado (normX === 0.5), el centro es estrictamente canvasWidth * 0.5
+    // Anclaje horizontal seguro
     let safeAnchorX = targetX
     if (normX !== 0.5) {
       const halfWidth = (maxKLineWidth / 2) * calibScaleX
-      const minX = canvasWidth * 0.04 + halfWidth
-      const maxX = canvasWidth * 0.96 - halfWidth
+      const minX = viewX + viewW * 0.04 + halfWidth
+      const maxX = viewX + viewW * 0.96 - halfWidth
       if (maxX >= minX) {
         safeAnchorX = Math.max(minX, Math.min(maxX, targetX))
       }
@@ -710,19 +741,19 @@ export function drawAnimatedTextClipToCanvas(
 
     let safeAnchorY = targetY
     const halfHeight = (kTotalHeight / 2) * calibScaleY
-    const minY = canvasHeight * 0.04 + halfHeight
-    const maxY = canvasHeight * 0.96 - halfHeight
+    const minY = viewY + viewH * 0.04 + halfHeight
+    const maxY = viewY + viewH * 0.96 - halfHeight
     if (maxY >= minY) {
       safeAnchorY = Math.max(minY, Math.min(maxY, targetY))
     }
 
-    // Prevención de desborde si el texto es muy ancho para el lienzo (ej. 9:16 vertical)
+    // Prevención de desborde si el texto es muy ancho para el viewport activo
     const effectiveWidth = maxKLineWidth * calibScaleX
-    const overflowRatio = effectiveWidth > canvasWidth * 0.88 ? (canvasWidth * 0.88) / effectiveWidth : 1
+    const overflowRatio = effectiveWidth > viewW * 0.88 ? (viewW * 0.88) / effectiveWidth : 1
 
     ctx.translate(
-      safeAnchorX + (state.translateXPx + state.glitchShiftPx) * scaleFactor,
-      safeAnchorY + state.translateYPx * scaleFactor,
+      safeAnchorX + (state.translateXPx + state.glitchShiftPx) * exportTextUnit,
+      safeAnchorY + state.translateYPx * exportTextUnit,
     )
     const totalRotation = state.rotationDeg + calibRotation
     if (totalRotation) ctx.rotate((totalRotation * Math.PI) / 180)
@@ -730,13 +761,13 @@ export function drawAnimatedTextClipToCanvas(
 
     // Dibujar caja de fondo redondeada si aplica
     if (style.backgroundOpacity > 0 && maxKLineWidth > 0) {
-      const padX = Math.round(20 * scaleFactor)
-      const padY = Math.round(10 * scaleFactor)
+      const padX = Math.round(20 * exportTextUnit)
+      const padY = Math.round(10 * exportTextUnit)
       const boxW = maxKLineWidth + padX * 2
       const boxH = kTotalHeight + padY * 2
       const boxX = -boxW / 2
       const boxY = -kTotalHeight / 2 - padY
-      const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * scaleFactor))
+      const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * exportTextUnit))
 
       ctx.fillStyle = hexToRgba(style.backgroundColor, style.backgroundOpacity)
       ctx.beginPath()
@@ -750,8 +781,8 @@ export function drawAnimatedTextClipToCanvas(
 
     if (style.shadowBlur > 0) {
       ctx.shadowColor = style.shadowColor
-      ctx.shadowBlur = style.shadowBlur * scaleFactor
-      ctx.shadowOffsetY = 3 * scaleFactor
+      ctx.shadowBlur = style.shadowBlur * exportTextUnit
+      ctx.shadowOffsetY = 3 * exportTextUnit
     }
 
     ctx.textAlign = 'left'
@@ -768,13 +799,13 @@ export function drawAnimatedTextClipToCanvas(
 
         if (style.strokeWidth > 0) {
           ctx.strokeStyle = style.strokeColor
-          ctx.lineWidth = Math.min(5, style.strokeWidth) * scaleFactor
+          ctx.lineWidth = Math.min(5, style.strokeWidth) * exportTextUnit
           ctx.lineJoin = 'round'
           ctx.strokeText(word, cursorX, lineY)
         }
 
         ctx.fillStyle = isCurrent ? style.accentColor : isPast ? style.color : style.color
-        ctx.fillText(word, cursorX, isCurrent ? lineY - 2 * scaleFactor : lineY)
+        ctx.fillText(word, cursorX, isCurrent ? lineY - 2 * exportTextUnit : lineY)
         cursorX += wWidth + spaceWidth
       }
     })
@@ -813,18 +844,18 @@ export function drawAnimatedTextClipToCanvas(
       if (m.width > maxLineWidth) maxLineWidth = m.width
     }
 
-    let targetX = canvasWidth * normX
+    let targetX = viewX + viewW * normX
     if (!isSubtitle && style.align === 'left' && normX === 0.5) {
-      targetX = canvasWidth * 0.08 + maxLineWidth / 2
+      targetX = viewX + viewW * 0.08 + maxLineWidth / 2
     } else if (!isSubtitle && style.align === 'right' && normX === 0.5) {
-      targetX = canvasWidth * 0.92 - maxLineWidth / 2
+      targetX = viewX + viewW * 0.92 - maxLineWidth / 2
     }
 
     let safeAnchorX = targetX
     if (normX !== 0.5) {
       const halfWidth = (maxLineWidth / 2) * calibScaleX
-      const minX = canvasWidth * 0.04 + halfWidth
-      const maxX = canvasWidth * 0.96 - halfWidth
+      const minX = viewX + viewW * 0.04 + halfWidth
+      const maxX = viewX + viewW * 0.96 - halfWidth
       if (maxX >= minX) {
         safeAnchorX = Math.max(minX, Math.min(maxX, targetX))
       }
@@ -832,31 +863,31 @@ export function drawAnimatedTextClipToCanvas(
 
     let safeAnchorY = targetY
     const halfHeight = (totalHeight / 2) * calibScaleY
-    const minY = canvasHeight * 0.04 + halfHeight
-    const maxY = canvasHeight * 0.96 - halfHeight
+    const minY = viewY + viewH * 0.04 + halfHeight
+    const maxY = viewY + viewH * 0.96 - halfHeight
     if (maxY >= minY) {
       safeAnchorY = Math.max(minY, Math.min(maxY, targetY))
     }
 
     const effectiveWidth = maxLineWidth * calibScaleX
-    const overflowRatio = effectiveWidth > canvasWidth * 0.88 ? (canvasWidth * 0.88) / effectiveWidth : 1
+    const overflowRatio = effectiveWidth > viewW * 0.88 ? (viewW * 0.88) / effectiveWidth : 1
 
     ctx.translate(
-      safeAnchorX + (state.translateXPx + state.glitchShiftPx) * scaleFactor,
-      safeAnchorY + state.translateYPx * scaleFactor,
+      safeAnchorX + (state.translateXPx + state.glitchShiftPx) * exportTextUnit,
+      safeAnchorY + state.translateYPx * exportTextUnit,
     )
     const totalRotation = state.rotationDeg + calibRotation
     if (totalRotation) ctx.rotate((totalRotation * Math.PI) / 180)
     ctx.scale(state.scaleX * calibScaleX * overflowRatio, state.scaleY * calibScaleY * overflowRatio)
 
     if (style.backgroundOpacity > 0 && maxLineWidth > 0) {
-      const padX = Math.round(20 * scaleFactor)
-      const padY = Math.round(10 * scaleFactor)
+      const padX = Math.round(20 * exportTextUnit)
+      const padY = Math.round(10 * exportTextUnit)
       const boxW = maxLineWidth + padX * 2
       const boxH = totalHeight + padY * 2
       const boxX = -boxW / 2
       const boxY = -totalHeight / 2 - padY
-      const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * scaleFactor))
+      const radius = Math.min(boxH / 2, Math.round(style.backgroundRadius * exportTextUnit))
 
       ctx.fillStyle = hexToRgba(style.backgroundColor, style.backgroundOpacity)
       ctx.beginPath()
@@ -870,8 +901,8 @@ export function drawAnimatedTextClipToCanvas(
 
     if (style.shadowBlur > 0) {
       ctx.shadowColor = style.shadowColor
-      ctx.shadowBlur = style.shadowBlur * scaleFactor
-      ctx.shadowOffsetY = 3 * scaleFactor
+      ctx.shadowBlur = style.shadowBlur * exportTextUnit
+      ctx.shadowOffsetY = 3 * exportTextUnit
     }
 
     const isLeft = style.align === 'left'
@@ -883,7 +914,7 @@ export function drawAnimatedTextClipToCanvas(
       const y = -totalHeight / 2 + lineHeight * (idx + 0.5)
       if (style.strokeWidth > 0) {
         ctx.strokeStyle = style.strokeColor
-        ctx.lineWidth = Math.min(5, style.strokeWidth) * scaleFactor
+        ctx.lineWidth = Math.min(5, style.strokeWidth) * exportTextUnit
         ctx.lineJoin = 'round'
         ctx.strokeText(line, drawX, y)
       }
