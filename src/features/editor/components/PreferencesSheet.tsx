@@ -17,7 +17,6 @@ import {
   X,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select'
 import { Switch } from '../../../components/ui/switch'
 import {
   AI_PREFS_KEY,
@@ -462,14 +461,6 @@ export function PreferencesSheet({
                       onCheckedChange={() => setAnimations((v) => !v)}
                       aria-label={t('Animaciones de interfaz', 'Interface animations')}
                     />
-                  </AppearanceSettingRow>
-                  <AppearanceSettingRow label={t('Escala de interfaz', 'Interface scale')} description={t('Densidad tipográfica y de controles.', 'Typography and control density.')}>
-                    <Select value="100" disabled>
-                      <SelectTrigger aria-label={t('Escala de interfaz (próximamente)', 'Interface scale (coming soon)')} title={t('La escala de interfaz aún no está disponible', 'Interface scaling is not available yet')} className="h-8 w-32 rounded-full border border-white/10 bg-white/[0.04] text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent><SelectItem value="100">100%</SelectItem></SelectContent>
-                    </Select>
                   </AppearanceSettingRow>
                 </AppearanceSettingSection>
               </div>

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Toaster, errorMessage, toast, useToastStore } from './toast'
+import { Toaster } from './toast'
+import { errorMessage, toast, useToastStore } from './toast-service'
 
 describe('toast system', () => {
   beforeEach(() => { vi.useFakeTimers(); useToastStore.setState({ toasts: [] }) })

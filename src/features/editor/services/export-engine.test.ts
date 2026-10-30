@@ -116,7 +116,7 @@ describe('export engine', () => {
 
   it('drawClipToCanvas centers clip when exporting 1920x1080 sequence to 3840x2160 (4K)', () => {
     const translateCalls: Array<[number, number]> = []
-    const drawImageCalls: any[] = []
+    const drawImageCalls: Parameters<CanvasRenderingContext2D['drawImage']>[] = []
 
     const mockCtx = {
       save: () => {},
@@ -124,7 +124,7 @@ describe('export engine', () => {
       translate: (x: number, y: number) => translateCalls.push([x, y]),
       rotate: () => {},
       scale: () => {},
-      drawImage: (...args: any[]) => drawImageCalls.push(args),
+      drawImage: (...args: Parameters<CanvasRenderingContext2D['drawImage']>) => drawImageCalls.push(args),
       fillRect: () => {},
       fillText: () => {},
       measureText: () => ({ width: 100 }),
@@ -167,7 +167,7 @@ describe('export engine', () => {
 
     // Image drawn centered: w=3840, h=2160, drawn at -1920, -1080
     expect(drawImageCalls).toHaveLength(1)
-    const [_, dx, dy, dw, dh] = drawImageCalls[0]
+    const [, dx, dy, dw, dh] = drawImageCalls[0]
     expect(dw).toBe(3840)
     expect(dh).toBe(2160)
     expect(dx).toBe(-1920)
@@ -175,7 +175,7 @@ describe('export engine', () => {
   })
 
   it('drawClipToCanvas preserves aspect ratio using computeFitRect without stretching', () => {
-    const drawImageCalls: any[] = []
+    const drawImageCalls: Parameters<CanvasRenderingContext2D['drawImage']>[] = []
 
     const mockCtx = {
       save: () => {},
@@ -183,7 +183,7 @@ describe('export engine', () => {
       translate: () => {},
       rotate: () => {},
       scale: () => {},
-      drawImage: (...args: any[]) => drawImageCalls.push(args),
+      drawImage: (...args: Parameters<CanvasRenderingContext2D['drawImage']>) => drawImageCalls.push(args),
       fillRect: () => {},
       fillText: () => {},
       measureText: () => ({ width: 100 }),
@@ -220,7 +220,7 @@ describe('export engine', () => {
     )
 
     expect(drawImageCalls).toHaveLength(1)
-    const [_, dx, dy, dw, dh] = drawImageCalls[0]
+    const [, dx, dy, dw, dh] = drawImageCalls[0]
     // 16:9 into 1080x1920: width=1080, height=607.5
     expect(dw).toBe(1080)
     expect(dh).toBeCloseTo(607.5, 1)

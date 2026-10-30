@@ -55,7 +55,7 @@ export const TEXT_ANIMATIONS_LOOP: { id: TextAnimationLoop; label: string; label
   { id: 'neon-flicker', label: 'Destello Neón', labelEn: 'Neon Flicker' },
 ]
 
-export const TEXT_STYLE_PRESETS: TextPresetDefinition[] = [
+const CORE_TEXT_STYLE_PRESETS: TextPresetDefinition[] = [
   {
     id: 'hormozi-karaoke',
     name: 'Hormozi Karaoke',
@@ -344,6 +344,56 @@ export const TEXT_STYLE_PRESETS: TextPresetDefinition[] = [
       outDuration: 0.22,
     },
   },
+]
+
+const EXTRA_TEXT_PRESETS: Array<{
+  id: string
+  name: string
+  category: TextPresetCategory
+  badge: string
+  sampleText: string
+  base: string
+  style: Partial<Omit<TextStyle, 'presetId'>>
+  animation: TextAnimation
+}> = [
+  {
+    id: 'impact-stamp-title', name: 'Sello de Impacto', category: 'titles', badge: 'IMPACTO', sampleText: 'IDEA CENTRAL', base: 'editorial-hook',
+    style: { fontFamily: '"Montserrat", "Inter", sans-serif', fontSize: 78, color: '#fff7ed', accentColor: '#fb923c', strokeWidth: 5, strokeColor: '#431407', backgroundOpacity: 0, letterSpacing: 1.2 },
+    animation: { in: 'zoom-in', out: 'pop-out', loop: 'pulse', inDuration: 0.38, outDuration: 0.22 },
+  },
+  {
+    id: 'neon-outline-title', name: 'Contorno Neón', category: 'titles', badge: 'NEÓN', sampleText: 'MODO NOCHE', base: 'kinetic-neon-glow',
+    style: { fontFamily: '"Bebas Neue", Impact, sans-serif', fontSize: 82, color: '#ecfeff', accentColor: '#22d3ee', strokeWidth: 4, strokeColor: '#155e75', backgroundOpacity: 0, letterSpacing: 2.2 },
+    animation: { in: 'glitch', out: 'fade-out', loop: 'neon-flicker', inDuration: 0.44, outDuration: 0.28 },
+  },
+  {
+    id: 'minimal-name-lower-third', name: 'Nombre Editorial', category: 'lower-thirds', badge: 'EDITORIAL', sampleText: 'SOFÍA · DIRECTORA', base: 'lower-third-studio',
+    style: { fontFamily: '"Georgia", "Times New Roman", serif', fontSize: 38, color: '#fff7ed', accentColor: '#d6b36a', backgroundColor: '#131820', backgroundOpacity: 78, backgroundRadius: 4, italic: true, letterSpacing: 0.7 },
+    animation: { in: 'fade-up', out: 'fade-out', loop: 'float', inDuration: 0.55, outDuration: 0.32 },
+  },
+  {
+    id: 'punchy-highlight-captions', name: 'Subtítulo Enfático', category: 'subtitles', badge: 'ÉNFASIS', sampleText: 'MIRA ESTO', base: 'capcut-pop-pill',
+    style: { fontFamily: '"Inter", "Segoe UI", sans-serif', fontSize: 52, color: '#ffffff', accentColor: '#a3e635', backgroundColor: '#172554', backgroundOpacity: 94, backgroundRadius: 10, strokeWidth: 2, strokeColor: '#020617', letterSpacing: 0.5 },
+    animation: { in: 'bounce', out: 'pop-out', loop: 'pulse', inDuration: 0.4, outDuration: 0.2 },
+  },
+]
+
+export const TEXT_STYLE_PRESETS: TextPresetDefinition[] = [
+  ...CORE_TEXT_STYLE_PRESETS,
+  ...EXTRA_TEXT_PRESETS.map((preset): TextPresetDefinition => {
+    const base = CORE_TEXT_STYLE_PRESETS.find((item) => item.id === preset.base) ?? CORE_TEXT_STYLE_PRESETS[0]
+    return {
+      ...base,
+      id: preset.id,
+      name: preset.name,
+      nameEn: preset.name,
+      category: preset.category,
+      badge: preset.badge,
+      sampleText: preset.sampleText,
+      style: { ...base.style, ...preset.style, presetId: preset.id },
+      animation: { ...preset.animation },
+    }
+  }),
 ]
 
 export function getTextPreset(presetId?: string): TextPresetDefinition {

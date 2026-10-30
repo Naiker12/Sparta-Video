@@ -4,7 +4,7 @@ import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Copy, CopyPlus, Film, 
 import type { Clip, EffectInstance, Keyframe, MediaItem, TextAnimation, TextStyle } from '../model'
 import { ADJUST_PARAMS, EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
 import { parseCubeLUT } from '../effects/lut-parser'
-import { toast } from '../../../components/ui/toast'
+import { toast } from '../../../components/ui/toast-service'
 import { ActionMenu } from './ActionMenu'
 import { formatTimecode } from '../timecode'
 import { t } from '../services/locale'

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { cn } from '../../lib/utils'
 
-export interface TabsListProps extends React.HTMLAttributes<HTMLDivElement> {}
+export type TabsListProps = React.HTMLAttributes<HTMLDivElement>
 export interface TabTriggerProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   active?: boolean
   variant?: 'default' | 'pill' | 'underline' | 'dock'

@@ -48,6 +48,47 @@ export async function loadMediaSource(id: string): Promise<string | null> {
   return blob ? URL.createObjectURL(blob) : null
 }
 
+const audioWaveformCache = new Map<string, Promise<number[] | null>>()
+
+export function loadAudioWaveform(id: string, bars = 92): Promise<number[] | null> {
+  const cacheKey = `${id}:${bars}`
+  const cached = audioWaveformCache.get(cacheKey)
+  if (cached) return cached
+
+  const waveform = (async () => {
+    const blob = await loadMediaBlob(id)
+    if (!blob) return null
+    const AudioContextConstructor = window.AudioContext
+    if (!AudioContextConstructor) return null
+    const context = new AudioContextConstructor()
+    try {
+      const buffer = await context.decodeAudioData(await blob.arrayBuffer())
+      const channelCount = buffer.numberOfChannels
+      const frameCount = buffer.length
+      const samplesPerBar = Math.max(1, Math.ceil(frameCount / bars))
+      const values = Array.from({ length: bars }, (_, bar) => {
+        const start = bar * samplesPerBar
+        const end = Math.min(frameCount, start + samplesPerBar)
+        let peak = 0
+        for (let channel = 0; channel < channelCount; channel += 1) {
+          const samples = buffer.getChannelData(channel)
+          for (let sample = start; sample < end; sample += 1) peak = Math.max(peak, Math.abs(samples[sample] ?? 0))
+        }
+        return Math.max(0.025, Math.min(1, peak))
+      })
+      return values
+    } catch {
+      return null
+    } finally {
+      await context.close().catch(() => {})
+    }
+  })()
+
+  audioWaveformCache.set(cacheKey, waveform)
+  void waveform.then((result) => { if (!result) audioWaveformCache.delete(cacheKey) })
+  return waveform
+}
+
 export async function storeMediaPreview(id: string, preview: Blob): Promise<void> {
   const database = await openDatabase()
   await new Promise<void>((resolve, reject) => {

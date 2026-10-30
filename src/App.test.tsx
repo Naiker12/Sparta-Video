@@ -9,7 +9,7 @@ describe('Sparta Video editor preview', () => {
   it('shows the editor and updates the inspector when a clip is selected', () => {
     render(<App />)
     expect(screen.getByText('Media library')).toBeInTheDocument()
-    expect(screen.getAllByText('Sequence 01')).toHaveLength(2)
+    expect(screen.getAllByText('Sequence 01')).toHaveLength(1)
 
     fireEvent.click(screen.getAllByRole('button', { name: /coastline_drone_04\.mp4/ })[0])
     expect(screen.getAllByText('coastline_drone_04.mp4').length).toBeGreaterThan(1)

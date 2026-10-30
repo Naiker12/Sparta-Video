@@ -3,7 +3,7 @@ import { AudioLines, Check, Download, FolderPlus, LoaderCircle, Mic2, Music2, Pl
 import { t } from '../services/locale'
 import { readProviderRegistry, type AITask, type ProviderRegistry } from '../services/ai-provider-registry'
 import { generateElevenLabsAudio, listElevenLabsVoices, type ElevenLabsVoice } from '../services/audio-generation'
-import { toast } from '../../../components/ui/toast'
+import { toast } from '../../../components/ui/toast-service'
 import { useEditorStore } from '../editor-store'
 import { storeMediaFile } from '../services/media-storage'
 import type { MediaItem } from '../model'

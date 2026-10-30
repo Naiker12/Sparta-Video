@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronRight, Eraser, LoaderCircle, LockKeyhole, PlayCircle, Send } from 'lucide-react'
+import { ArrowDown, Braces, Check, ChevronDown, ChevronRight, Eraser, ListChecks, LoaderCircle, LockKeyhole, PlayCircle, Send } from 'lucide-react'
 import { IconButton } from './controls'
+import { Badge } from '../../../components/ui/badge'
 import { AudioGenerationPanel } from './AudioGenerationPanel'
 import {
   IconNleAspectRatio,
@@ -16,7 +17,7 @@ import { AI_PREFS_EVENT } from '../services/ai-preferences'
 import { readProviderRegistry, type ProviderRegistry } from '../services/ai-provider-registry'
 import { sendAIChat, type AnalysisDepth, type ChatMessage } from '../services/ai-chat'
 import { applyAIOperations, extractAIProposal, formatOperationLabel } from '../services/ai-operations'
-import { toast } from '../../../components/ui/toast'
+import { toast } from '../../../components/ui/toast-service'
 import { t } from '../services/locale'
 
 export type AssistantMode = 'create' | 'edit' | 'audio'
@@ -26,6 +27,87 @@ type ChatEntry = ChatMessage & { id: string }
 const HISTORY_LIMIT = 40
 const historyKey = (project: string) => `sparta-ai-chat:${encodeURIComponent(project)}`
 const modelKey = (project: string) => `sparta-ai-chat-model:${encodeURIComponent(project)}`
+function getVisibleAssistantText(content: string, proposal: ReturnType<typeof extractAIProposal>) {
+  return proposal
+    ? content.replace(/```(?:json)?\s*[\s\S]*?\s*```/gi, '').replace(/\n{3,}/g, '\n\n').trim()
+    : content
+}
+function getAssistantPreview(content: string, proposal: ReturnType<typeof extractAIProposal>) {
+  const plain = getVisibleAssistantText(content, proposal).replace(/```[\s\S]*?```/g, '').replace(/^\s{0,3}#{1,3}\s+/gm, '').replace(/[*`]/g, '').replace(/^\s*[-•]\s+/gm, '')
+  const preview = plain.slice(0, 250).replace(/\s+\S*$/, '').trimEnd()
+  return `${preview}${plain.length > 250 ? '…' : ''}`
+}
+function renderAssistantText(content: string, proposal: ReturnType<typeof extractAIProposal>) {
+  const lines = getVisibleAssistantText(content, proposal).split(/\r?\n/)
+  const blocks: { type: 'paragraph' | 'heading' | 'list' | 'code' | 'quote' | 'table'; text: string; level?: number; rows?: string[][] }[] = []
+  let paragraph: string[] = []
+  let list: string[] = []
+  let code: string[] | null = null
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push({ type: 'paragraph', text: paragraph.join(' ') })
+    paragraph = []
+  }
+  const flushList = () => {
+    if (list.length) blocks.push({ type: 'list', text: list.join('\n') })
+    list = []
+  }
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex]
+    if (/^\s*```/.test(line)) {
+      flushParagraph(); flushList()
+      if (code) { blocks.push({ type: 'code', text: code.join('\n') }); code = null }
+      else code = []
+      continue
+    }
+    if (code) { code.push(line); continue }
+    if (line.includes('|') && /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[lineIndex + 1] ?? '')) {
+      flushParagraph(); flushList()
+      const cells = (row: string) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
+      const rows = [cells(line)]
+      lineIndex += 2
+      while (lineIndex < lines.length && lines[lineIndex].includes('|') && lines[lineIndex].trim()) {
+        rows.push(cells(lines[lineIndex]))
+        lineIndex += 1
+      }
+      lineIndex -= 1
+      blocks.push({ type: 'table', text: '', rows })
+      continue
+    }
+    const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+)$/)
+    if (heading) { flushParagraph(); flushList(); blocks.push({ type: 'heading', text: heading[2], level: heading[1].length }); continue }
+    const quote = line.match(/^\s*>\s?(.*)$/)
+    if (quote) { flushParagraph(); flushList(); blocks.push({ type: 'quote', text: quote[1] }); continue }
+    const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.+)$/)
+    if (item) { flushParagraph(); list.push(item[1]); continue }
+    if (!line.trim()) { flushParagraph(); flushList(); continue }
+    flushList()
+    paragraph.push(line.trim())
+  }
+  flushParagraph(); flushList()
+  if (code?.length && !proposal) blocks.push({ type: 'code', text: code.join('\n') })
+  return blocks.map((block, index) => {
+    if (block.type === 'heading') return <strong className={`assistant-markdown-heading level-${block.level}`} key={index}>{renderInline(block.text)}</strong>
+    if (block.type === 'list') return <ul key={index}>{block.text.split('\n').map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}</ul>
+    if (block.type === 'quote') return <blockquote key={index}>{renderInline(block.text)}</blockquote>
+    if (block.type === 'table') return <div className="assistant-table-scroller" key={index}><table><thead><tr>{block.rows?.[0]?.map((cell, cellIndex) => <th key={cellIndex}>{renderInline(cell)}</th>)}</tr></thead><tbody>{block.rows?.slice(1).map((row, rowIndex) => <tr key={rowIndex}>{block.rows?.[0]?.map((_, cellIndex) => <td key={cellIndex}>{renderInline(row[cellIndex] ?? '')}</td>)}</tr>)}</tbody></table></div>
+    if (block.type === 'code') return <details className="assistant-code-details" key={index}>
+      <summary><span><Braces size={13} /> {t('Ver detalles técnicos', 'View technical details')} <span className="assistant-code-language">{/^\s*(?:\{|\[)/.test(block.text) ? 'JSON' : 'CODE'}</span></span><ChevronDown size={13} /></summary>
+      <pre><code>{block.text}</code></pre>
+    </details>
+    return <p key={index}>{renderInline(block.text)}</p>
+  })
+}
+function renderInline(text: string) {
+  return text.split(/(\[[^\]]+\]\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g).filter(Boolean).map((part, index) => {
+    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/)
+    if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={index}>{part.slice(2, -2)}</strong>
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={index}>{part.slice(1, -1)}</code>
+    if (part.startsWith('*') && part.endsWith('*')) return <em key={index}>{part.slice(1, -1)}</em>
+    return part
+  })
+}
+
 function readHistory(project: string): ChatEntry[] {
   try {
     const value: unknown = JSON.parse(window.localStorage.getItem(historyKey(project)) || '[]')
@@ -70,6 +152,9 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
   const [requesting, setRequesting] = useState(false)
   const [error, setError] = useState('')
   const feedRef = useRef<HTMLDivElement>(null)
+  const followLatestRef = useRef(true)
+  const initialHistoryAnchorRef = useRef(true)
+  const [showLatestButton, setShowLatestButton] = useState(false)
   const sequence = useEditorStore((state) => state.sequence)
   const tracks = useEditorStore((state) => state.tracks)
   const assets = useEditorStore((state) => state.assets)
@@ -82,7 +167,52 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
     window.addEventListener(AI_PREFS_EVENT, refresh)
     return () => window.removeEventListener(AI_PREFS_EVENT, refresh)
   }, [])
-  useEffect(() => { if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight }, [messages, requesting, mode])
+  useEffect(() => {
+    const feed = feedRef.current
+    if (!feed) return
+    if (initialHistoryAnchorRef.current) {
+      initialHistoryAnchorRef.current = false
+      const latestTurn = [...messages].reverse().find((message) => message.role === 'assistant') ?? messages.at(-1)
+      if (latestTurn) {
+        followLatestRef.current = false
+        requestAnimationFrame(() => {
+          const currentFeed = feedRef.current
+          const target = currentFeed?.querySelector<HTMLElement>(`[data-message-id="${latestTurn.id}"]`)
+          if (!currentFeed || !target) return
+          const top = target.getBoundingClientRect().top - currentFeed.getBoundingClientRect().top + currentFeed.scrollTop - 8
+          currentFeed.scrollTop = Math.max(0, top)
+          setShowLatestButton(currentFeed.scrollHeight - currentFeed.scrollTop - currentFeed.clientHeight >= 56)
+        })
+        return
+      }
+    }
+    if (!followLatestRef.current) return
+    feed.scrollTo({ top: feed.scrollHeight, behavior: requesting ? 'auto' : 'smooth' })
+  }, [messages, requesting, mode])
+
+  const updateScrollFollow = () => {
+    const feed = feedRef.current
+    if (!feed) return
+    const atLatest = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 56
+    followLatestRef.current = atLatest
+    setShowLatestButton(!atLatest)
+  }
+
+  const jumpToLatest = () => {
+    followLatestRef.current = true
+    setShowLatestButton(false)
+    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
+  }
+
+  const scrollToMessageStart = (id: string) => {
+    requestAnimationFrame(() => {
+      const feed = feedRef.current
+      const message = feed?.querySelector<HTMLElement>(`[data-message-id="${id}"]`)
+      if (!feed || !message) return
+      const top = message.getBoundingClientRect().top - feed.getBoundingClientRect().top + feed.scrollTop - 8
+      feed.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+    })
+  }
 
   const selectedClip = useMemo(
     () => tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId),
@@ -115,7 +245,10 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
     setDraft(''); setError('')
     const userMessage: ChatEntry = { id: crypto.randomUUID(), role: 'user', content: clean }
     const next = [...messages, userMessage].slice(-HISTORY_LIMIT)
+    followLatestRef.current = false
+    setShowLatestButton(false)
     persist(next)
+    scrollToMessageStart(userMessage.id)
     setRequesting(true)
     try {
       const answer = await sendAIChat({
@@ -126,7 +259,8 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
         mode: mode === 'create' ? 'create' : 'edit',
         depth,
       })
-      persist([...next, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
+      const assistantMessage: ChatEntry = { id: crypto.randomUUID(), role: 'assistant', content: answer }
+      persist([...next, assistantMessage])
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally { setRequesting(false) }
@@ -235,7 +369,7 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
         </button>
       </div>
     </div>
-    <div className="chat-content" ref={feedRef}>
+    <div className="chat-content" ref={feedRef} onScroll={updateScrollFollow}>
       {mode === 'audio' ? <AudioGenerationPanel /> : <>
         {!messages.length && !requesting && <div className="chat-welcome">
           <h3>{selected ? t('¿En qué trabajamos?', 'What are we working on?') : t('Configura un modelo para empezar', 'Set up a model to get started')}</h3>
@@ -255,21 +389,38 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
         </div>}
         {messages.map((message) => {
           const proposal = message.role === 'assistant' ? extractAIProposal(message.content) : null
-          return <article className={`assistant-chat-message ${message.role}`} key={message.id}>
+          const longAnswer = message.role === 'assistant' && getVisibleAssistantText(message.content, proposal).length > 560
+          return <article className={`assistant-chat-message ${message.role}`} data-message-id={message.id} key={message.id}>
             <span className="assistant-message-icon">{message.role === 'assistant' ? <IconNleAssistant size={12} /> : null}</span>
             <div className="assistant-message-content">
-              <div>{message.content}</div>
+              {longAnswer ? <details className="assistant-message-expand">
+                <summary>
+                  <span className="assistant-message-preview">{getAssistantPreview(message.content, proposal)}</span>
+                  <span className="assistant-message-expand-label">{t('Leer respuesta completa', 'Read full response')}</span>
+                </summary>
+                <div className="assistant-markdown assistant-message-full">{renderAssistantText(message.content, proposal)}</div>
+              </details> : <div className="assistant-markdown">{renderAssistantText(message.content, proposal)}</div>}
               {proposal && <div className="ai-proposal-card">
-                <div className="ai-proposal-header">
-                  <PlayCircle size={14} className="ai-proposal-icon" />
-                  <strong>{proposal.title}</strong>
+                <div className="ai-proposal-topline">
+                  <span className="ai-proposal-icon-wrap"><PlayCircle size={16} className="ai-proposal-icon" /></span>
+                  <div className="ai-proposal-heading-copy">
+                    <span className="ai-proposal-eyebrow">{t('PROPUESTA DE EDICIÓN', 'EDITING PROPOSAL')}</span>
+                    <strong>{proposal.title}</strong>
+                  </div>
+                  <Badge variant="outline" className="ai-proposal-count">{proposal.operations.length} {proposal.operations.length === 1 ? t('acción', 'action') : t('acciones', 'actions')}</Badge>
                 </div>
                 <p className="ai-proposal-summary">{proposal.summary}</p>
-                <ul className="ai-proposal-operations">
-                  {proposal.operations.map((op, idx) => (
-                    <li key={idx}><code>•</code> {formatOperationLabel(op)}</li>
-                  ))}
-                </ul>
+                {proposal.operations.length > 0 && <div className="ai-proposal-operation-list">
+                  <span className="ai-proposal-operations-label"><ListChecks size={13} /> {t('Incluye', 'Includes')}</span>
+                  {proposal.operations.length > 3 ? <details className="ai-proposal-more-operations">
+                    <summary>{t('Ver acciones de la propuesta', 'View proposal actions')}<ChevronDown size={13} /></summary>
+                    <ul className="ai-proposal-operations">
+                      {proposal.operations.map((op, idx) => <li key={idx}><span aria-hidden="true" />{formatOperationLabel(op)}</li>)}
+                    </ul>
+                  </details> : <ul className="ai-proposal-operations">
+                    {proposal.operations.map((op, idx) => <li key={idx}><span aria-hidden="true" />{formatOperationLabel(op)}</li>)}
+                  </ul>}
+                </div>}
                 <button
                   type="button"
                   className="ai-proposal-apply-btn"
@@ -284,23 +435,28 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
                     }
                   }}
                 >
-                  <Check size={13} /> {t('Aplicar propuesta a la edición', 'Apply proposal to edit')}
+                  <Check size={14} /> {t('Aplicar propuesta', 'Apply proposal')} <ChevronRight size={14} className="ai-proposal-apply-arrow" />
                 </button>
               </div>}
             </div>
           </article>
         })}
-        {requesting && <p className="assistant-thinking" role="status"><LoaderCircle className="spin" size={13} /> {t('Analizando el proyecto y preparando la respuesta…', 'Analyzing the project and preparing a response…')}</p>}
+        {requesting && <div className="assistant-thinking" role="status" aria-live="polite">
+          <span className="assistant-thinking-orbit"><LoaderCircle className="spin" size={14} /></span>
+          <span className="assistant-thinking-copy"><strong>{t('Sparta está pensando', 'Sparta is thinking')}</strong><span>{t('Revisando el contexto de tu proyecto…', 'Reviewing your project context…')}</span></span>
+          <span className="assistant-thinking-dots" aria-hidden="true"><i /><i /><i /></span>
+        </div>}
         {error && <p className="assistant-chat-error" role="alert">{error}</p>}
       </>}
     </div>
+    {mode !== 'audio' && showLatestButton && <button type="button" className="assistant-jump-latest" onClick={jumpToLatest}><ArrowDown size={13} /> {t('Ir a la respuesta', 'Jump to latest')}</button>}
     {mode !== 'audio' && <div className="chat-compose">
       <div className="assistant-model-controls">
         <label><span className="sr-only">{t('Modelo de texto', 'Text model')}</span><select aria-label={t('Modelo de texto', 'Text model')} value={selectedKeyValue} onChange={(event) => selectModel(event.target.value)}><option value="">{t('Seleccionar modelo', 'Select a model')}</option>{options.map(({ key, profile, model }) => <option key={key} value={key}>{profile.name} · {model.name}</option>)}</select></label>
         <label><span className="sr-only">{t('Profundidad de análisis', 'Analysis depth')}</span><select aria-label={t('Profundidad de análisis', 'Analysis depth')} value={depth} onChange={(event) => selectDepth(event.target.value as AnalysisDepth)}><option value="concise">{t('Breve', 'Concise')}</option><option value="balanced">{t('Equilibrada', 'Balanced')}</option><option value="deep">{t('Profunda', 'Deep')}</option></select></label>
       </div>
       <textarea aria-label={t('Mensaje para Sparta AI', 'Message for Sparta AI')} placeholder={mode === 'create' ? t('Describe el video que quieres planear…', 'Describe the video you want to plan…') : t('Pregunta sobre este proyecto…', 'Ask about this project…')} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() } }} />
-      <div className="compose-bottom"><span className="assistant-memory-note">{t('Contexto de secuencia activo', 'Sequence context active')}</span><button className="send-button" aria-label={t('Enviar mensaje', 'Send message')} title={!selected ? t('Selecciona un modelo de texto', 'Select a text model') : t('Enviar mensaje', 'Send message')} onClick={() => void send()} disabled={requesting || !draft.trim() || !selected}>{requesting ? <LoaderCircle className="spin" size={13} /> : <Send size={13} />}</button></div>
+      <div className="compose-bottom"><span className="assistant-memory-note">{t('Contexto de secuencia activo', 'Sequence context active')} <kbd className="assistant-kbd">Enter</kbd> · <kbd className="assistant-kbd">Shift</kbd>+<kbd className="assistant-kbd">Enter</kbd> {t('nueva línea', 'new line')}</span><button className="send-button" aria-label={t('Enviar mensaje', 'Send message')} title={!selected ? t('Selecciona un modelo de texto', 'Select a text model') : t('Enviar mensaje', 'Send message')} onClick={() => void send()} disabled={requesting || !draft.trim() || !selected}>{requesting ? <LoaderCircle className="spin" size={13} /> : <Send size={13} />}</button></div>
     </div>}
     <div className="assistant-disclaimer"><LockKeyhole size={10} /> {mode === 'audio' ? t('Generación externa · requiere clave y consume créditos', 'External generation · requires an API key and uses credits') : t('Las solicitudes se envían al proveedor del modelo seleccionado', 'Requests are sent to the selected model provider')}</div>
   </aside>

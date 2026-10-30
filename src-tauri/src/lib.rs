@@ -374,6 +374,16 @@ async fn chat_with_provider(request: ChatRequest) -> Result<String, String> {
                     _ => "medium",
                 });
             }
+            let is_lm_studio_local = request.kind == "compatible"
+                && reqwest::Url::parse(&base).ok().is_some_and(|url| {
+                    matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
+                        && url.port() == Some(1234)
+                });
+            if is_lm_studio_local {
+                // LM Studio's OpenAI-compatible endpoint supports this hint; it prevents
+                // local reasoning models from consuming the whole reply budget internally.
+                body["reasoning_effort"] = serde_json::json!("none");
+            }
             (url.to_string(), body, "bearer")
         }
     };

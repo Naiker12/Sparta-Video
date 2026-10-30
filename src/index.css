@@ -124,10 +124,13 @@ select:focus-visible {
 
 /* Preferences dialog: quiet motion and consistent editor surfaces. */
 .preferences-window {
-  box-shadow: 0 32px 100px rgba(0, 0, 0, .62), 0 0 0 1px rgba(255, 255, 255, .025);
+  background: var(--panel) !important;
+  color: var(--text);
+  border-color: var(--line) !important;
+  box-shadow: var(--shadow-pop), 0 0 0 1px color-mix(in srgb, var(--accent) 5%, transparent);
 }
-.preferences-sidebar { background: #141518; padding: 12px 10px; }
-.preferences-main { background: #191a1e; }
+.preferences-sidebar { background: var(--background); border-color: var(--line); padding: 12px 10px; }
+.preferences-main { background: var(--panel); }
 .preferences-main > div { scrollbar-color: #3a3c43 transparent; scrollbar-width: thin; }
 .preferences-main h1 { letter-spacing: -.025em; }
 .preferences-page.page-forward { animation: preferences-page-forward 190ms cubic-bezier(.2, .8, .2, 1) both; }
@@ -139,12 +142,14 @@ select:focus-visible {
   z-index: 0;
   inset: 0;
   border-radius: inherit;
-  background: #292a2e;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-raised));
   content: "";
   animation: preferences-pill-in 180ms cubic-bezier(.2, .8, .2, 1) both;
 }
-.preferences-sidebar input:focus-visible { outline: none !important; border-color: rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .07); box-shadow: 0 0 0 2px rgba(59, 130, 246, .2); }
-.preferences-nav button:focus-visible { outline: none !important; box-shadow: 0 0 0 1px rgba(255, 255, 255, .25); }
+.preferences-nav button[aria-selected="true"],
+.preferences-nav button[aria-selected="true"] svg { color: var(--accent); }
+.preferences-sidebar input:focus-visible { outline: none !important; border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); background: var(--panel-raised); box-shadow: 0 0 0 2px var(--accent-subtle); }
+.preferences-nav button:focus-visible { outline: none !important; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .preferences-main button, .preferences-sidebar button, .preferences-window input {
   transition-duration: 160ms;
 }

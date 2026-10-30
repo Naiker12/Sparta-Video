@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { EditorState, PersistedProjectState } from '../editor-store'
 import { useEditorStore } from '../editor-store'
 import { t } from './locale'
-import { toast } from '../../../components/ui/toast'
+import { toast } from '../../../components/ui/toast-service'
 
 export const SPARTA_PROJECT_FORMAT = 'sparta-video-project'
 export const SPARTA_PROJECT_VERSION = 1
@@ -144,7 +144,7 @@ export function downloadProjectFile(fileContent: SpartaProjectFile) {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export function parseProjectFile(rawJson: string): SpartaProjectFile {

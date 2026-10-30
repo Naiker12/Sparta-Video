@@ -19,7 +19,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { toast } from '../../../components/ui/toast'
+import { toast } from '../../../components/ui/toast-service'
 import type { MediaItem, Track } from '../model'
 import type { ExportPresetId, ExportSettings, RenderProgress } from '../services/contracts'
 import {
