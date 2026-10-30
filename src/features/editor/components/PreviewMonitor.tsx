@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, Copy, Expand, Film, LoaderCircle, Monitor, Pause, Pencil, Play, SkipBack, SkipForward, Smartphone, Trash2 } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import { ActionMenu } from './ActionMenu'
-import type { Clip, MediaItem, TimelineMarker } from '../model'
+import type { Clip, EffectInstance, MediaItem, TimelineMarker } from '../model'
 import { formatTimecode, parseTimecode } from '../timecode'
 import { t } from '../services/locale'
 import { loadMediaSource } from '../services/media-storage'
 import { getInterpolatedOpacity, getInterpolatedTransform } from '../services/keyframe-interpolation'
 import { computeTextAnimationState, getDefaultTextStyle } from '../services/text-presets'
 import { useEditorStore } from '../editor-store'
-import { toast } from '../../../components/ui/toast'
+import { toast } from '../../../components/ui/toast-service'
 import { computeTransitionInState } from '../effects/transition-math'
 import { getEffectsCSSFilter } from '../effects/pixel-effects'
 
@@ -18,7 +18,8 @@ type Props = {
   frameRate: number
   duration: number
   clip?: Clip
-  adjustmentLayers?: Clip[]
+  visualClips?: PreviewVisualClip[]
+  adjustmentLayers?: PreviewVisualClip[]
   textOverlays?: Clip[]
   selectedClipId?: string
   media?: MediaItem
@@ -37,6 +38,7 @@ type Props = {
   volume?: number
 }
 type ZoomPreset = 'fit' | '50%' | '100%' | '200%'
+type PreviewVisualClip = Clip & { trackId: string; trackOrder: number }
 
 function hexToRgbaCss(hex: string, alphaPercent: number): string {
   const clean = hex.replace('#', '').trim()
@@ -53,11 +55,26 @@ function hexToRgbaCss(hex: string, alphaPercent: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
+type PreviewEffectOverlay = { id: string; opacity: number; blend: React.CSSProperties['mixBlendMode']; image: string; size?: string }
+
+function getPreviewEffectOverlays(effects?: EffectInstance[]): PreviewEffectOverlay[] {
+  const overlays: PreviewEffectOverlay[] = []
+  for (const effect of (effects ?? []).filter((item) => item.enabled)) {
+    const strength = Math.max(0, Math.min(1, (effect.intensity ?? 100) / 100))
+    if (effect.effectId === 'fx-film-grain') overlays.push({ id: effect.id, opacity: ((effect.params.amount ?? 35) / 100) * strength * 0.34, blend: 'soft-light', image: 'url("data:image/svg+xml,%3Csvg viewBox=%270 0 180 180%27 xmlns=%27http://www.w3.org/2000/svg%27%3E%3Cfilter id=%27n%27%3E%3CfeTurbulence type=%27fractalNoise%27 baseFrequency=%27.82%27 numOctaves=%273%27 stitchTiles=%27stitch%27/%3E%3C/filter%3E%3Crect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23n)%27 opacity=%27.8%27/%3E%3C/svg%3E")' })
+    if (effect.effectId === 'fx-halftone') overlays.push({ id: effect.id, opacity: 0.52 * strength, blend: 'multiply', image: 'radial-gradient(rgba(0,0,0,.72) .75px, transparent .9px)', size: `${Math.max(3, effect.params.dotSize ?? 8)}px ${Math.max(3, effect.params.dotSize ?? 8)}px` })
+    if (effect.effectId === 'fx-vhs-glitch') overlays.push({ id: effect.id, opacity: 0.28 * strength, blend: 'screen', image: 'repeating-linear-gradient(0deg, transparent 0 5px, rgba(255,255,255,.42) 6px, transparent 7px), linear-gradient(90deg, rgba(255,30,90,.35), transparent 22%, transparent 78%, rgba(35,180,255,.38))' })
+    if (effect.effectId === 'fx-chromatic-aberration') overlays.push({ id: effect.id, opacity: 0.2 * strength, blend: 'screen', image: 'linear-gradient(90deg, rgba(255,20,70,.72), transparent 18%, transparent 82%, rgba(20,190,255,.75))' })
+  }
+  return overlays
+}
+
 export function PreviewMonitor({
   playhead,
   frameRate,
   duration,
   clip,
+  visualClips = [],
   adjustmentLayers = [],
   textOverlays = [],
   selectedClipId,
@@ -83,6 +100,7 @@ export function PreviewMonitor({
   const [hoverScrub, setHoverScrub] = useState<{ time: number; ratio: number } | null>(null)
   const [timecodeDraft, setTimecodeDraft] = useState<string | null>(null)
   const [sourceState, setSourceState] = useState<{ assetId: string; status: 'ready' | 'missing'; url?: string } | null>(null)
+  const [layerSources, setLayerSources] = useState<Record<string, { assetId: string; url: string | null }>>({})
   const [snapGuides, setSnapGuides] = useState<{ x: boolean; y: number | null }>({ x: false, y: null })
   const [detectedVideoFormat, setDetectedVideoFormat] = useState<{ width: number; height: number; isVertical: boolean } | null>(null)
   const [inlineEditingClipId, setInlineEditingClipId] = useState<string | null>(null)
@@ -91,6 +109,8 @@ export function PreviewMonitor({
   const stageRef = useRef<HTMLDivElement>(null)
   const canvasBoxRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const layerVideoRefs = useRef(new Map<string, HTMLVideoElement>())
+  const layerSourcesRef = useRef<Record<string, { assetId: string; url: string | null }>>({})
   const timecode = formatTimecode(playhead, frameRate)
   const transform = clip
     ? getInterpolatedTransform(clip, playhead, sequenceSize)
@@ -157,7 +177,82 @@ export function PreviewMonitor({
   const sourceLoading = !!sourceAssetId && !sourceMatches
   const sourceMissing = !!sourceAssetId && sourceMatches && sourceState?.status === 'missing'
   const hasActiveTextOverlays = textOverlays.length > 0
-  const isPlayable = !!sourceUrl || hasActiveTextOverlays || (duration > 0 && playing)
+
+  const visualSources = useMemo(() => visualClips
+    .filter((item) => item.kind !== 'adjustment' && item.text === undefined && item.thumbnail !== 'text-overlay')
+    .map((item) => ({ clip: item, assetId: item.sourceAssetId ?? assets?.find((asset) => asset.title === item.title)?.id }))
+    .filter((entry): entry is { clip: PreviewVisualClip; assetId: string } => !!entry.assetId), [visualClips, assets])
+  const hasVisualLayer = visualSources.some(({ clip: item, assetId }) => layerSources[item.id]?.assetId === assetId && !!layerSources[item.id]?.url)
+  const isPlayable = !!sourceUrl || hasActiveTextOverlays || hasVisualLayer || (duration > 0 && playing)
+
+  useEffect(() => {
+    let cancelled = false
+    const wanted = new Map(visualSources.map(({ clip: item, assetId }) => [item.id, assetId]))
+    const current = layerSourcesRef.current
+    const retained = Object.fromEntries(Object.entries(current).filter(([clipId, source]) => {
+      const keep = wanted.get(clipId) === source.assetId
+      if (!keep && source.url) URL.revokeObjectURL(source.url)
+      return keep
+    }))
+    layerSourcesRef.current = retained
+    setLayerSources(retained)
+    const missing = visualSources.filter(({ clip: item, assetId }) => retained[item.id]?.assetId !== assetId)
+    void Promise.all(missing.map(async ({ clip: item, assetId }) => {
+      try {
+        return { clipId: item.id, assetId, url: await loadMediaSource(assetId) }
+      } catch {
+        return { clipId: item.id, assetId, url: null }
+      }
+    })).then((loaded) => {
+      if (cancelled) {
+        loaded.forEach(({ url }) => { if (url) URL.revokeObjectURL(url) })
+        return
+      }
+      const next = { ...layerSourcesRef.current }
+      loaded.forEach(({ clipId, assetId, url }) => {
+        if (wanted.get(clipId) === assetId) next[clipId] = { assetId, url }
+        else if (url) URL.revokeObjectURL(url)
+      })
+      layerSourcesRef.current = next
+      setLayerSources(next)
+    })
+    return () => { cancelled = true }
+  }, [visualSources])
+
+  useEffect(() => () => {
+    Object.values(layerSourcesRef.current).forEach(({ url }) => { if (url) URL.revokeObjectURL(url) })
+    layerSourcesRef.current = {}
+  }, [])
+
+  useEffect(() => {
+    const syncVideos = () => {
+      for (const { clip: layerClip } of visualSources) {
+        const video = layerVideoRefs.current.get(layerClip.id)
+        if (!video || video.readyState < 1) continue
+        const speed = layerClip.speed ?? 1
+        const sourceTime = layerClip.freezeTime ?? Math.max(0, (playhead - layerClip.start) * speed)
+        if (Math.abs(video.currentTime - sourceTime) > (playing ? 0.25 : 0.035)) {
+          try { video.currentTime = sourceTime } catch { /* Browser will seek when metadata is ready. */ }
+        }
+        video.playbackRate = speed
+        video.preservesPitch = layerClip.preservePitch ?? true
+        video.muted = true
+        if (playing && layerClip.freezeTime === undefined) void video.play().catch(() => {})
+        else video.pause()
+      }
+    }
+    syncVideos()
+    if (!playing) return
+    let frame = 0
+    let active = true
+    const tick = () => {
+      if (!active) return
+      syncVideos()
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => { active = false; cancelAnimationFrame(frame) }
+  }, [visualSources, layerSources, playhead, playing])
 
   useEffect(() => {
     const video = videoRef.current
@@ -239,6 +334,19 @@ export function PreviewMonitor({
 
   const combinedEffects = [...(clip?.effects ?? []), ...(adjustmentLayers?.flatMap((l) => l.effects ?? []) ?? [])]
   const effFilter = getEffectsCSSFilter(combinedEffects)
+  const vignetteEffects = combinedEffects.filter((effect) => effect.enabled && effect.effectId === 'fx-vignette')
+  const vignetteOverlay = vignetteEffects.length ? {
+    position: 'absolute' as const,
+    inset: 0,
+    zIndex: 40,
+    pointerEvents: 'none' as const,
+    background: vignetteEffects.map((effect) => {
+      const strength = (effect.intensity ?? 100) / 100
+      const amount = Math.max(0, Math.min(1, (effect.params.amount ?? 50) / 100 * strength))
+      const feather = Math.max(10, Math.min(100, effect.params.feather ?? 60))
+      return `radial-gradient(ellipse at center, transparent ${Math.round(30 + feather * 0.35)}%, rgba(0, 0, 0, ${Math.min(0.85, 0.85 * amount)}) 100%)`
+    }).join(', '),
+  } : null
 
   const transOffsetX = transState ? (transState.offsetX / sequenceSize.width) * (boxWidth || 1) : 0
   const transOffsetY = transState ? (transState.offsetY / sequenceSize.height) * (boxHeight || 1) : 0
@@ -253,6 +361,33 @@ export function PreviewMonitor({
     mixBlendMode: blendModeStyle as React.CSSProperties['mixBlendMode'],
     filter: effFilter || undefined,
     clipPath: transState?.clipPath,
+  }
+
+  const getLayerStyle = (layerClip: PreviewVisualClip, order: number): React.CSSProperties => {
+    const layerTransform = getInterpolatedTransform(layerClip, playhead, sequenceSize)
+    const legacyCenter = sequenceSize.width === 1080 && sequenceSize.height === 1920 && Math.abs(layerTransform.x - 960) < 5 && Math.abs(layerTransform.y - 540) < 5 && !layerClip.keyframes?.some((keyframe) => keyframe.property === 'position')
+    const x = legacyCenter ? sequenceSize.width / 2 : layerTransform.x
+    const y = legacyCenter ? sequenceSize.height / 2 : layerTransform.y
+    const fit = layerClip.fit ?? 'fit'
+    const layerTransition = layerClip.transitionIn ? computeTransitionInState(layerClip.transitionIn, layerClip.start, playhead, sequenceSize.width, sequenceSize.height) : null
+    const lowerAdjustmentEffects = adjustmentLayers
+      .filter((adjustment) => adjustment.trackOrder < layerClip.trackOrder)
+      .flatMap((adjustment) => adjustment.effects ?? [])
+    const effects = [...(layerClip.effects ?? []), ...lowerAdjustmentEffects]
+    const scaleX = (layerClip.flipH ? -1 : 1) * (layerTransform.scaleX / 100) * (layerTransition?.scale ?? 1)
+    const scaleY = (layerClip.flipV ? -1 : 1) * (layerTransform.scaleY / 100) * (layerTransition?.scale ?? 1)
+    const offsetX = ((x - sequenceSize.width / 2 + (layerTransition?.offsetX ?? 0)) / sequenceSize.width) * (boxWidth || 1)
+    const offsetY = ((y - sequenceSize.height / 2 + (layerTransition?.offsetY ?? 0)) / sequenceSize.height) * (boxHeight || 1)
+    return {
+      position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: fit === 'fill' ? 'cover' : fit === 'stretch' ? 'fill' : 'contain',
+      transform: `translate(${offsetX}px, ${offsetY}px) scale(${scaleX}, ${scaleY}) rotate(${layerTransform.rotation + (layerTransition?.rotation ?? 0)}deg)`,
+      opacity: (getInterpolatedOpacity(layerClip, playhead) / 100) * (layerTransition?.opacity ?? 1),
+      mixBlendMode: layerClip.blendMode === 'add' ? 'plus-lighter' : layerClip.blendMode === 'normal' ? undefined : layerClip.blendMode as React.CSSProperties['mixBlendMode'],
+      filter: getEffectsCSSFilter(effects) || undefined,
+      imageRendering: effects.some((effect) => effect.enabled && effect.effectId === 'fx-pixelate') ? 'pixelated' : undefined,
+      clipPath: layerTransition?.clipPath,
+      zIndex: order,
+    }
   }
 
   const zoomLabel = zoom === 'fit' ? t('Ajustar', 'Fit') : zoom
@@ -391,8 +526,7 @@ export function PreviewMonitor({
   return <section className="preview-panel">
     <div className="h-9 px-3 flex items-center justify-between border-b border-border bg-card select-none">
       <div className="flex items-center gap-2 shrink-0">
-        <span className="text-[13px] font-semibold text-foreground whitespace-nowrap shrink-0">{t('Programa', 'Program')}</span>
-        <span className="sr-only">Sequence 01</span>
+        <span className="text-[13px] font-semibold text-foreground whitespace-nowrap shrink-0">{t('Secuencia 01', 'Sequence 01')}</span>
         {showAspectMismatchAlert && onSetSequence && (
           <button
             type="button"
@@ -419,19 +553,7 @@ export function PreviewMonitor({
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-xs text-muted-foreground font-mono tabular-nums whitespace-nowrap shrink-0">{sequenceSize.width} × {sequenceSize.height} · {Math.round(frameRate)} fps</span>
-        <ActionMenu
-          label={t('Calidad de reproducción', 'Playback quality')}
-          triggerClass="h-7 px-2.5 text-xs rounded-[6px] bg-input border-0 text-foreground hover:bg-input-hover flex items-center gap-1 cursor-pointer transition-colors focus:ring-2 focus:ring-primary"
-          popupClass="monitor-quality-popup"
-          items={[
-            { label: t('Completa', 'Full'), checked: true, onSelect: () => {} },
-            { label: '1/2', checked: false, onSelect: () => {} },
-            { label: '1/4', checked: false, onSelect: () => {} },
-          ]}
-        >
-          <span>{t('Calidad: Completa', 'Quality: Full')}</span>
-          <ChevronDown size={11} aria-hidden="true" className="text-muted-foreground" />
-        </ActionMenu>
+        <span className="h-7 px-2.5 text-xs rounded-[6px] bg-input text-muted-foreground inline-flex items-center" title={t('La calidad de previsualización aún no se puede cambiar.', 'Preview quality cannot be changed yet.')}>{t('Previsualización: Alta', 'Preview: High')}</span>
       </div>
     </div>
     <div className={`preview-stage ${zoom !== 'fit' ? 'is-zoomed' : ''}`} ref={stageRef}>
@@ -468,9 +590,40 @@ export function PreviewMonitor({
           </button>
         </div>
       )}
-      <div ref={canvasBoxRef} className={`preview-image ${sourceUrl || hasActiveTextOverlays ? 'preview-image-loaded' : 'preview-empty-image'}`} style={canvasBoxStyle}>
-        {sourceUrl && isImage && <img className="preview-media-image" style={mediaTransform} src={sourceUrl} alt={previewTitle ?? ''} />}
-        {sourceUrl && isVideo && <video key={`${sourceAssetId}-${clip?.id ?? 'library'}`} ref={videoRef} className="preview-media-image" style={mediaTransform} src={sourceUrl} muted={isMuted} playsInline preload="auto" onLoadedMetadata={(event) => {
+      <div ref={canvasBoxRef} className={`preview-image ${sourceUrl || hasVisualLayer || hasActiveTextOverlays ? 'preview-image-loaded' : 'preview-empty-image'}`} style={{ ...canvasBoxStyle, position: 'relative' }}>
+        {visualSources.map(({ clip: layerClip, assetId }, index) => {
+          const loadedSource = layerSources[layerClip.id]
+          const url = loadedSource?.assetId === assetId ? loadedSource.url : null
+          const asset = assets?.find((item) => item.id === assetId)
+          const isLayerImage = asset?.type === 'image' || layerClip.thumbnail === 'image-catalog'
+          const layerStyle = getLayerStyle(layerClip, index + 1)
+          const adjustmentEffects = adjustmentLayers.filter((adjustment) => adjustment.trackOrder < layerClip.trackOrder).flatMap((adjustment) => adjustment.effects ?? [])
+          const effectOverlays = getPreviewEffectOverlays([...(layerClip.effects ?? []), ...adjustmentEffects])
+          if (!url) return null
+          return <Fragment key={layerClip.id}>
+            {isLayerImage ? <img className="preview-media-image preview-media-layer" style={layerStyle} src={url} alt={layerClip.title} /> : <video
+              ref={(node) => { if (node) layerVideoRefs.current.set(layerClip.id, node); else layerVideoRefs.current.delete(layerClip.id) }}
+              className="preview-media-image preview-media-layer"
+              style={layerStyle}
+              src={url}
+              muted
+              playsInline
+              preload="auto"
+              onLoadedMetadata={(event) => {
+                const video = event.currentTarget
+                const speed = layerClip.speed ?? 1
+                const sourceTime = layerClip.freezeTime ?? Math.max(0, (playhead - layerClip.start) * speed)
+                try { video.currentTime = sourceTime } catch { /* Browser will seek when metadata is ready. */ }
+                video.playbackRate = speed
+                video.preservesPitch = layerClip.preservePitch ?? true
+                if (playing && layerClip.freezeTime === undefined) void video.play().catch(() => {})
+              }}
+            />}
+            {effectOverlays.map((overlay) => <div key={overlay.id} aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: index + 1.5, pointerEvents: 'none', opacity: overlay.opacity, backgroundImage: overlay.image, backgroundSize: overlay.size, mixBlendMode: overlay.blend }} />)}
+          </Fragment>
+        })}
+        {visualClips.length === 0 && sourceUrl && isImage && <img className="preview-media-image" style={mediaTransform} src={sourceUrl} alt={previewTitle ?? ''} />}
+        {visualClips.length === 0 && sourceUrl && isVideo && <video key={`${sourceAssetId}-${clip?.id ?? 'library'}`} ref={videoRef} className="preview-media-image" style={mediaTransform} src={sourceUrl} muted={isMuted} playsInline preload="auto" onLoadedMetadata={(event) => {
           const video = event.currentTarget
           const vw = video.videoWidth
           const vh = video.videoHeight
@@ -507,7 +660,8 @@ export function PreviewMonitor({
             if (Math.abs(next - playhead) > 0.12) onSeek(duration > 0 ? Math.min(duration, next) : next)
           }
         }} />}
-        {!sourceUrl && !hasActiveTextOverlays && (
+        {vignetteOverlay && (sourceUrl || hasVisualLayer) && <div aria-hidden="true" style={vignetteOverlay} />}
+        {!sourceUrl && !hasVisualLayer && !hasActiveTextOverlays && (
           <div className="preview-empty-copy">
             {sourceLoading ? <LoaderCircle size={20} className="spin" aria-hidden="true" /> : <Film size={20} strokeWidth={1.6} aria-hidden="true" />}
             <strong>{previewTitle ?? t('La vista previa aparecerá aquí', 'Preview will appear here')}</strong>

@@ -706,14 +706,14 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
   addAdjustmentLayer: (start, duration) => {
     let clipId = ''
     set((state) => {
-      let tracks = copyTracks(state.tracks)
-      let targetTrack = tracks.find((t) => t.kind === 'video' && !state.lockedTracks.includes(t.id))
+      const tracks = copyTracks(state.tracks)
+      let targetTrack = tracks.find((track) => track.kind === 'video' && (track.name.toLowerCase().includes('efecto') || track.name.toLowerCase().includes('fx')) && !state.lockedTracks.includes(track.id))
       if (!targetTrack) {
-        let num = tracks.filter((t) => t.kind === 'video').length + 1
-        while (tracks.some((t) => t.id === `v${num}`)) num += 1
+        let num = 1
+        while (tracks.some((track) => track.id === `fx${num}`)) num += 1
         targetTrack = {
-          id: `v${num}`,
-          name: `Vídeo ${String(num).padStart(2, '0')}`,
+          id: `fx${num}`,
+          name: num === 1 ? 'Efectos' : `Efectos ${String(num).padStart(2, '0')}`,
           kind: 'video',
           clips: [],
         }

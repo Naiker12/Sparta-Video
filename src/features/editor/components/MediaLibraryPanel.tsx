@@ -13,9 +13,53 @@ import { TEXT_STYLE_PRESETS, type TextPresetCategory } from '../services/text-pr
 import { EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
 import { parseCubeLUT } from '../effects/lut-parser'
 import { useEditorStore } from '../editor-store'
-import { toast } from '../../../components/ui/toast'
+import { toast } from '../../../components/ui/toast-service'
 
 export type LibraryTab = 'media' | 'text' | 'filters' | 'effects' | 'transitions' | 'templates'
+
+function getFilterPreviewStyle(effectId: string): CSSProperties {
+  const definition = getEffectDef(effectId)
+  const values = definition?.presetValues ?? {}
+  const saturation = Math.max(0, 1 + (values.saturation ?? 0) / 100)
+  const contrast = Math.max(0.2, 1 + (values.contrast ?? 0) / 100)
+  const brightness = Math.max(0.2, 1 + (values.brightness ?? 0) / 100)
+  const temperature = values.temperature ?? 0
+  const tint = values.tint ?? 0
+  const sepia = Math.max(0, temperature) * 0.35
+  const hue = temperature < 0 ? temperature * 0.3 : 0 + tint * 0.4
+  return { filter: `saturate(${saturation.toFixed(2)}) contrast(${contrast.toFixed(2)}) brightness(${brightness.toFixed(2)}) ${sepia ? `sepia(${sepia.toFixed(0)}%)` : ''} ${hue ? `hue-rotate(${hue.toFixed(0)}deg)` : ''}`.trim() }
+}
+
+function getEffectPreviewStyle(effectId: string): CSSProperties {
+  const styles: Record<string, CSSProperties> = {
+    'fx-gaussian-blur': { filter: 'blur(2px)' },
+    'fx-zoom-blur': { filter: 'blur(1px) saturate(1.3)', transform: 'scale(1.08)' },
+    'fx-motion-blur': { filter: 'blur(1px)', transform: 'scaleX(1.08)' },
+    'fx-glow': { filter: 'brightness(1.18) saturate(1.3)' },
+    'fx-film-grain': { filter: 'contrast(1.12) saturate(.88)' },
+    'fx-chromatic-aberration': { filter: 'saturate(1.5) contrast(1.08)' },
+    'fx-pixelate': { imageRendering: 'pixelated' },
+    'fx-posterize': { filter: 'contrast(1.45) saturate(1.2)' },
+    'fx-vignette': { filter: 'brightness(.9) contrast(1.15)' },
+    'fx-sharpen': { filter: 'contrast(1.2) saturate(1.08)' },
+    'fx-fisheye': { transform: 'scale(1.12)' },
+    'fx-halftone': { filter: 'grayscale(.25) contrast(1.25)' },
+    'fx-vhs-glitch': { filter: 'hue-rotate(-12deg) saturate(1.25) contrast(1.12)' },
+    'fx-swirl': { filter: 'hue-rotate(16deg) saturate(1.3)' },
+  }
+  return styles[effectId] ?? { filter: 'saturate(1.2) contrast(1.08)' }
+}
+
+function effectPreviewValue(effectId: string) {
+  const value = getEffectDef(effectId)?.params[0]
+  return value ? `${value.default}${value.unit ?? ''}` : ''
+}
+
+function PreviewScene({ src, className = '', style }: { src?: string; className?: string; style?: CSSProperties }) {
+  return <span className={`effect-preview-scene ${className}`} aria-hidden="true">
+    {src ? <img src={src} alt="" draggable={false} style={style} /> : <span className="effect-preview-placeholder"><i /><i /><i /></span>}
+  </span>
+}
 
 const PRESET_COMPACT_PREVIEW: Record<string, string> = {
   'hormozi-karaoke': 'VOZ EN VIVO',
@@ -26,12 +70,15 @@ const PRESET_COMPACT_PREVIEW: Record<string, string> = {
   'lower-third-studio': 'DIRECCIÓN',
   'typewriter-docu': 'DOCU ARCHIVO',
   'bounce-viral': 'REELS VIRAL',
+  'impact-stamp-title': 'IDEA CENTRAL',
+  'neon-outline-title': 'MODO NOCHE',
+  'minimal-name-lower-third': 'SOFÍA · DIRECTORA',
+  'punchy-highlight-captions': 'MIRA ESTO',
 }
 
 type Props = {
   assets: MediaItem[]
   selectedMedia: string | null
-  projectName: string
   isExtractingSubtitles?: boolean
   subtitleProgressText?: string
   importStatus?: { isImporting: boolean; current: number; total: number; currentFileName: string } | null
@@ -46,12 +93,14 @@ type Props = {
   onRelink: (assetId: string, file: File) => void
   onImport: () => void
   onImportFiles: (files: FileList | File[]) => void
-  onOpenProject: () => void
 }
 
-export function MediaLibraryPanel({ assets, selectedMedia, projectName: _projectName, isExtractingSubtitles = false, subtitleProgressText, importStatus, onSelect, onAdd, onAddTextClip, onAutoSubtitles, onApplySubtitlePreset, onClearSubtitles, onRename, onDelete, onRelink, onImport, onImportFiles, onOpenProject: _onOpenProject }: Props) {
+export function MediaLibraryPanel({ assets, selectedMedia, isExtractingSubtitles = false, subtitleProgressText, importStatus, onSelect, onAdd, onAddTextClip, onAutoSubtitles, onApplySubtitlePreset, onClearSubtitles, onRename, onDelete, onRelink, onImport, onImportFiles }: Props) {
   const [dockTab, setDockTab] = useState<LibraryTab>('media')
   const [textCategory, setTextCategory] = useState<'all' | TextPresetCategory>('all')
+  const selectedClipId = useEditorStore((state) => state.selectedClipId)
+  const tracks = useEditorStore((state) => state.tracks)
+  const selectedClip = useMemo(() => tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId), [tracks, selectedClipId])
 
   const applyEffectToSelectedClip = (effectId: string) => {
     const state = useEditorStore.getState()
@@ -67,16 +116,34 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
     const clip = state.tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId)
     if (!clip) return
 
+    const owner = state.tracks.find((track) => track.clips.some((item) => item.id === clip.id))
+    if (owner && state.lockedTracks.includes(owner.id)) {
+      toast.info(t('Desbloquea la pista para modificar este clip.', 'Unlock the track to change this clip.'))
+      return
+    }
+    if ((clip.kind !== 'video' && clip.kind !== 'adjustment') || clip.text !== undefined || clip.thumbnail === 'text-overlay') {
+      toast.info(t('Selecciona un clip de video o una capa FX para aplicar este efecto.', 'Select a video clip or FX layer to apply this effect.'))
+      return
+    }
+
     const inst = createEffectInstance(effectId)
     if (!inst) return
 
-    const existing = clip.effects ?? []
+    const targetClipId = clip.kind === 'video' ? state.addAdjustmentLayer(clip.start, clip.duration) : clip.id
+    if (!targetClipId) return
+    const effectTarget = useEditorStore.getState().tracks.flatMap((track) => track.clips).find((item) => item.id === targetClipId)
+    if (!effectTarget) return
+    const existing = effectTarget.effects ?? []
     const nextEffects = def.kind === 'filter'
       ? [...existing.filter((e) => getEffectDef(e.effectId)?.kind !== 'filter'), inst]
       : [...existing, inst]
 
-    state.updateClip(clip.id, { effects: nextEffects })
-    toast.success(t(`"${def.name}" aplicado a "${clip.title}"`, `"${def.name}" applied to "${clip.title}"`))
+    useEditorStore.getState().updateClip(targetClipId, { effects: nextEffects, ...(clip.kind === 'video' ? { title: def.name } : {}) })
+    if (state.playing) state.setPlaying(false)
+    if (state.playhead < clip.start || state.playhead >= clip.start + clip.duration) {
+      state.setPlayhead(clip.start + Math.min(clip.duration / 2, 0.35))
+    }
+    toast.success(t(`"${def.name}" añadido a la pista Efectos`, `"${def.name}" added to the Effects track`), { description: clip.title })
   }
 
   const applyTransitionToSelectedClip = (transId: string) => {
@@ -90,12 +157,28 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
       return
     }
 
+    const clip = state.tracks.flatMap((track) => track.clips).find((item) => item.id === selectedClipId)
+    const owner = state.tracks.find((track) => track.clips.some((item) => item.id === selectedClipId))
+    if (!clip) return
+    if (owner && state.lockedTracks.includes(owner.id)) {
+      toast.info(t('Desbloquea la pista para modificar este clip.', 'Unlock the track to change this clip.'))
+      return
+    }
+    if (clip.kind !== 'video' || clip.text !== undefined || clip.thumbnail === 'text-overlay') {
+      toast.info(t('Selecciona un clip de video para asignarle una transición.', 'Select a video clip to assign a transition.'))
+      return
+    }
+
+    const duration = def.params.find((param) => param.key === 'duration')?.default ?? 0.6
+
     state.updateClip(selectedClipId, {
       transitionIn: {
         effectId: transId,
-        duration: 0.6,
+        duration,
       },
     })
+    if (state.playing) state.setPlaying(false)
+    state.setPlayhead(clip.start + Math.min(duration * 0.25, clip.duration / 2))
     toast.success(t(`Transición "${def.name}" asignada al clip`, `Transition "${def.name}" assigned to clip`))
   }
   const [captionLanguage, setCaptionLanguage] = useState<SubtitleLanguage>('spanish')
@@ -130,6 +213,16 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
   const relinkInputRef = useRef<HTMLInputElement>(null)
   const relinkTargetId = useRef<string | null>(null)
   const initialAssetIds = useRef(assets.map((asset) => asset.id))
+  const selectedPreviewAssetId = selectedClip?.sourceAssetId ?? selectedMedia ?? undefined
+  const fallbackPreviewAssetId = assets.find((asset) => asset.status === 'ready' && (asset.type === 'video' || asset.type === 'image'))?.id
+  const previewAssetId = selectedPreviewAssetId && imagePreviews[selectedPreviewAssetId] ? selectedPreviewAssetId : fallbackPreviewAssetId
+  const scenePreview = previewAssetId ? imagePreviews[previewAssetId] : undefined
+  const alternatePreviewAssetId = assets.find((asset) => asset.id !== previewAssetId && imagePreviews[asset.id])?.id
+  const nextClip = selectedClip ? tracks
+    .find((track) => track.clips.some((clip) => clip.id === selectedClip.id))?.clips
+    .filter((clip) => clip.kind === 'video' && clip.id !== selectedClip.id && clip.start >= selectedClip.start + selectedClip.duration)
+    .sort((a, b) => a.start - b.start)[0] : undefined
+  const nextScenePreview = (nextClip?.sourceAssetId ? imagePreviews[nextClip.sourceAssetId] : undefined) ?? (alternatePreviewAssetId ? imagePreviews[alternatePreviewAssetId] : undefined)
   useEffect(() => { void pruneStoredMedia(initialAssetIds.current).catch(() => {}) }, [])
   useEffect(() => {
     let cancelled = false
@@ -457,7 +550,6 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
                 >
                   <div className="text-preset-stage">
                     <span className="text-preset-badge">{preset.badge}</span>
-                    <span className="text-preset-hover-hint" aria-hidden="true">{t('Vista previa', 'Preview')}</span>
                     <span
                       className="text-preset-sample"
                       style={{
@@ -526,7 +618,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
               <Palette size={13} /> {t('Filtros de color cinematográficos', 'Cinematic color filters')}
             </strong>
             <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
-              {t('Haz clic en un filtro para aplicarlo al clip seleccionado.', 'Click a filter to apply it to the selected clip.')}
+              {t('Elige un filtro para añadirlo como capa independiente en la pista Efectos.', 'Choose a filter to add it as a separate layer on the Effects track.')}
             </p>
           </div>
           <label className="keyframe-button" style={{ width: '100%', margin: '8px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer' }}>
@@ -556,12 +648,20 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
               <button
                 key={filter.id}
                 type="button"
-                className="text-preset-card"
+                className={`text-preset-card effect-library-card filter-preset-card ${selectedClip?.effects?.some((item) => item.effectId === filter.id && item.enabled) ? 'is-applied' : ''}`}
+                aria-label={`${filter.name}. ${filter.category}. ${filter.description}`}
                 onClick={() => applyEffectToSelectedClip(filter.id)}
                 style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', textAlign: 'left', minHeight: '80px', justifyContent: 'space-between' }}
               >
+                <span className="effect-preview-thumb filter-preview-thumb">
+                  <PreviewScene src={scenePreview} className={`filter-preview-scene ${filter.id}`} style={getFilterPreviewStyle(filter.id)} />
+                  <span className="filter-preview-before"><PreviewScene src={scenePreview} /></span>
+                  <span className={`effect-preview-overlay ${filter.id}`} />
+                  <span className="effect-preview-description">{filter.description}</span>
+                </span>
                 <div>
                   <span className="text-preset-badge" style={{ fontSize: '9px', marginBottom: '4px' }}>{filter.category}</span>
+                  <span className="effect-preview-value">{effectPreviewValue(filter.id)}</span>
                   <strong style={{ fontSize: '12px', display: 'block', color: 'var(--text)' }}>{filter.name}</strong>
                   <span style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, display: 'block' }}>{filter.description}</span>
                 </div>
@@ -583,7 +683,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
               <Sparkles size={13} /> {t('Efectos visuales y de shader', 'Visual & shader effects')}
             </strong>
             <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
-              {t('Añade desenfoque, grano, resplandor o viñeta al clip.', 'Add blur, grain, glow, or vignette to the clip.')}
+              {t('Elige un efecto para añadirlo como capa independiente en la pista Efectos.', 'Choose an effect to add it as a separate layer on the Effects track.')}
             </p>
           </div>
           <button
@@ -602,12 +702,19 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
               <button
                 key={effect.id}
                 type="button"
-                className="text-preset-card"
+                className={`text-preset-card effect-library-card effect-preset-card ${selectedClip?.effects?.some((item) => item.effectId === effect.id && item.enabled) ? 'is-applied' : ''}`}
+                aria-label={`${effect.name}. ${effect.category}. ${effect.description}`}
                 onClick={() => applyEffectToSelectedClip(effect.id)}
                 style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', textAlign: 'left', minHeight: '80px', justifyContent: 'space-between' }}
               >
+                <span className="effect-preview-thumb effect-preview-thumb-image">
+                  <PreviewScene src={scenePreview} className={`effect-preview-scene ${effect.id}`} style={getEffectPreviewStyle(effect.id)} />
+                  <span className={`effect-preview-overlay ${effect.id}`} />
+                  <span className="effect-preview-description">{effect.description}</span>
+                </span>
                 <div>
                   <span className="text-preset-badge" style={{ fontSize: '9px', marginBottom: '4px' }}>{effect.category}</span>
+                  <span className="effect-preview-value">{effectPreviewValue(effect.id)}</span>
                   <strong style={{ fontSize: '12px', display: 'block', color: 'var(--text)' }}>{effect.name}</strong>
                   <span style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, display: 'block' }}>{effect.description}</span>
                 </div>
@@ -629,7 +736,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
               <Shuffle size={13} /> {t('Transiciones de escena', 'Scene transitions')}
             </strong>
             <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
-              {t('Selecciona un clip y elige cómo entra en escena.', 'Select a clip and choose its in-transition.')}
+              {t('Pasa el cursor para ver la animación · haz clic para asignarla.', 'Hover to preview the motion · click to apply it.')}
             </p>
           </div>
           <div className="text-presets-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', padding: '8px 0' }}>
@@ -637,16 +744,25 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName: _project
               <button
                 key={trans.id}
                 type="button"
-                className="text-preset-card"
+                className={`text-preset-card effect-library-card transition-preset-card ${trans.id} ${selectedClip?.transitionIn?.effectId === trans.id ? 'is-applied' : ''}`}
+                data-transition={trans.id}
+                aria-label={`${trans.name}. ${trans.category}. ${trans.description}`}
                 onClick={() => applyTransitionToSelectedClip(trans.id)}
                 style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', textAlign: 'left', minHeight: '80px', justifyContent: 'space-between' }}
               >
+                <span className="transition-preview-thumb" data-transition={trans.id}>
+                  <PreviewScene src={scenePreview} className="transition-preview-old" />
+                  <PreviewScene src={nextScenePreview ?? scenePreview} className={`transition-preview-new ${nextScenePreview ? '' : 'transition-preview-fallback'}`} />
+                  <span className="transition-preview-flash" />
+                  <span className="effect-preview-description">{trans.description}</span>
+                </span>
                 <div>
                   <span className="text-preset-badge" style={{ fontSize: '9px', marginBottom: '4px' }}>{trans.category}</span>
+                  <span className="effect-preview-value">{effectPreviewValue(trans.id)}</span>
                   <strong style={{ fontSize: '12px', display: 'block', color: 'var(--text)' }}>{trans.name}</strong>
                   <span style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, display: 'block' }}>{trans.description}</span>
                 </div>
-                <span className="pill-action-tag" style={{ alignSelf: 'flex-end', fontSize: '9px' }}>{t('Asignar', 'Assign')}</span>
+                <span className="pill-action-tag" style={{ alignSelf: 'flex-end', fontSize: '9px' }}>{selectedClip?.transitionIn?.effectId === trans.id ? t('Aplicada', 'Applied') : t('Asignar', 'Apply')}</span>
               </button>
             ))}
           </div>

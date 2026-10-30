@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Columns2, CopyPlus, FileDown, FileUp, Film, FolderOpen, Maximize2, Pencil, PlusCircle, Redo2, Scissors, Settings2, Trash2, Undo2, Upload, Video, Zap } from 'lucide-react'
-import { AssistantPanel, type AssistantMode } from './features/editor/components/AssistantPanel'
+import type { AssistantMode } from './features/editor/components/AssistantPanel'
 import { InspectorPanel } from './features/editor/components/InspectorPanel'
 import { MediaLibraryPanel } from './features/editor/components/MediaLibraryPanel'
 import { PreviewMonitor } from './features/editor/components/PreviewMonitor'
 import { TimelinePanel } from './features/editor/components/TimelinePanel'
 import { ActionMenu } from './features/editor/components/ActionMenu'
-import { PreferencesSheet } from './features/editor/components/PreferencesSheet'
 import { RenameProjectDialog } from './features/editor/components/RenameProjectDialog'
-import { ExportDialog } from './features/editor/components/ExportDialog'
 import { TimelineAudioEngine } from './features/editor/services/audio-playback'
 import { getProjectSaveStatus, subscribeProjectSaveStatus, useEditorStore } from './features/editor/editor-store'
-import type { MediaItem } from './features/editor/model'
+import type { MediaItem, TransitionRef } from './features/editor/model'
 import {
   captureVideoThumbnail,
   formatMediaDuration,
@@ -25,13 +23,17 @@ import {
   repairTimelineAndAssetDurations,
   type SubtitleLanguage,
 } from './features/editor/services/subtitle-generator'
-import { downloadProjectFile, exportProjectData, openProjectFromFile } from './features/editor/services/project-file'
 import { Group, Panel, Separator, useDefaultLayout, useGroupRef, usePanelRef } from 'react-resizable-panels'
 import { t, useLanguage } from './features/editor/services/locale'
-import { Toaster, errorMessage, toast } from './components/ui/toast'
+import { Toaster } from './components/ui/toast'
+import { errorMessage, toast } from './components/ui/toast-service'
 import './App.css'
 import './styles/editor-polish.css'
 import './styles/toast.css'
+
+const AssistantPanel = lazy(() => import('./features/editor/components/AssistantPanel').then(({ AssistantPanel: Component }) => ({ default: Component })))
+const ExportDialog = lazy(() => import('./features/editor/components/ExportDialog').then(({ ExportDialog: Component }) => ({ default: Component })))
+const PreferencesSheet = lazy(() => import('./features/editor/components/PreferencesSheet').then(({ PreferencesSheet: Component }) => ({ default: Component })))
 
 // Layout is a convenience preference. Keep the editor usable if browser storage is blocked.
 const layoutMemory = new Map<string, string>()
@@ -140,6 +142,11 @@ function App() {
   const selectedClipTrack = tracks.find((track) => track.clips.some((clip) => clip.id === selectedClipId))
   const selectedClipReadOnly = !!selectedClipTrack && lockedTracks.includes(selectedClipTrack.id)
   const sequenceDuration = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration)))
+  const activeVisualClips = tracks
+    .map((track, trackOrder) => ({ track, trackOrder }))
+    .filter(({ track }) => track.kind === 'video' && !mutedTracks.includes(track.id))
+    .reverse()
+    .flatMap(({ track, trackOrder }) => track.clips.filter((clip) => clip.kind !== 'adjustment' && clip.text === undefined && clip.thumbnail !== 'text-overlay' && playhead >= clip.start && playhead < clip.start + clip.duration).map((clip) => ({ ...clip, trackId: track.id, trackOrder })))
   const previewClip = tracks.filter((track) => track.kind === 'video' && !mutedTracks.includes(track.id)).reduce<NonNullable<typeof selectedClip> | undefined>((active, track) => {
     const current = track.clips
       .filter((clip) => playhead >= clip.start && playhead < clip.start + clip.duration && clip.text === undefined && clip.thumbnail !== 'text-overlay' && clip.kind !== 'adjustment')
@@ -148,9 +155,9 @@ function App() {
     return current ?? active
   }, undefined)
   const activeAdjustmentLayers = tracks
-    .filter((track) => track.kind === 'video' && !mutedTracks.includes(track.id))
-    .flatMap((track) => track.clips)
-    .filter((clip) => clip.kind === 'adjustment' && playhead >= clip.start && playhead < clip.start + clip.duration)
+    .map((track, trackOrder) => ({ track, trackOrder }))
+    .filter(({ track }) => track.kind === 'video' && !mutedTracks.includes(track.id))
+    .flatMap(({ track, trackOrder }) => track.clips.filter((clip) => clip.kind === 'adjustment' && playhead >= clip.start && playhead < clip.start + clip.duration).map((clip) => ({ ...clip, trackId: track.id, trackOrder })))
   const activeTextOverlays = tracks
     .filter((track) => track.kind === 'video' && !mutedTracks.includes(track.id))
     .flatMap((track) =>
@@ -187,10 +194,12 @@ function App() {
   const fileInput = useRef<HTMLInputElement>(null)
   const projectFileInput = useRef<HTMLInputElement>(null)
   const assistantPanelRef = usePanelRef()
+  const appWorkspaceGroupRef = useGroupRef()
   const mainVerticalGroupRef = useGroupRef()
   const upperGroupRef = useGroupRef()
+  const appWorkspaceLayout = useDefaultLayout({ id: 'sparta-app-workspace', panelIds: ['editor', 'assistant'], storage: layoutStorage })
   const verticalLayout = useDefaultLayout({ id: 'sparta-main-vertical', panelIds: ['stage', 'timeline'], storage: layoutStorage })
-  const upperLayout = useDefaultLayout({ id: 'sparta-upper-workspace', panelIds: ['library', 'monitor', 'inspector', 'assistant'], storage: layoutStorage })
+  const upperLayout = useDefaultLayout({ id: 'sparta-upper-workspace', panelIds: ['library', 'monitor', 'inspector'], storage: layoutStorage })
 
   useEffect(() => subscribeProjectSaveStatus(setSaveStatus), [])
 
@@ -241,15 +250,11 @@ function App() {
   }, [assistantPanelRef])
 
   const toggleAssistant = () => {
-    const panel = assistantPanelRef.current
-    if (!panel) return
-    if (panel.isCollapsed()) {
-      panel.expand()
-      upperGroupRef.current?.setLayout(window.innerWidth < 1100 ? { library: 20, monitor: 38, inspector: 20, assistant: 22 } : { library: 22, monitor: 42, inspector: 20, assistant: 16 })
+    if (!chatOpen) {
+      appWorkspaceGroupRef.current?.setLayout({ editor: 76, assistant: 24 })
       setChatOpen(true)
     } else {
-      panel.collapse()
-      upperGroupRef.current?.setLayout({ library: 24, monitor: 50, inspector: 26, assistant: 0 })
+      appWorkspaceGroupRef.current?.setLayout({ editor: 100, assistant: 0 })
       setChatOpen(false)
     }
   }
@@ -263,7 +268,6 @@ function App() {
             library: 24,
             monitor: 50,
             inspector: 26,
-            assistant: chatOpen ? 20 : 0,
           })
         }
         const vertLayout = mainVerticalGroupRef.current?.getLayout() as Record<string, number> | undefined
@@ -280,27 +284,31 @@ function App() {
     const compactLayout = () => {
       if (window.innerWidth >= 1100) return
       if (assistantPanelRef.current && !assistantPanelRef.current.isCollapsed()) assistantPanelRef.current.collapse()
-      upperGroupRef.current?.setLayout({ library: 28, monitor: 44, inspector: 28, assistant: 0 })
+      appWorkspaceGroupRef.current?.setLayout({ editor: 100, assistant: 0 })
+      upperGroupRef.current?.setLayout({ library: 28, monitor: 44, inspector: 28 })
       mainVerticalGroupRef.current?.setLayout({ stage: 56, timeline: 44 })
       setChatOpen(false)
     }
     compactLayout()
     window.addEventListener('resize', compactLayout)
     return () => window.removeEventListener('resize', compactLayout)
-  }, [assistantPanelRef, mainVerticalGroupRef, upperGroupRef])
+  }, [assistantPanelRef, appWorkspaceGroupRef, mainVerticalGroupRef, upperGroupRef])
   const resetWorkspace = () => {
     try {
       window.localStorage.removeItem('react-resizable-panels:sparta-workspace')
+      window.localStorage.removeItem('react-resizable-panels:sparta-app-workspace')
       window.localStorage.removeItem('react-resizable-panels:sparta-main-vertical')
       window.localStorage.removeItem('react-resizable-panels:sparta-upper-workspace')
       window.localStorage.removeItem('react-resizable-panels:sparta-preview-inspector')
       window.localStorage.removeItem('react-resizable-panels:sparta-editor-vertical')
       window.localStorage.removeItem('sparta-workspace')
+      window.localStorage.removeItem('sparta-app-workspace')
       window.localStorage.removeItem('sparta-main-vertical')
       window.localStorage.removeItem('sparta-upper-workspace')
     } catch { /* ignore */ }
     mainVerticalGroupRef.current?.setLayout({ stage: 58, timeline: 42 })
-    upperGroupRef.current?.setLayout({ library: 24, monitor: 50, inspector: 26, assistant: 0 })
+    appWorkspaceGroupRef.current?.setLayout({ editor: 100, assistant: 0 })
+    upperGroupRef.current?.setLayout({ library: 24, monitor: 50, inspector: 26 })
     toast.success(t('Distribución de paneles restablecida', 'Panel layout reset'))
   }
   const toggleTimelineExpanded = () => {
@@ -667,7 +675,7 @@ function App() {
           <ActionMenu label={t('Archivo', 'File')} triggerClass="sparta-menu-btn text-[13px] text-muted-foreground hover:text-foreground font-medium px-2 py-1 rounded-[4px] hover:bg-secondary/60 transition-colors cursor-pointer" items={[
             { label: t('Nuevo proyecto', 'New project'), icon: PlusCircle, onSelect: () => { useEditorStore.getState().resetProject(); toast.info(t('Nuevo proyecto creado', 'New project created')) } },
             { label: t('Abrir proyecto (.sparta)…', 'Open project (.sparta)…'), icon: FileUp, onSelect: () => projectFileInput.current?.click() },
-            { label: t('Guardar proyecto como (.sparta)…', 'Save project as (.sparta)…'), icon: FileDown, onSelect: () => { const fileData = exportProjectData(); downloadProjectFile(fileData); toast.success(t('Archivo de proyecto guardado', 'Project file saved'), { description: `${fileData.project.name}.sparta` }) } },
+            { label: t('Guardar proyecto como (.sparta)…', 'Save project as (.sparta)…'), icon: FileDown, onSelect: () => { void import('./features/editor/services/project-file').then(({ exportProjectData, downloadProjectFile }) => { const fileData = exportProjectData(); downloadProjectFile(fileData); toast.success(t('Archivo de proyecto guardado', 'Project file saved'), { description: fileData.project.name + '.sparta' }) }) } },
             { separator: true },
             { label: t('Importar medios…', 'Import media…'), icon: FileUp, onSelect: () => fileInput.current?.click() },
             { label: t('Exportar vídeo…', 'Export video…'), icon: Video, onSelect: () => setExportOpen(true) },
@@ -700,7 +708,7 @@ function App() {
           items={[
             { heading: 'PROJECT' },
             { label: t('Cambiar nombre del proyecto', 'Rename project'), icon: Pencil, onSelect: () => setRenameOpen(true) },
-            { label: t('Duplicar proyecto', 'Duplicate project'), icon: CopyPlus, onSelect: () => toast.info(t('Función en desarrollo', 'In development')) },
+            { label: t('Duplicar proyecto (.sparta)…', 'Duplicate project (.sparta)…'), icon: CopyPlus, onSelect: () => { void import('./features/editor/services/project-file').then(({ exportProjectData, downloadProjectFile }) => { const fileData = exportProjectData(); fileData.project.name = fileData.project.name + ' - copia'; downloadProjectFile(fileData); toast.success(t('Copia del proyecto guardada', 'Project copy saved'), { description: t('Los medios vinculados conservan sus ubicaciones actuales.', 'Linked media keeps its current locations.') }) }) } },
             { separator: true },
             { label: t('Preferencias del proyecto', 'Project preferences'), icon: FolderOpen, onSelect: () => setSettingsOpen(true) },
           ]}
@@ -765,13 +773,15 @@ function App() {
       </div>
     </header>
     <input ref={fileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" multiple accept="video/*,audio/*,image/*" tabIndex={-1} aria-hidden="true" onChange={(event) => { void importFiles(event.target.files); event.target.value = '' }} />
-    <input ref={projectFileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" accept=".sparta,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file) void openProjectFromFile(file); event.target.value = '' }} />
-    <Group id="sparta-workspace" groupRef={mainVerticalGroupRef} className="workspace" orientation="vertical" defaultLayout={verticalLayout.defaultLayout ?? { stage: 58, timeline: 42 }} onLayoutChanged={verticalLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
-      <Panel id="stage" defaultSize="58%" minSize="32%" maxSize="80%" className="bg-transparent overflow-hidden h-full">
+    <input ref={projectFileInput} className="visually-hidden hidden" style={{ display: 'none' }} type="file" accept=".sparta,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file) void import('./features/editor/services/project-file').then(({ openProjectFromFile }) => openProjectFromFile(file)); event.target.value = '' }} />
+    <Group id="sparta-app-workspace" groupRef={appWorkspaceGroupRef} className="workspace" orientation="horizontal" defaultLayout={appWorkspaceLayout.defaultLayout ?? { editor: 100, assistant: 0 }} onLayoutChanged={(layout, meta) => { appWorkspaceLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
+      <Panel id="editor" defaultSize="100%" minSize="60%" className="editor-workspace-panel">
+    <Group id="sparta-workspace" groupRef={mainVerticalGroupRef} className="editor-vertical-group" orientation="vertical" defaultLayout={verticalLayout.defaultLayout ?? { stage: 61, timeline: 39 }} onLayoutChanged={verticalLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
+      <Panel id="stage" defaultSize="61%" minSize="32%" maxSize="80%" className="bg-transparent overflow-hidden h-full">
         <div className="upper-workspace">
-          <Group id="sparta-upper-workspace" groupRef={upperGroupRef} className="preview-inspector-group" orientation="horizontal" defaultLayout={upperLayout.defaultLayout ?? { library: 24, monitor: 50, inspector: 26, assistant: 0 }} onLayoutChanged={(layout, meta) => { upperLayout.onLayoutChanged(layout, meta); setChatOpen((layout.assistant ?? 0) > 0) }} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
-            <Panel id="library" defaultSize="24%" minSize="260px" maxSize="38%" className="resize-panel-content">
-              <MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} projectName={projectName} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onClearSubtitles={handleClearSubtitles} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} onOpenProject={() => setSettingsOpen(true)} />
+          <Group id="sparta-upper-workspace" groupRef={upperGroupRef} className="preview-inspector-group" orientation="horizontal" defaultLayout={upperLayout.defaultLayout ?? { library: 23, monitor: 52, inspector: 25 }} onLayoutChanged={upperLayout.onLayoutChanged} resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}>
+            <Panel id="library" defaultSize="23%" minSize="240px" maxSize="38%" className="resize-panel-content">
+              <MediaLibraryPanel assets={assets} selectedMedia={selectedMediaId} isExtractingSubtitles={extractingSubtitles} subtitleProgressText={subtitleProgressText} importStatus={importStatus} onSelect={(asset) => selectMedia(asset.id)} onAdd={(asset) => addMediaToTimeline(asset)} onAddTextClip={(presetId, text) => { addTextClip({ presetId, text, at: playhead }); toast.success(t('Titular insertado en el cabezal', 'Title inserted at playhead')) }} onAutoSubtitles={(presetId, script, language) => { void handleGenerateVideoSubtitles(presetId, script, language) }} onApplySubtitlePreset={(presetId, language) => { handleApplyOrExtractSubtitlePreset(presetId, language) }} onClearSubtitles={handleClearSubtitles} onRename={(assetId, name) => updateAsset(assetId, { title: name })} onDelete={(assetId) => void deleteMedia(assetId)} onRelink={(assetId, file) => void relinkMedia(assetId, file)} onImport={() => fileInput.current?.click()} onImportFiles={(files) => void importFiles(files)} />
             </Panel>
             <Separator
               id="library-separator"
@@ -783,12 +793,11 @@ function App() {
                   library: 24,
                   monitor: 50,
                   inspector: 26,
-                  assistant: chatOpen ? 20 : 0,
                 })
                 toast.info(t('Ancho de biblioteca restaurado al 24%', 'Library width restored to 24%'))
               }}
             />
-            <Panel id="monitor" defaultSize="50%" minSize="35%" className="resize-panel-content">
+            <Panel id="monitor" defaultSize="52%" minSize="35%" className="resize-panel-content">
               {(() => {
                 const isPreviewClipMuted = previewClip
                   ? mutedTracks.some((id) => tracks.find((t) => t.id === id)?.clips.some((c) => c.id === previewClip.id))
@@ -802,6 +811,7 @@ function App() {
                     frameRate={frameRate}
                     duration={effectiveDuration}
                     clip={previewClip}
+                    visualClips={activeVisualClips}
                     adjustmentLayers={activeAdjustmentLayers}
                     textOverlays={activeTextOverlays}
                     selectedClipId={selectedClipId}
@@ -822,24 +832,26 @@ function App() {
               })()}
             </Panel>
             <Separator id="monitor-splitter" className="panel-separator" aria-label={t('Redimensionar monitor e inspector', 'Resize preview and inspector')} />
-            <Panel id="inspector" defaultSize="26%" minSize="220px" maxSize="40%" className="resize-panel-content">
+            <Panel id="inspector" defaultSize="25%" minSize="220px" maxSize="40%" className="resize-panel-content">
               <InspectorPanel clip={selectedClip ?? previewClip} selectedMedia={selectedMedia} assets={assets} playhead={playhead} sequenceSize={sequence} onSeek={setPlayhead} readOnly={selectedClipReadOnly} onAddSelected={() => { if (selectedMedia) addMediaToTimeline(selectedMedia, playhead) }} onAddTextClip={(presetId) => { addTextClip({ presetId, at: playhead }); toast.success(t('Capa de texto Pro añadida', 'Pro text layer added')) }} onUpdateClip={updateClip} onCopyClipName={(name) => void copyClipName(name)} onSplitAtPlayhead={() => { if (selectedClip && !selectedClipReadOnly) splitClip(selectedClip.id, playhead) }} onDuplicateClip={() => { if (selectedClip && !selectedClipReadOnly) { duplicateClip(selectedClip.id); toast.success(t('Clip duplicado', 'Clip duplicated')) } }} onFreezeFrame={(id, time) => { const fId = freezeFrame(id, time); if (fId) toast.success(t('Fotograma congelado insertado', 'Frozen frame inserted')) }} onCalibrateAllSubtitles={(id) => { const n = calibrateAllSubtitles(id); if (n > 0) toast.success(t(`Calibración aplicada a ${n} subtítulos`, `Calibration applied to ${n} subtitles`)) }} onNudgeAllSubtitlesTime={(delta) => { const n = nudgeAllSubtitlesTime(delta); if (n > 0) toast.success(t(`Sincronización ${delta > 0 ? '+' : ''}${delta}s en ${n} subtítulos`, `Sync ${delta > 0 ? '+' : ''}${delta}s on ${n} subtitles`)) }} onResetClip={() => { if (selectedClip && !selectedClipReadOnly) updateClip(selectedClip.id, { transform: { x: sequence.width / 2, y: sequence.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }, opacity: 100, blendMode: 'normal', volume: 100, fadeIn: 0, fadeOut: 0, uniformScale: true, keyframes: [] }) }} />
-            </Panel>
-            <Separator id="assistant-separator" className="panel-separator" aria-label={t('Redimensionar panel del asistente', 'Resize assistant panel')} />
-            <Panel id="assistant" panelRef={assistantPanelRef} defaultSize="20%" minSize="14%" maxSize="30%" collapsedSize="0%" collapsible className="resize-panel-content">
-              <AssistantPanel open onClose={toggleAssistant} projectName={projectName} activeMode={assistantMode} onModeChange={setAssistantMode} />
             </Panel>
           </Group>
         </div>
       </Panel>
       <Separator id="stage-timeline-splitter" className="panel-separator panel-separator-horizontal" aria-label={t('Redimensionar monitor y línea de tiempo', 'Resize monitor and timeline')} />
       <Panel id="timeline" defaultSize="42%" minSize="20%" className="resize-panel-content">
-        <TimelinePanel tracks={tracks} assets={assets} markers={markers} selected={selectedClipId} playhead={playhead} zoom={zoom} frameRate={frameRate} snap={snapToFrames} expanded={timelineExpanded} tool={activeTool} mutedTracks={mutedTracks} lockedTracks={lockedTracks} onMuteTrack={toggleMute} onLockTrack={toggleLock} onSelect={selectClip} onSeek={setPlayhead} onZoom={setZoom} onAddTrack={addTrack} onAddMedia={addMediaToTimeline} onMoveClip={moveClip} onMoveClipToNewTrack={moveClipToNewTrack} onSplitClip={splitClip} onDeleteClip={deleteClip} onDuplicateClip={(id) => { duplicateClip(id); toast.success(t('Clip duplicado', 'Clip duplicated')) }} onFreezeFrame={(id, time) => { const fId = freezeFrame(id, time); if (fId) toast.success(t('Fotograma congelado insertado', 'Frozen frame inserted')) }} onAddTextClip={() => { addTextClip({ presetId: 'hormozi-karaoke', at: playhead }); toast.success(t('Texto animado Pro añadido en el cabezal', 'Pro animated text added at playhead')) }} onAddAdjustmentLayer={() => { addAdjustmentLayer(playhead); toast.success(t('Capa FX añadida en el cabezal', 'FX Layer added at playhead')) }} onAutoSubtitles={() => { void handleGenerateVideoSubtitles('hormozi-karaoke') }} onClearSubtitles={handleClearSubtitles} onPackClips={() => { const n = ripplePackTrack(); if (n > 0) toast.success(t(`${n} clip(s) compactados sin huecos`, `${n} clip(s) packed without gaps`)); else toast.info(t('No hay huecos que compactar', 'No gaps to pack')) }} onAutoMarkers={() => { const n = autoSceneMarkers(); if (n > 0) toast.success(t(`${n} marcador(es) añadidos en cortes`, `${n} marker(s) added at cuts`)); else toast.info(t('Ya existen marcadores en los cortes', 'Cut markers already exist')) }} onAutoAudio={() => { const n = autoAudioBalance(); if (n > 0) toast.success(t(`Mezcla y fundidos aplicados a ${n} clip(s)`, `Mix and fades applied to ${n} clip(s)`)); else toast.info(t('Añade clips para nivelar audio', 'Add clips to balance audio')) }} onAddMarker={addMarker} onRemoveMarker={removeMarker} onToggleSnap={toggleSnap} onToggleExpanded={toggleTimelineExpanded} onSetTool={setActiveTool} onImportFiles={(files) => void importFiles(files)} />
+        <TimelinePanel tracks={tracks} assets={assets} markers={markers} selected={selectedClipId} playhead={playhead} zoom={zoom} frameRate={frameRate} snap={snapToFrames} expanded={timelineExpanded} tool={activeTool} mutedTracks={mutedTracks} lockedTracks={lockedTracks} onMuteTrack={toggleMute} onLockTrack={toggleLock} onSelect={selectClip} onSeek={setPlayhead} onZoom={setZoom} onAddTrack={addTrack} onAddMedia={addMediaToTimeline} onMoveClip={moveClip} onMoveClipToNewTrack={moveClipToNewTrack} onSplitClip={splitClip} onDeleteClip={deleteClip} onDuplicateClip={(id) => { duplicateClip(id); toast.success(t('Clip duplicado', 'Clip duplicated')) }} onFreezeFrame={(id, time) => { const fId = freezeFrame(id, time); if (fId) toast.success(t('Fotograma congelado insertado', 'Frozen frame inserted')) }} onAddTextClip={() => { addTextClip({ presetId: 'hormozi-karaoke', at: playhead }); toast.success(t('Texto animado Pro añadido en el cabezal', 'Pro animated text added at playhead')) }} onAddAdjustmentLayer={() => { addAdjustmentLayer(playhead); toast.success(t('Capa FX añadida en el cabezal', 'FX Layer added at playhead')) }} onAutoSubtitles={() => { void handleGenerateVideoSubtitles('hormozi-karaoke') }} onClearSubtitles={handleClearSubtitles} onPackClips={() => { const n = ripplePackTrack(); if (n > 0) toast.success(t(`${n} clip(s) compactados sin huecos`, `${n} clip(s) packed without gaps`)); else toast.info(t('No hay huecos que compactar', 'No gaps to pack')) }} onAutoMarkers={() => { const n = autoSceneMarkers(); if (n > 0) toast.success(t(`${n} marcador(es) añadidos en cortes`, `${n} marker(s) added at cuts`)); else toast.info(t('Ya existen marcadores en los cortes', 'There are already markers at the cuts')) }} onAutoAudio={() => { const n = autoAudioBalance(); if (n > 0) toast.success(t(`Mezcla y fundidos aplicados a ${n} clip(s)`, `Mix and fades applied to ${n} clip(s)`)); else toast.info(t('Añade clips para nivelar audio', 'Add clips to balance audio')) }} onAddMarker={addMarker} onRemoveMarker={removeMarker} onToggleSnap={toggleSnap} onToggleExpanded={toggleTimelineExpanded} onSetTool={setActiveTool} onImportFiles={(files) => void importFiles(files)} onApplyTransition={(clipId, transition: TransitionRef) => { const clip = useEditorStore.getState().tracks.flatMap((track) => track.clips).find((item) => item.id === clipId); if (!clip) return; updateClip(clipId, { transitionIn: transition }); selectClip(clipId); setPlaying(false); setPlayhead(clip.start + Math.min(transition.duration * 0.25, clip.duration / 2)); toast.success(t('Transición asignada y previsualizada en el corte', 'Transition applied and previewed at the cut')) }} />
       </Panel>
     </Group>
-    <PreferencesSheet open={settingsOpen} onOpenChange={setSettingsOpen} onResetLayout={resetWorkspace} snapToFrames={snapToFrames} onToggleSnap={toggleSnap} saveStatus={saveStatus} />
+      </Panel>
+      <Separator id="assistant-separator" className="panel-separator" aria-label={t('Redimensionar panel del asistente', 'Resize assistant panel')} />
+      <Panel id="assistant" panelRef={assistantPanelRef} defaultSize="24%" minSize="260px" maxSize="40%" collapsedSize="0%" collapsible className="resize-panel-content assistant-workspace-panel">
+        {chatOpen && <Suspense fallback={<aside className="assistant-panel assistant-loading" role="status" aria-label={t('Abriendo el asistente', 'Opening assistant')}><div className="assistant-loading-heading"><span className="assistant-loading-mark"><Zap size={15} /></span><span><strong>Sparta AI</strong><small>{t('Preparando el espacio de trabajo…', 'Preparing your workspace…')}</small></span></div><div className="assistant-loading-body"><i /><i /><i /></div><div className="assistant-loading-compose"><span /><b /></div></aside>}><AssistantPanel open onClose={toggleAssistant} projectName={projectName} activeMode={assistantMode} onModeChange={setAssistantMode} /></Suspense>}
+      </Panel>
+    </Group>
+    {settingsOpen && <Suspense fallback={null}><PreferencesSheet open={settingsOpen} onOpenChange={setSettingsOpen} onResetLayout={resetWorkspace} snapToFrames={snapToFrames} onToggleSnap={toggleSnap} saveStatus={saveStatus} /></Suspense>}
     <RenameProjectDialog open={renameOpen} name={projectName} onOpenChange={setRenameOpen} onSave={(name) => { setProjectName(name); toast.success(t('Proyecto renombrado', 'Project renamed'), { description: name }) }} />
-    <ExportDialog open={exportOpen} projectName={projectName} sequenceDuration={sequenceDuration} sequenceSize={sequence} tracks={tracks} assets={assets} mutedTracks={mutedTracks} onOpenChange={setExportOpen} />
+    {exportOpen && <Suspense fallback={null}><ExportDialog open={exportOpen} projectName={projectName} sequenceDuration={sequenceDuration} sequenceSize={sequence} tracks={tracks} assets={assets} mutedTracks={mutedTracks} onOpenChange={setExportOpen} /></Suspense>}
     <Toaster />
   </main>
 }
