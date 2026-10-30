@@ -479,20 +479,22 @@ async function renderWithWebCodecs({
     ctx.fillStyle = '#000000'
     ctx.fillRect(0, 0, settings.width, settings.height)
 
-    for (const track of [...activeVideoTracks].reverse()) {
-      const trackClips = track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration)
-      for (const clip of trackClips) {
-        const aId = resolveClipAssetId(clip, assets)
-        drawClipToCanvas(
-          ctx,
-          clip,
-          aId ? visualAssets.get(aId) : undefined,
-          time,
-          settings.width,
-          settings.height,
-          sequenceSize,
-        )
-      }
+    const activeTimelineClips = [...activeVideoTracks].reverse().flatMap((track) =>
+      track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+    )
+    const visualAndTextClips = activeTimelineClips.filter((clip) => clip.kind !== 'adjustment')
+    const activeAdjustmentLayers = activeTimelineClips.filter((clip) => clip.kind === 'adjustment')
+    for (const clip of [...visualAndTextClips, ...activeAdjustmentLayers]) {
+      const aId = resolveClipAssetId(clip, assets)
+      drawClipToCanvas(
+        ctx,
+        clip,
+        aId ? visualAssets.get(aId) : undefined,
+        time,
+        settings.width,
+        settings.height,
+        sequenceSize,
+      )
     }
 
     const timestampMicros = Math.round(time * 1_000_000)
@@ -743,8 +745,9 @@ export async function renderSequence({
     track.clips.filter((clip) => 0 >= clip.start && 0 < clip.start + clip.duration),
   )
   const initialMedia = initialClips.filter((c) => c.text === undefined && c.thumbnail !== 'text-overlay')
-  const initialText = initialClips.filter((c) => c.text !== undefined || c.thumbnail === 'text-overlay')
-  for (const clip of [...initialMedia, ...initialText]) {
+  const initialAdjustmentLayers = initialClips.filter((clip) => clip.kind === 'adjustment')
+  const initialRenderableClips = initialClips.filter((clip) => clip.kind !== 'adjustment')
+  for (const clip of [...initialRenderableClips, ...initialAdjustmentLayers]) {
     const aId = resolveClipAssetId(clip, assets)
     drawClipToCanvas(
       ctx,
@@ -892,20 +895,22 @@ export async function renderSequence({
         }
       }
 
-      for (const track of [...activeVideoTracks].reverse()) {
-        const trackClips = track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration)
-        for (const clip of trackClips) {
-          const aId = resolveClipAssetId(clip, assets)
-          drawClipToCanvas(
-            ctx,
-            clip,
-            aId ? visualAssets.get(aId) : undefined,
-            time,
-            settings.width,
-            settings.height,
-            sequenceSize,
-          )
-        }
+      const activeTimelineClips = [...activeVideoTracks].reverse().flatMap((track) =>
+        track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+      )
+      const visualAndTextClips = activeTimelineClips.filter((clip) => clip.kind !== 'adjustment')
+      const activeAdjustmentLayers = activeTimelineClips.filter((clip) => clip.kind === 'adjustment')
+      for (const clip of [...visualAndTextClips, ...activeAdjustmentLayers]) {
+        const aId = resolveClipAssetId(clip, assets)
+        drawClipToCanvas(
+          ctx,
+          clip,
+          aId ? visualAssets.get(aId) : undefined,
+          time,
+          settings.width,
+          settings.height,
+          sequenceSize,
+        )
       }
 
       // Force canvas capture frame if API is available

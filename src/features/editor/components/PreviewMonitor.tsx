@@ -370,10 +370,11 @@ export function PreviewMonitor({
     const y = legacyCenter ? sequenceSize.height / 2 : layerTransform.y
     const fit = layerClip.fit ?? 'fit'
     const layerTransition = layerClip.transitionIn ? computeTransitionInState(layerClip.transitionIn, layerClip.start, playhead, sequenceSize.width, sequenceSize.height) : null
-    const lowerAdjustmentEffects = adjustmentLayers
-      .filter((adjustment) => adjustment.trackOrder < layerClip.trackOrder)
-      .flatMap((adjustment) => adjustment.effects ?? [])
-    const effects = [...(layerClip.effects ?? []), ...lowerAdjustmentEffects]
+    // Adjustment layers are global grade layers. Apply active layers regardless
+    // of their persisted track index; projects created before the FX track was
+    // moved to the top can otherwise silently skip their effects.
+    const adjustmentEffects = adjustmentLayers.flatMap((adjustment) => adjustment.effects ?? [])
+    const effects = [...(layerClip.effects ?? []), ...adjustmentEffects]
     const scaleX = (layerClip.flipH ? -1 : 1) * (layerTransform.scaleX / 100) * (layerTransition?.scale ?? 1)
     const scaleY = (layerClip.flipV ? -1 : 1) * (layerTransform.scaleY / 100) * (layerTransition?.scale ?? 1)
     const offsetX = ((x - sequenceSize.width / 2 + (layerTransition?.offsetX ?? 0)) / sequenceSize.width) * (boxWidth || 1)
@@ -597,7 +598,7 @@ export function PreviewMonitor({
           const asset = assets?.find((item) => item.id === assetId)
           const isLayerImage = asset?.type === 'image' || layerClip.thumbnail === 'image-catalog'
           const layerStyle = getLayerStyle(layerClip, index + 1)
-          const adjustmentEffects = adjustmentLayers.filter((adjustment) => adjustment.trackOrder < layerClip.trackOrder).flatMap((adjustment) => adjustment.effects ?? [])
+          const adjustmentEffects = adjustmentLayers.flatMap((adjustment) => adjustment.effects ?? [])
           const effectOverlays = getPreviewEffectOverlays([...(layerClip.effects ?? []), ...adjustmentEffects])
           if (!url) return null
           return <Fragment key={layerClip.id}>
