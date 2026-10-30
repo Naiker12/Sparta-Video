@@ -55,7 +55,7 @@ export const aiOperationSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('set_clip_blend'),
     clipId: z.string(),
-    blendMode: z.enum(['normal', 'multiply', 'screen', 'overlay']),
+    blendMode: z.enum(['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'soft-light', 'add']),
   }),
   z.object({
     type: z.literal('duplicate_clip'),

@@ -6,7 +6,7 @@ import {
   formatMediaDuration,
   loadMediaBlob,
   parseDurationFromDetail,
-  probeMediaDuration,
+  probeMediaMetadata,
 } from './media-storage'
 import type {
   WorkerCaptionItem,
@@ -728,10 +728,17 @@ export async function repairTimelineAndAssetDurations(): Promise<number> {
     if (knownDuration && knownDuration > 0 && !hasLegacySixSecClip) continue
 
     let realDuration = knownDuration
-    if (!realDuration || realDuration <= 0) {
+    let probedWidth = asset.width
+    let probedHeight = asset.height
+
+    if (!realDuration || realDuration <= 0 || !probedWidth || !probedHeight) {
       const blob = await loadMediaBlob(asset.id).catch(() => null)
       if (blob) {
-        realDuration = await probeMediaDuration(blob, asset.type)
+        const probed = await probeMediaMetadata(blob, asset.type)
+        if (probed.duration) realDuration = probed.duration
+        if (probed.width) probedWidth = probed.width
+        if (probed.height) probedHeight = probed.height
+
         if (!realDuration) {
           const decoded = await decodeMediaBlobAudio(blob)
           if (decoded && decoded.duration > 0) {
@@ -750,6 +757,8 @@ export async function repairTimelineAndAssetDurations(): Promise<number> {
       const nextDetail = [...baseParts, timeTag].join(' · ')
       useEditorStore.getState().updateAsset(asset.id, {
         durationSeconds: realDuration,
+        ...(probedWidth ? { width: probedWidth } : {}),
+        ...(probedHeight ? { height: probedHeight } : {}),
         detail: nextDetail,
       })
       repairedCount++

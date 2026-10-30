@@ -243,4 +243,117 @@ describe('editor project operations', () => {
     expect(emptyClear).toBe(0)
     expect(useEditorStore.getState().past.length).toBe(pastLength)
   })
+
+  it('setSequence from 1920x1080 to 1080x1920 rescales clip transforms and position keyframes proportionally', () => {
+    const store = useEditorStore.getState()
+    // Prepare a clip with transform and position keyframe
+    store.updateClip('c1', {
+      transform: { x: 960, y: 540, scaleX: 100, scaleY: 100, rotation: 0 },
+      keyframes: [
+        { property: 'position', time: 0, valueX: 960, valueY: 540 },
+        { property: 'position', time: 2, valueX: 480, valueY: 270 },
+      ],
+    })
+
+    const initialPastLength = useEditorStore.getState().past.length
+
+    // Change sequence to vertical 9:16 (1080x1920)
+    store.setSequence({ width: 1080, height: 1920, frameRate: 24 })
+
+    const updatedClip = useEditorStore.getState().tracks[0].clips.find((c) => c.id === 'c1')
+    expect(updatedClip?.transform?.x).toBe(540)
+    expect(updatedClip?.transform?.y).toBe(960)
+
+    const kf0 = updatedClip?.keyframes?.find((k) => k.time === 0 && k.property === 'position')
+    expect(kf0?.valueX).toBe(540)
+    expect(kf0?.valueY).toBe(960)
+
+    const kf1 = updatedClip?.keyframes?.find((k) => k.time === 2 && k.property === 'position')
+    expect(kf1?.valueX).toBe(270)
+    expect(kf1?.valueY).toBe(480)
+
+    // A single undo reverts both the sequence dimensions and clip transforms
+    expect(useEditorStore.getState().past.length).toBe(initialPastLength + 1)
+    useEditorStore.getState().undo()
+
+    expect(useEditorStore.getState().sequence).toEqual({ width: 1920, height: 1080, frameRate: 24 })
+    const revertedClip = useEditorStore.getState().tracks[0].clips.find((c) => c.id === 'c1')
+    expect(revertedClip?.transform?.x).toBe(960)
+    expect(revertedClip?.transform?.y).toBe(540)
+  })
+
+  it('regression: clip created in 16:9 and sequence adapted to 9:16 has 0 offset from center', () => {
+    const store = useEditorStore.getState()
+    // Default 1920x1080 sequence
+    expect(store.sequence.width).toBe(1920)
+    expect(store.sequence.height).toBe(1080)
+
+    const clipId = store.addMedia({
+      id: 'vertical-video-asset',
+      title: 'phone_recording.mp4',
+      detail: 'VIDEO · 1080×1920',
+      thumb: 'cliff',
+      type: 'video',
+      status: 'ready',
+      width: 1080,
+      height: 1920,
+    })
+
+    // User clicks "Adapt sequence" -> 1080x1920
+    store.setSequence({ width: 1080, height: 1920, frameRate: 24 })
+
+    const updatedState = useEditorStore.getState()
+    const adaptedClip = updatedState.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId)
+    expect(adaptedClip).toBeDefined()
+    expect(adaptedClip?.transform?.x).toBe(540)
+    expect(adaptedClip?.transform?.y).toBe(960)
+
+    // Center offset calculation in PreviewMonitor
+    const offsetFromCenterX = (adaptedClip!.transform!.x - 1080 / 2)
+    const offsetFromCenterY = (adaptedClip!.transform!.y - 1920 / 2)
+    expect(offsetFromCenterX).toBe(0)
+    expect(offsetFromCenterY).toBe(0)
+  })
+
+  it('creates an adjustment layer with kind: adjustment and fx badge defaults', () => {
+    const store = useEditorStore.getState()
+    const fxClipId = store.addAdjustmentLayer(2.0, 4.0)
+    expect(fxClipId).toBeTruthy()
+
+    const state = useEditorStore.getState()
+    const clip = state.tracks.flatMap((t) => t.clips).find((c) => c.id === fxClipId)
+    expect(clip).toBeDefined()
+    expect(clip?.kind).toBe('adjustment')
+    expect(clip?.start).toBe(2.0)
+    expect(clip?.duration).toBe(4.0)
+    expect(clip?.color).toBe('bg-violet-600')
+    expect(state.selectedClipId).toBe(fxClipId)
+  })
+
+  it('freezes a frame, splitting the clip and inserting frozen middle hold', () => {
+    const store = useEditorStore.getState()
+    // c1 starts at 0, duration is 6.0
+    const frozenId = store.freezeFrame('c1', 2.0, 3.0)
+    expect(frozenId).toBeTruthy()
+
+    const state = useEditorStore.getState()
+    const track = state.tracks.find((t) => t.clips.some((c) => c.id === frozenId))
+    expect(track).toBeDefined()
+
+    const left = track!.clips.find((c) => c.id === 'c1')
+    const frozen = track!.clips.find((c) => c.id === frozenId)
+    expect(left).toBeDefined()
+    expect(left?.duration).toBeCloseTo(2.0, 1)
+
+    expect(frozen).toBeDefined()
+    expect(frozen?.start).toBeCloseTo(2.0, 1)
+    expect(frozen?.duration).toBe(3.0)
+    expect(frozen?.freezeTime).toBeCloseTo(2.0, 1)
+    expect(frozen?.title).toContain('Congelado')
+
+    // Subsequent clips should be shifted
+    const right = track!.clips.find((c) => c.start >= 5.0 && c.id !== frozenId)
+    expect(right).toBeDefined()
+    expect(right?.start).toBeCloseTo(5.0, 1)
+  })
 })

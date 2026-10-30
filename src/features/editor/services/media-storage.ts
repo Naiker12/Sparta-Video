@@ -331,11 +331,15 @@ export async function probeMediaMetadata(
       }
       const timer = window.setTimeout(() => finish(null), timeoutMs)
       element.onerror = () => finish(null)
-      element.onloadedmetadata = () => {
-        if (element instanceof HTMLVideoElement && element.videoWidth && element.videoHeight) {
+      const checkDimensions = () => {
+        if (element instanceof HTMLVideoElement && element.videoWidth > 0 && element.videoHeight > 0) {
           capturedWidth = element.videoWidth
           capturedHeight = element.videoHeight
         }
+      }
+
+      element.onloadedmetadata = () => {
+        checkDimensions()
         if (Number.isFinite(element.duration) && element.duration > 0) {
           finish(element.duration)
           return
@@ -343,11 +347,13 @@ export async function probeMediaMetadata(
         if (element.duration === Infinity) {
           element.ontimeupdate = () => {
             element.ontimeupdate = null
+            checkDimensions()
             const resolved = element.duration
             try { element.currentTime = 0 } catch { /* ignore */ }
             finish(resolved)
           }
           element.ondurationchange = () => {
+            checkDimensions()
             if (Number.isFinite(element.duration) && element.duration > 0) {
               finish(element.duration)
             }
@@ -360,6 +366,9 @@ export async function probeMediaMetadata(
           return
         }
         finish(null)
+      }
+      element.onloadeddata = () => {
+        checkDimensions()
       }
       element.src = url
       try { element.load() } catch { finish(null) }

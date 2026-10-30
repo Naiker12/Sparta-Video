@@ -68,7 +68,7 @@ Para mitigar esto, Sparta Video incluye mecanismos avanzados de protección:
 
 Convierte automáticamente cualquier pista de voz en subtítulos perfectamente sincronizados, sin necesidad de escribir guiones a mano ni subir archivos a servidores externos si se usa procesamiento local.
 
-![Extractor de voz y plantillas](docs/images/whisper-subtitles-generator.png)
+![Biblioteca de medios y herramientas](docs/images/whisper-subtitles-generator.png)
 
 - **Ejecución en Web Worker dedicado (`whisper.worker.ts`)**: El modelo Whisper de Hugging Face se procesa en segundo plano sin congelar jamás el hilo principal de la interfaz ni la reproducción.
 - **Segmentación gramatical inteligente**:
@@ -83,10 +83,10 @@ Convierte automáticamente cualquier pista de voz en subtítulos perfectamente s
 
 Crea titulares y subtítulos con el impacto visual de creadores profesionales (estilo Hormozi, documentales de YouTube y vídeos verticales).
 
-![Subtítulo Hormozi Karaoke en el Monitor](docs/images/karaoke-subtitles-preview.png)
+![Subtítulo cinético dinámico en el Monitor](docs/images/karaoke-subtitles-preview.png)
 
 - **Estilos incluidos**:
-  - **Hormozi Karaoke Pro**: Resaltado de palabra por palabra en tiempo real con color de acento ajustable y micro-animación de escala.
+  - **Hormozi Karaoke**: Resaltado de palabra por palabra en tiempo real con color de acento ajustable y micro-animación de escala.
   - **Pop Pill Dinámico**: Subtítulo moderno encapsulado en pastilla flotante con entrada elástica.
   - **Cine Subtítulo 4K**: Tipografía clásica y elegante con sombra cinematográfica para producciones narrativas.
   - **Titular Impact Hook**: Letras en mayúsculas de gran tamaño con zoom dramático para captar la atención en los primeros segundos.

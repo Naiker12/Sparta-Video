@@ -8,7 +8,8 @@ import {
   ChevronDown,
   Clapperboard,
   Download,
-  Globe,
+  Folder,
+  HelpCircle,
   Laptop,
   LoaderCircle,
   MonitorPlay,
@@ -27,6 +28,7 @@ import {
   getDefaultExportSettings,
   renderSequence,
 } from '../services/export-engine'
+import { loadMediaPreview } from '../services/media-storage'
 import { t, useLanguage } from '../services/locale'
 import { formatTimecode } from '../timecode'
 
@@ -59,7 +61,22 @@ export function ExportDialog({
   const [isExporting, setIsExporting] = useState(false)
   const [progress, setProgress] = useState<RenderProgress | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [savePath, setSavePath] = useState('C:\\Usuarios\\Naiker\\Videos\\')
+  const [previewThumb, setPreviewThumb] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const active = assets.find((a) => a.type === 'video' || a.type === 'image')
+    if (active) {
+      void loadMediaPreview(active.id).then((url) => {
+        if (!cancelled && url) setPreviewThumb(url)
+      }).catch(() => {})
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [assets])
 
   const handlePresetSelect = (id: ExportPresetId) => {
     setPreset(id)
@@ -245,10 +262,10 @@ export function ExportDialog({
           <header className="dialog-heading">
             <div>
               <span className="dialog-eyebrow">
-                {t('MOTOR DE RENDERIZADO', 'RENDERING ENGINE')}
+                {t('EXPORTAR', 'EXPORT')}
               </span>
               <Dialog.Title id="export-dialog-title" className="dialog-title">
-                {t('Exportar secuencia de vídeo', 'Export video sequence')}
+                {t('Exportar secuencia', 'Export video sequence')}
               </Dialog.Title>
               <Dialog.Description id="export-dialog-desc" className="dialog-description">
                 {t(
@@ -268,47 +285,54 @@ export function ExportDialog({
 
           <form onSubmit={handleStartExport} className="export-form">
             <div className="export-body">
-              {/* Platform advisory badge: Web vs Desktop mode */}
-              <div className={`export-platform-advisory ${isDesktop ? 'is-desktop' : 'is-web'}`}>
-                <div className="export-advisory-icon">
-                  {isDesktop ? <Laptop size={14} aria-hidden="true" /> : <Globe size={14} aria-hidden="true" />}
+              {/* Platform advisory banner */}
+              <div className="export-platform-advisory">
+                <div className="export-advisory-main">
+                  <div className="export-advisory-icon text-primary">
+                    <Laptop size={16} aria-hidden="true" />
+                  </div>
+                  <div className="export-advisory-copy">
+                    <div className="export-advisory-title-row">
+                      <span className="export-advisory-title">
+                        {t('Render nativo acelerado', 'Accelerated native render')}
+                      </span>
+                      <span className="export-advisory-help" title={t('Información sobre aceleración de render', 'Render acceleration info')}>
+                        <HelpCircle size={12} aria-hidden="true" />
+                      </span>
+                    </div>
+                    <span className="export-advisory-desc">
+                      {t(
+                        'Usa el motor de renderizado nativo para un mejor rendimiento y calidad.',
+                        'Uses native rendering engine for superior performance and quality.'
+                      )}
+                    </span>
+                  </div>
                 </div>
-                <div className="export-advisory-copy">
-                  <span className="export-advisory-title">
-                    {isDesktop ? t('Modo Escritorio Activo', 'Desktop App Mode') : t('Modo Web (Navegador)', 'Web Browser Mode')}
-                  </span>
-                  <span className="export-advisory-desc">
-                    {isDesktop
-                      ? t(
-                          'Renderizado nativo acelerado. Puedes minimizar la app o cambiar de ventana; el proceso continuará a máxima velocidad sin límites de navegador.',
-                          'Accelerated native rendering. You can minimize the app or switch windows; export will continue at full speed without browser limits.'
-                        )
-                      : t(
-                          'Mantén esta pestaña activa en primer plano durante la exportación y descarga. Si sales de la pestaña, el navegador reducirá los FPS para ahorrar batería.',
-                          'Keep this tab active in the foreground while exporting and downloading. If you leave, the browser will throttle FPS to save energy.'
-                        )}
-                  </span>
+                <div className="export-advisory-tip">
+                  {t(
+                    'El render nativo utiliza la GPU de tu equipo para acelerar el proceso de exportación y mejorar la calidad del resultado.',
+                    'Native rendering leverages your GPU to accelerate export and enhance output quality.'
+                  )}
                 </div>
               </div>
 
               {/* Preset selection grid */}
               <div className="export-section">
                 <label className="export-section-label">
-                  {t('Preajustes de exportación', 'Export presets')}
+                  {t('PERFILES DE EXPORTACIÓN', 'EXPORT PROFILES')}
                 </label>
-                <div className="export-preset-grid" role="radiogroup" aria-label={t('Preajustes de exportación', 'Export presets')}>
-                  {(Object.keys(EXPORT_PRESETS) as ExportPresetId[]).map((id) => {
+                <div className="export-preset-grid" role="radiogroup" aria-label={t('Perfiles de exportación', 'Export profiles')}>
+                  {(['web-1080p', 'social-vertical', 'uhd-4k', 'fast-720p'] as ExportPresetId[]).map((id) => {
                     const item = EXPORT_PRESETS[id]
                     const Icon = presetIcons[id]
                     const isSelected = preset === id
-                    const isWide = id === 'audio-only'
                     return (
                       <button
                         type="button"
                         key={id}
                         role="radio"
                         aria-checked={isSelected}
-                        className={`export-preset-card ${isSelected ? 'selected' : ''} ${isWide ? 'is-wide' : ''}`}
+                        className={`export-preset-card ${isSelected ? 'selected' : ''}`}
                         onClick={() => handlePresetSelect(id)}
                         disabled={isExporting}
                       >
@@ -318,6 +342,11 @@ export function ExportDialog({
                             <span className="export-preset-title">{item.label}</span>
                             <span className="export-preset-desc">{item.description}</span>
                           </div>
+                          {id === 'web-1080p' && (
+                            <span className="export-recommended-badge">
+                              {t('Recomendado', 'Recommended')}
+                            </span>
+                          )}
                           {isSelected && (
                             <Check size={14} className="export-preset-check" strokeWidth={2.5} aria-hidden="true" />
                           )}
@@ -326,12 +355,42 @@ export function ExportDialog({
                     )
                   })}
                 </div>
+
+                <div className="export-section-subheading">{t('Solo audio', 'Audio only')}</div>
+                {(() => {
+                  const id: ExportPresetId = 'audio-only'
+                  const item = EXPORT_PRESETS[id]
+                  const Icon = presetIcons[id]
+                  const isSelected = preset === id
+                  return (
+                    <button
+                      type="button"
+                      key={id}
+                      role="radio"
+                      aria-checked={isSelected}
+                      className={`export-preset-card is-wide ${isSelected ? 'selected' : ''}`}
+                      onClick={() => handlePresetSelect(id)}
+                      disabled={isExporting}
+                    >
+                      <div className="export-preset-header">
+                        <Icon size={16} className="export-preset-icon" aria-hidden="true" />
+                        <div className="export-preset-title-wrap">
+                          <span className="export-preset-title">{item.label}</span>
+                          <span className="export-preset-desc">{item.description}</span>
+                        </div>
+                        {isSelected && (
+                          <Check size={14} className="export-preset-check" strokeWidth={2.5} aria-hidden="true" />
+                        )}
+                      </div>
+                    </button>
+                  )
+                })()}
               </div>
 
-              {/* Quick file name input */}
+              {/* Quick file name input & destination */}
               <div className="export-section">
                 <label htmlFor="export-filename-input" className="export-section-label">
-                  {t('Nombre del archivo de salida', 'Output filename')}
+                  {t('NOMBRE DEL ARCHIVO', 'FILE NAME')}
                 </label>
                 <div className="export-filename-box">
                   <input
@@ -350,6 +409,24 @@ export function ExportDialog({
                   />
                   <span className="export-filename-ext">.{settings.format}</span>
                 </div>
+
+                <div className="export-destination-row">
+                  <div className="export-destination-info">
+                    <Folder size={14} className="export-destination-icon" />
+                    <span className="export-destination-label">{t('Guardar en', 'Save in')}</span>
+                    <span className="export-destination-path" title={savePath}>{savePath}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="export-destination-btn"
+                    onClick={() => {
+                      const next = prompt(t('Ruta de exportación:', 'Export directory path:'), savePath)
+                      if (next) setSavePath(next)
+                    }}
+                  >
+                    {t('Cambiar…', 'Change…')}
+                  </button>
+                </div>
               </div>
 
               {/* Advanced settings toggle */}
@@ -362,11 +439,9 @@ export function ExportDialog({
                 >
                   <SlidersHorizontal size={13} />
                   <span>
-                    {showAdvanced
-                      ? t('Ocultar ajustes avanzados', 'Hide advanced settings')
-                      : t('Mostrar ajustes avanzados (resolución, bitrate, fps)', 'Show advanced settings (resolution, bitrate, fps)')}
+                    {t('Ajustes avanzados', 'Advanced settings')}
                   </span>
-                  <ChevronDown size={12} className={`export-chevron ${showAdvanced ? 'open' : ''}`} />
+                  <ChevronDown size={14} className={`export-chevron ${showAdvanced ? 'open' : ''}`} />
                 </button>
               </div>
 
@@ -455,29 +530,46 @@ export function ExportDialog({
                 </div>
               )}
 
-              {/* Summary metadata card */}
+              {/* Summary metadata card with video preview */}
               <div className="export-summary-card">
-                <div className="export-summary-item">
-                  <span className="export-summary-label">{t('Duración', 'Duration')}</span>
-                  <span className="export-summary-value">
-                    {formatTimecode(sequenceDuration, sequenceSize.frameRate)}
-                  </span>
+                <div className="export-summary-thumb">
+                  {previewThumb ? (
+                    <img src={previewThumb} alt="" className="export-summary-thumb-img" />
+                  ) : (
+                    <div className="export-summary-thumb-placeholder">
+                      <Clapperboard size={20} />
+                    </div>
+                  )}
                 </div>
-                <div className="export-summary-item">
-                  <span className="export-summary-label">{t('Resolución', 'Resolution')}</span>
-                  <span className="export-summary-value">
-                    {settings.width} × {settings.height} <span className="export-summary-sub">({settings.frameRate} fps)</span>
-                  </span>
-                </div>
-                <div className="export-summary-item">
-                  <span className="export-summary-label">{t('Formato', 'Format')}</span>
-                  <span className="export-summary-value">
-                    {settings.format.toUpperCase()} <span className="export-summary-sub">({settings.bitrateMbps} Mbps)</span>
-                  </span>
-                </div>
-                <div className="export-summary-item">
-                  <span className="export-summary-label">{t('Tamaño est.', 'Est. Size')}</span>
-                  <span className="export-summary-value">{formatBytes(estSizeBytes)}</span>
+                <div className="export-summary-grid">
+                  <div className="export-summary-item">
+                    <span className="export-summary-label">{t('Duración', 'Duration')}</span>
+                    <span className="export-summary-value">
+                      {formatTimecode(sequenceDuration, sequenceSize.frameRate)}
+                    </span>
+                    <span className="export-summary-sub">
+                      ({Math.max(1, Math.round(sequenceDuration / 60))} min)
+                    </span>
+                  </div>
+                  <div className="export-summary-item">
+                    <span className="export-summary-label">{t('Resolución', 'Resolution')}</span>
+                    <span className="export-summary-value">
+                      {settings.width} × {settings.height}
+                    </span>
+                    <span className="export-summary-sub">({settings.frameRate} fps)</span>
+                  </div>
+                  <div className="export-summary-item">
+                    <span className="export-summary-label">{t('Formato', 'Format')}</span>
+                    <span className="export-summary-value">
+                      {settings.format.toUpperCase()}
+                    </span>
+                    <span className="export-summary-sub">({settings.format === 'mp4' ? 'H.264' : settings.format === 'webm' ? 'VP9' : 'PCM'})</span>
+                  </div>
+                  <div className="export-summary-item">
+                    <span className="export-summary-label">{t('Tamaño est.', 'Est. Size')}</span>
+                    <span className="export-summary-value">{formatBytes(estSizeBytes)}</span>
+                    <span className="export-summary-sub">({t('aprox.', 'approx.')})</span>
+                  </div>
                 </div>
               </div>
 
@@ -532,37 +624,42 @@ export function ExportDialog({
             </div>
 
             <footer className="dialog-actions export-footer">
-              {isExporting ? (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={handleCancelExport}
-                >
-                  {t('Cancelar exportación', 'Cancel export')}
-                </button>
-              ) : (
-                <Dialog.Close className="secondary-button">
-                  {t('Cancelar', 'Cancel')}
-                </Dialog.Close>
-              )}
-
-              <button
-                type="submit"
-                className="primary-button export-submit-btn"
-                disabled={isExporting || sequenceDuration <= 0}
-              >
+              <div className="export-footer-est">
+                {t('Tardará aprox.', 'Takes approx.')} {Math.max(1, Math.round(sequenceDuration / 60))} min
+              </div>
+              <div className="export-footer-buttons">
                 {isExporting ? (
-                  <>
-                    <LoaderCircle size={15} className="spin" />
-                    <span>{t('Exportando…', 'Exporting…')}</span>
-                  </>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={handleCancelExport}
+                  >
+                    {t('Cancelar exportación', 'Cancel export')}
+                  </button>
                 ) : (
-                  <>
-                    <Download size={14} />
-                    <span>{t('Exportar vídeo', 'Export video')}</span>
-                  </>
+                  <Dialog.Close className="secondary-button">
+                    {t('Cancelar', 'Cancel')}
+                  </Dialog.Close>
                 )}
-              </button>
+
+                <button
+                  type="submit"
+                  className="primary-button export-submit-btn"
+                  disabled={isExporting || sequenceDuration <= 0}
+                >
+                  {isExporting ? (
+                    <>
+                      <LoaderCircle size={15} className="spin" />
+                      <span>{t('Exportando…', 'Exporting…')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} />
+                      <span>{t('Exportar vídeo', 'Export video')}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </footer>
           </form>
         </Dialog.Popup>

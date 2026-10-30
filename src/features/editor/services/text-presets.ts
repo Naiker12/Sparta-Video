@@ -31,11 +31,11 @@ export const TEXT_FONT_FAMILIES: { id: string; label: string; css: string }[] = 
 
 export const TEXT_ANIMATIONS_IN: { id: TextAnimationIn; label: string; labelEn: string; tag: string }[] = [
   { id: 'none', label: 'Sin entrada', labelEn: 'None', tag: 'OFF' },
-  { id: 'pop', label: 'Pop Elástico', labelEn: 'Spring Pop', tag: 'PRO' },
-  { id: 'karaoke', label: 'Karaoke Palabra', labelEn: 'Word Karaoke', tag: 'PRO' },
+  { id: 'pop', label: 'Pop Elástico', labelEn: 'Spring Pop', tag: 'POP' },
+  { id: 'karaoke', label: 'Karaoke Palabra', labelEn: 'Word Karaoke', tag: 'KARAOKE' },
   { id: 'typewriter', label: 'Máquina de Escribir', labelEn: 'Typewriter', tag: 'FX' },
   { id: 'fade-up', label: 'Fundido Ascendente', labelEn: 'Fade Up', tag: 'CINE' },
-  { id: 'bounce', label: 'Rebote Dinámico', labelEn: 'Dynamic Bounce', tag: 'PRO' },
+  { id: 'bounce', label: 'Rebote Dinámico', labelEn: 'Dynamic Bounce', tag: 'REBOTE' },
   { id: 'slide-left', label: 'Deslizar Lateral', labelEn: 'Slide Left', tag: 'TV' },
   { id: 'glitch', label: 'Glitch Digital', labelEn: 'Cyber Glitch', tag: 'FX' },
   { id: 'zoom-in', label: 'Impacto Zoom', labelEn: 'Impact Zoom', tag: 'HOOK' },
@@ -58,8 +58,8 @@ export const TEXT_ANIMATIONS_LOOP: { id: TextAnimationLoop; label: string; label
 export const TEXT_STYLE_PRESETS: TextPresetDefinition[] = [
   {
     id: 'hormozi-karaoke',
-    name: 'Hormozi Karaoke Pro',
-    nameEn: 'Hormozi Karaoke Pro',
+    name: 'Hormozi Karaoke',
+    nameEn: 'Hormozi Karaoke',
     category: 'subtitles',
     badge: 'KARAOKE',
     sampleText: 'EL SECRETO ESTÁ EN EL RITMO VISUAL',
@@ -97,7 +97,7 @@ export const TEXT_STYLE_PRESETS: TextPresetDefinition[] = [
     name: 'Pop Pill Dinámico',
     nameEn: 'Dynamic Pop Pill',
     category: 'subtitles',
-    badge: 'POP PRO',
+    badge: 'POP',
     sampleText: 'Subtítulo dinámico con impacto inmediato',
     defaultDuration: 3.0,
     style: {

@@ -1,3 +1,6 @@
+import type { EffectInstance, TransitionRef } from './effects/catalog'
+export type { EffectDef, EffectInstance, EffectKind, EffectParamDef, TransitionRef } from './effects/catalog'
+
 export type Transform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number }
 
 export type Keyframe = {
@@ -52,6 +55,25 @@ export type TextAnimation = {
   outDuration: number
 }
 
+export type FitMode = 'fit' | 'fill' | 'stretch'
+
+export type ClipBlendMode =
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'soft-light'
+  | 'add'
+
+export type ClipCrop = {
+  l: number
+  t: number
+  r: number
+  b: number
+}
+
 export type Clip = {
   id: string
   title: string
@@ -60,11 +82,21 @@ export type Clip = {
   color: string
   thumbnail: string
   sourceAssetId?: string
-  kind: 'video' | 'audio'
+  kind: 'video' | 'audio' | 'adjustment'
   transform?: Transform
   uniformScale?: boolean
   opacity?: number
-  blendMode?: 'normal' | 'multiply' | 'screen' | 'overlay'
+  blendMode?: ClipBlendMode
+  fit?: FitMode
+  crop?: ClipCrop
+  flipH?: boolean
+  flipV?: boolean
+  speed?: number
+  preservePitch?: boolean
+  freezeTime?: number
+  effects?: EffectInstance[]
+  transitionIn?: TransitionRef
+  transitionOut?: TransitionRef
   volume?: number
   fadeIn?: number
   fadeOut?: number

@@ -1,34 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
-import { AudioLines, Clock3, CopyPlus, Film, Gauge, LockKeyhole, Maximize2, MoreHorizontal, Plus, Scan, Scissors, Trash2, Type, Video, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react'
+import { AudioLines, Bookmark, Eye, Film, LockKeyhole, Magnet, MousePointer2, Plus, Scan, Scissors, Search, Snowflake, Sparkles, Trash2, Type, Video, Volume2, VolumeX } from 'lucide-react'
 import type { Clip, MediaItem, TimelineMarker, Track } from '../model'
-import { IconButton } from './controls'
-import { ActionMenu } from './ActionMenu'
-import { IconNleCaptions, IconNleTitleHook } from './StudioIcons'
 import { formatRulerTime, formatTimecode } from '../timecode'
 import { t } from '../services/locale'
+import { cn } from '../../../lib/utils'
 
 type Props = {
   tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]; selected: string; playhead: number; zoom: number; frameRate: number; snap: boolean; expanded: boolean; tool: 'select' | 'razor'
   onSelect: (id: string) => void; onSeek: (time: number) => void; onZoom: (zoom: number) => void
   mutedTracks: string[]; lockedTracks: string[]; onMuteTrack: (id: string) => void; onLockTrack: (id: string) => void
-  onAddTrack: (kind: 'video' | 'audio') => void; onAddMedia: (item: MediaItem, at: number, trackId?: string) => void
+  onAddTrack?: (kind: 'video' | 'audio') => void; onAddMedia: (item: MediaItem, at: number, trackId?: string) => void
   onMoveClip: (clipId: string, start: number, duration?: number) => void; onMoveClipToNewTrack: (clipId: string) => void; onSplitClip: (clipId: string, time: number) => void
   onDeleteClip?: (clipId: string) => void; onDuplicateClip?: (clipId: string) => void
-  onAddTextClip?: () => void; onAutoSubtitles?: () => void; onClearSubtitles?: () => void
+  onFreezeFrame?: (clipId: string, time: number) => void
+  onAddTextClip?: () => void; onAddAdjustmentLayer?: () => void; onAutoSubtitles?: () => void; onClearSubtitles?: () => void
   onPackClips?: () => void; onAutoMarkers?: () => void; onAutoAudio?: () => void
-  onAddMarker: (time: number) => void; onRemoveMarker: (id: string) => void; onToggleSnap: () => void; onToggleExpanded: () => void; onSetTool: (tool: 'select' | 'razor') => void
+  onAddMarker: (time: number) => void; onRemoveMarker: (id: string) => void; onToggleSnap: () => void; onToggleExpanded?: () => void; onSetTool: (tool: 'select' | 'razor') => void
   onImportFiles?: (files: FileList | File[]) => void
 }
 type Gesture = { id: string; startX: number; originalStart: number; originalDuration: number; mode: 'move' | 'trim-left' | 'trim-right' }
 type GestureFeedback = { id: string; mode: Gesture['mode']; start: number; duration: number; originalStart: number; originalDuration: number }
 type SnapFeedback = { time: number; target: string }
 
-export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onAddTextClip, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool, onImportFiles }: Props) {
+export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack: _onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip: _onDuplicateClip, onFreezeFrame: _onFreezeFrame, onAddTextClip, onAddAdjustmentLayer, onAutoSubtitles: _onAutoSubtitles, onClearSubtitles: _onClearSubtitles, onPackClips: _onPackClips, onAutoMarkers: _onAutoMarkers, onAutoAudio: _onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded: _onToggleExpanded, onSetTool, onImportFiles }: Props) {
   const scale = 31 * zoom
   const sequenceDuration = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration)), ...markers.map((marker) => marker.time))
-  const selectedClipObj = tracks.flatMap((track) => track.clips).find((clip) => clip.id === selected)
-  const selectedTrackLocked = !!selectedClipObj && tracks.some((track) => lockedTracks.includes(track.id) && track.clips.some((clip) => clip.id === selected))
-  const canSplitSelectedAtPlayhead = !!selectedClipObj && !selectedTrackLocked && playhead > selectedClipObj.start + 1 / frameRate && playhead < selectedClipObj.start + selectedClipObj.duration - 1 / frameRate
   const rulerDuration = Math.max(10, sequenceDuration + 2)
   const rulerTickCount = Math.ceil(rulerDuration) + 1
   const rulerStep = getRulerStep(scale)
@@ -45,14 +41,20 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
   const fitSequence = () => onZoom(Math.max(0.25, Math.min(2.4, (timelineRef.current?.clientWidth ?? 880) / (rulerTickCount * 31))))
   const gestureRef = useRef<Gesture | null>(null)
   const pendingRef = useRef<{ start: number; duration: number } | null>(null)
-  const [waveforms, setWaveforms] = useState(true)
-  const [clipLabels, setClipLabels] = useState(true)
-  const [trackDensity, setTrackDensity] = useState<'compact' | 'normal' | 'expanded'>('normal')
+  const [waveforms] = useState(true)
+  const [clipLabels] = useState(true)
   const [preview, setPreview] = useState<Record<string, { start: number; duration: number }>>({})
   const [gestureFeedback, setGestureFeedback] = useState<GestureFeedback | null>(null)
   const [snapFeedback, setSnapFeedback] = useState<SnapFeedback | null>(null)
   const [razorTime, setRazorTime] = useState<number | null>(null)
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null)
+  const visibleTracks = tracks.filter((track) => {
+    const isFxTrack = track.name.toLowerCase().includes('fx') || track.name.toLowerCase().includes('efecto') || track.name.toLowerCase().includes('ajuste')
+    if (isFxTrack) {
+      return track.clips.length > 0
+    }
+    return true
+  })
   const laneLayouts = new Map(tracks.map((track) => {
     const rows = new Map<string, number>()
     const rowEnds: number[] = []
@@ -62,7 +64,7 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
       rows.set(clip.id, row)
       rowEnds[row] = clip.start + clip.duration
     }
-    const rowHeight = trackDensity === 'compact' ? 32 : trackDensity === 'expanded' ? 56 : 42
+    const rowHeight = 42
     return [track.id, { rows, height: Math.max(track.kind === 'audio' ? rowHeight + 3 : rowHeight + 6, rowEnds.length * rowHeight + 6), rowHeight }] as const
   }))
   const overlapIds = new Set<string>()
@@ -131,15 +133,15 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
     const time = Math.max(0, (clientX - rect.left + (timelineRef.current?.scrollLeft ?? 0)) / scale)
     onSeek(snap ? Math.round(time * frameRate) / frameRate : time)
   }
-  const [trackHeaderWidth, setTrackHeaderWidth] = useState(172)
+  const [trackHeaderWidth, setTrackHeaderWidth] = useState(180)
   const resizingTrackHeaderRef = useRef(false)
-  const trackHeaderStartRef = useRef({ x: 0, width: 172 })
+  const trackHeaderStartRef = useRef({ x: 0, width: 180 })
   useEffect(() => {
     const move = (event: PointerEvent) => {
       if (scrubbingRef.current) seekFromClientX(event.clientX)
       if (resizingTrackHeaderRef.current) {
         const delta = event.clientX - trackHeaderStartRef.current.x
-        setTrackHeaderWidth(Math.max(110, Math.min(280, trackHeaderStartRef.current.width + delta)))
+        setTrackHeaderWidth(Math.max(140, Math.min(280, trackHeaderStartRef.current.width + delta)))
       }
     }
     const end = () => {
@@ -151,66 +153,183 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
     window.addEventListener('pointercancel', end)
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end) }
   })
-  return <section className={`timeline-panel ${expanded ? 'timeline-expanded' : ''}`}>
-    <div className="timeline-top">
-      <div className="timeline-heading">
-        <span className="section-kicker">{t('LÍNEA DE TIEMPO', 'TIMELINE')}</span>
-        <span className="timeline-divider" />
-        <span className="sequence-selector">{t('Secuencia 01', 'Sequence 01')}</span>
+  return <section className={`timeline-panel ${expanded ? 'timeline-expanded' : ''} flex flex-col h-full bg-card overflow-hidden select-none`}>
+    <div className="flex items-center justify-between px-3 h-9 bg-card border-b border-border select-none shrink-0">
+      {/* Sequence Tabs */}
+      <div className="flex items-center gap-1 h-full">
+        <button type="button" className="h-full px-3 text-xs font-semibold text-foreground border-b-2 border-primary cursor-pointer flex items-center gap-1.5 select-none">
+          <span className="sr-only">Sequence 01</span>
+          <span>Core</span>
+        </button>
+        <button type="button" className="h-full px-3 text-xs font-medium text-muted-foreground hover:text-foreground cursor-pointer select-none">
+          Secuencia 2
+        </button>
+        <button type="button" className="w-7 h-7 flex items-center justify-center rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer" title={t('Nueva secuencia', 'New sequence')}>
+          <Plus size={14} />
+        </button>
       </div>
-      <div className="timeline-actions">
-        <ActionMenu
-          label={t('Añadir pista', 'Add track')}
-          items={[
-            { label: t('Añadir pista de vídeo', 'Add video track'), icon: Video, onSelect: () => onAddTrack('video') },
-            { label: t('Añadir pista de audio', 'Add audio track'), icon: AudioLines, onSelect: () => onAddTrack('audio') },
-            ...(onAddTextClip ? [{ separator: true as const }, { label: t('Insertar capa de texto en cabezal', 'Insert text layer at playhead'), icon: Type, onSelect: onAddTextClip }] : []),
-            ...(onAutoSubtitles ? [{ label: t('Generar subtítulos sincronizados', 'Generate synced subtitles'), icon: Type, onSelect: onAutoSubtitles }] : []),
-          ]}
+
+      {/* Tools Cluster */}
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onSetTool('select')}
+          className={cn(
+            'w-7 h-7 rounded-[6px] flex items-center justify-center transition-colors cursor-pointer border-0',
+            tool === 'select'
+              ? 'bg-primary/18 text-primary font-medium shadow-xs'
+              : 'text-muted-foreground hover:text-foreground hover:bg-input'
+          )}
+          title={t('Selección (V)', 'Selection (V)')}
         >
-          <Plus size={15} />
-        </ActionMenu>
-        <ActionMenu
-          label={t('Opciones de la línea de tiempo', 'Timeline options')}
-          items={[
-            { heading: t('Visualización de la línea de tiempo', 'Timeline display') },
-            { label: t('Mostrar formas de onda', 'Show waveforms'), checked: waveforms, onSelect: () => setWaveforms((value) => !value) },
-            { label: t('Mostrar nombres de clips', 'Show clip names'), checked: clipLabels, onSelect: () => setClipLabels((value) => !value) },
-            { label: t('Pistas compactas', 'Compact tracks'), checked: trackDensity === 'compact', onSelect: () => setTrackDensity('compact') },
-            { label: t('Altura normal de pistas', 'Normal track height'), checked: trackDensity === 'normal', onSelect: () => setTrackDensity('normal') },
-            { label: t('Pistas expandidas', 'Expanded tracks'), checked: trackDensity === 'expanded', onSelect: () => setTrackDensity('expanded') },
-            ...(onPackClips || onAutoMarkers || onAutoAudio ? [{ separator: true as const }, { heading: t('Edición de secuencia', 'Sequence editing') }] : []),
-            ...(onPackClips ? [{ label: t('Cerrar huecos en pista', 'Pack track gaps'), onSelect: onPackClips }] : []),
-            ...(onAutoMarkers ? [{ label: t('Detectar cortes de escena', 'Detect scene cuts'), onSelect: onAutoMarkers }] : []),
-            ...(onAutoAudio ? [{ label: t('Nivelar mezcla de audio', 'Balance audio mix'), onSelect: onAutoAudio }] : []),
-            { separator: true },
-            { label: t('Restablecer zoom', 'Reset zoom'), icon: ZoomOut, onSelect: () => onZoom(1) },
-            { label: t('Encajar secuencia', 'Fit sequence'), icon: ZoomIn, onSelect: fitSequence },
-          ]}
+          <MousePointer2 size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onSetTool(tool === 'razor' ? 'select' : 'razor')}
+          aria-label={t('Cortar (Razor)', 'Razor tool')}
+          className={cn(
+            'w-7 h-7 rounded-[6px] flex items-center justify-center transition-colors cursor-pointer border-0',
+            tool === 'razor'
+              ? 'bg-primary/18 text-primary font-medium shadow-xs'
+              : 'text-muted-foreground hover:text-foreground hover:bg-input'
+          )}
+          title={t('Corte / Cuchilla (C)', 'Razor cut (C)')}
         >
-          <MoreHorizontal size={16} />
-        </ActionMenu>
-        <span className="timeline-divider" />
-        <IconButton label={t('Encajar secuencia', 'Fit sequence')} onClick={fitSequence}><Scan size={15} /></IconButton>
-        <IconButton label={t('Alejar', 'Zoom out')} onClick={() => onZoom(Math.max(0.25, zoom - 0.15))}><ZoomOut size={15} /></IconButton>
-        <input aria-label={t('Zoom de la línea de tiempo', 'Timeline zoom')} className="zoom-slider" type="range" min="0.25" max="2.4" step="0.05" value={zoom} onChange={(event) => onZoom(Number(event.target.value))} />
-        <IconButton label={t('Acercar', 'Zoom in')} onClick={() => onZoom(Math.min(2.4, zoom + 0.15))}><ZoomIn size={15} /></IconButton>
-        <span className="zoom-value">{Math.round(zoom * 100)}%</span>
+          <Scissors size={14} />
+        </button>
+        <button
+          type="button"
+          className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-input border-0 transition-colors cursor-pointer"
+          title={t('Recortar / Deslizar', 'Trim / Slip')}
+        >
+          <Scan size={14} />
+        </button>
+
+        {/* Snap Button */}
+        <button
+          type="button"
+          onClick={onToggleSnap}
+          className={cn(
+            'w-7 h-7 rounded-[6px] flex items-center justify-center transition-colors cursor-pointer border-0',
+            snap
+              ? 'bg-primary/18 text-primary font-medium shadow-xs'
+              : 'text-muted-foreground hover:text-foreground hover:bg-input'
+          )}
+          title={t('Ajuste magnético (Snap)', 'Snap (S)')}
+          aria-label={t('Ajuste magnético (Snap)', 'Snap (S)')}
+        >
+          <Magnet size={14} />
+        </button>
+
+        {onAddTextClip && (
+          <button
+            type="button"
+            onClick={onAddTextClip}
+            className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-input border-0 transition-colors cursor-pointer"
+            title={t('Insertar texto (T)', 'Insert text (T)')}
+          >
+            <Type size={14} />
+          </button>
+        )}
+        {onAddAdjustmentLayer && (
+          <button
+            type="button"
+            onClick={onAddAdjustmentLayer}
+            className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-[#a99cff] hover:bg-input border-0 transition-colors cursor-pointer"
+            title={t('Insertar capa FX', 'Insert FX adjustment layer')}
+          >
+            <Sparkles size={14} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onAddMarker(playhead)}
+          className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-input border-0 transition-colors cursor-pointer"
+          title={t('Añadir marcador (M)', 'Add marker (M)')}
+        >
+          <Bookmark size={14} />
+        </button>
+        {onDeleteClip && (
+          <button
+            type="button"
+            onClick={() => { if (selected) onDeleteClip(selected) }}
+            className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-input border-0 transition-colors cursor-pointer"
+            title={t('Eliminar clip seleccionado (Supr)', 'Delete selected clip (Del)')}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* Zoom Cluster */}
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <Search size={13} className="text-muted-foreground" />
+        <input
+          aria-label={t('Zoom de la línea de tiempo', 'Timeline zoom')}
+          type="range"
+          min="0.25"
+          max="2.4"
+          step="0.05"
+          value={zoom}
+          onChange={(event) => onZoom(Number(event.target.value))}
+          className="w-20 h-1 accent-primary cursor-pointer"
+        />
+        <span className="text-[11px] font-mono tabular-nums text-muted-foreground w-8 text-right">{Math.round(zoom * 100)}%</span>
       </div>
     </div>
     <div className="timeline-body">
       <div className="track-controls" ref={trackControlsRef} onScroll={() => syncVerticalScroll('tracks')} style={{ width: `${trackHeaderWidth}px` }}>
         <div className="ruler-spacer" style={{ width: `${trackHeaderWidth}px` }}><span aria-hidden="true">{t('PISTAS', 'TRACKS')}</span></div>
-        {tracks.map((track) => (
-          <div className={`track-control ${track.kind} track-density-${trackDensity} ${lockedTracks.includes(track.id) ? 'locked-track' : ''} ${mutedTracks.includes(track.id) ? 'muted-track' : ''}`} style={{ height: `${laneLayouts.get(track.id)?.height ?? 48}px` }} key={track.id}>
-            <div className="track-color"><span /></div>
-            <span className="track-name" title={track.name}>{track.name}</span>
-            <button aria-label={`${mutedTracks.includes(track.id) ? t('Activar sonido de', 'Unmute') : t('Silenciar', 'Mute')} ${track.name}`} aria-pressed={mutedTracks.includes(track.id)} className={mutedTracks.includes(track.id) ? 'track-action pressed' : 'track-action'} title={mutedTracks.includes(track.id) ? t('Silencio guardado; todavía no afecta el sonido', 'Mute state saved; audio is not affected yet') : t('Silenciar pista', 'Mute track')} onClick={() => onMuteTrack(track.id)}>
-              {mutedTracks.includes(track.id) ? <VolumeX size={13} /> : <Volume2 size={13} />}
-            </button>
-            <button aria-label={`${lockedTracks.includes(track.id) ? t('Desbloquear', 'Unlock') : t('Bloquear', 'Lock')} ${track.name}`} aria-pressed={lockedTracks.includes(track.id)} className={lockedTracks.includes(track.id) ? 'track-action pressed' : 'track-action'} title={lockedTracks.includes(track.id) ? t('Desbloquear pista', 'Unlock track') : t('Bloquear pista', 'Lock track')} onClick={() => onLockTrack(track.id)}>
-              <LockKeyhole size={12} />
-            </button>
+        {visibleTracks.map((track) => (
+          <div
+            className={cn(
+              'flex items-center justify-between px-2.5 bg-card border-b border-border/80 border-r border-border text-xs text-foreground font-medium select-none',
+              lockedTracks.includes(track.id) && 'opacity-60 bg-muted',
+              mutedTracks.includes(track.id) && 'text-muted-foreground'
+            )}
+            style={{ height: `${laneLayouts.get(track.id)?.height ?? 48}px` }}
+            key={track.id}
+          >
+            <div className="flex items-center gap-2 truncate">
+              {track.kind === 'audio' ? (
+                <AudioLines size={14} className="text-[#3fae68] shrink-0" />
+              ) : track.name.toLowerCase().includes('text') || track.name.toLowerCase().includes('subtítulo') ? (
+                <Type size={14} className="text-[#c0558f] shrink-0" />
+              ) : track.name.toLowerCase().includes('fx') || track.name.toLowerCase().includes('efecto') ? (
+                <Sparkles size={14} className="text-[#6c5ce0] shrink-0" />
+              ) : (
+                <Video size={14} className="text-[#3b6fd4] shrink-0" />
+              )}
+              <span className="truncate text-xs" title={track.name}>{track.name}</span>
+            </div>
+            <div className="flex items-center gap-1 text-muted-foreground shrink-0">
+              <button
+                type="button"
+                className={cn('w-6 h-6 flex items-center justify-center rounded hover:text-foreground hover:bg-input border-0 transition-colors cursor-pointer', lockedTracks.includes(track.id) && 'text-amber-400')}
+                aria-label={lockedTracks.includes(track.id) ? `Unlock ${track.name}` : `Lock ${track.name}`}
+                title={lockedTracks.includes(track.id) ? t('Desbloquear pista', 'Unlock track') : t('Bloquear pista', 'Lock track')}
+                onClick={() => onLockTrack(track.id)}
+              >
+                <LockKeyhole size={13} />
+              </button>
+              <button
+                type="button"
+                className="w-6 h-6 flex items-center justify-center rounded hover:text-foreground hover:bg-input border-0 transition-colors cursor-pointer"
+                title={t('Visibilidad de pista', 'Track visibility')}
+              >
+                <Eye size={13} />
+              </button>
+              <button
+                type="button"
+                className={cn('w-6 h-6 flex items-center justify-center rounded hover:text-foreground hover:bg-input border-0 transition-colors cursor-pointer', mutedTracks.includes(track.id) && 'text-destructive')}
+                aria-label={mutedTracks.includes(track.id) ? `Unmute ${track.name}` : `Mute ${track.name}`}
+                title={mutedTracks.includes(track.id) ? t('Activar sonido', 'Unmute') : t('Silenciar', 'Mute')}
+                onClick={() => onMuteTrack(track.id)}
+              >
+                {mutedTracks.includes(track.id) ? <VolumeX size={13} /> : <Volume2 size={13} />}
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -246,32 +365,46 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
           <div className="ruler" ref={rulerRef} onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); scrubbingRef.current = true; seekFromClientX(event.clientX) }}>{rulerMarks.map((time) => <div className="ruler-mark" key={time} style={{ left: `${time * scale}px` }}><span>{formatRulerTime(time)}</span><i /></div>)}</div>
           {markers.map((marker) => <button key={marker.id} className={`timeline-marker ${activeMarkerId === marker.id ? 'marker-active' : ''}`} style={{ left: `${marker.time * scale}px` }} title={`${marker.label} · ${formatTimecode(marker.time, frameRate)} · pulsa Supr para eliminar`} onClick={() => { setActiveMarkerId(marker.id); onSeek(marker.time) }} onKeyDown={(event) => { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); event.stopPropagation(); setActiveMarkerId(null); onRemoveMarker(marker.id) } }} onContextMenu={(event) => { event.preventDefault(); setActiveMarkerId(null); onRemoveMarker(marker.id) }} aria-label={`${marker.label} en ${formatTimecode(marker.time, frameRate)}. Supr para eliminar`} />)}
           {markers.filter((marker) => marker.id === activeMarkerId).map((marker) => <div key={`popover-${marker.id}`} className="marker-popover" style={{ left: `${marker.time * scale}px` }}><strong>{marker.label}</strong><span>{formatTimecode(marker.time, frameRate)}</span><button type="button" onClick={() => { setActiveMarkerId(null); onRemoveMarker(marker.id) }}>{t('Eliminar', 'Delete')}</button></div>)}
-          {tracks.map((track) => (
-            <div className={`track-lane ${track.kind} track-density-${trackDensity} ${mutedTracks.includes(track.id) ? 'muted-lane' : ''} ${lockedTracks.includes(track.id) ? 'locked-lane' : ''}`} style={{ height: `${laneLayouts.get(track.id)?.height ?? 48}px`, backgroundSize: `${scale}px 100%` }} data-track-id={track.id} key={track.id}>
+          {visibleTracks.map((track) => (
+            <div className={`track-lane ${track.kind} track-density-normal ${mutedTracks.includes(track.id) ? 'muted-lane' : ''} ${lockedTracks.includes(track.id) ? 'locked-lane' : ''}`} style={{ height: `${laneLayouts.get(track.id)?.height ?? 48}px`, backgroundSize: `${scale}px 100%` }} data-track-id={track.id} key={track.id}>
               {track.clips.map((clip) => {
                 const position = preview[clip.id] ?? clip
                 const isLocked = lockedTracks.includes(track.id)
                 const pixelWidth = position.duration * scale
                 const density = pixelWidth < 48 ? 'clip-tiny' : pixelWidth < 105 ? 'clip-compact' : 'clip-full'
                 return (
-                  <button key={clip.id} disabled={isLocked} className={`timeline-clip ${density} ${overlapIds.has(clip.id) ? 'overlap-warning' : ''} ${clip.color} ${selected === clip.id ? 'clip-selected' : ''} ${clip.kind === 'audio' ? 'audio-clip' : ''} ${tool === 'razor' ? 'razor-cursor' : ''}`} style={{ left: `${position.start * scale}px`, width: `${pixelWidth}px`, top: `${5 + (laneLayouts.get(track.id)?.rows.get(clip.id) ?? 0) * (laneLayouts.get(track.id)?.rowHeight ?? 42)}px`, zIndex: selected === clip.id ? 3 : 1 }} onPointerMove={(event) => { if (tool === 'razor') { const rect = event.currentTarget.getBoundingClientRect(); setRazorTime(position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale))) } }} onPointerLeave={() => setRazorTime(null)} onPointerDown={(event) => { if (tool === 'razor') { event.preventDefault(); event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const cutTime = position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale)); onSplitClip(clip.id, cutTime); setRazorTime(null); return } beginGesture(event, clip, 'move') }} onClick={() => { if (tool === 'select') onSelect(clip.id) }} title={tool === 'razor' ? `${clip.title} · corte en ${formatTimecode(razorTime ?? position.start, frameRate)} · haz clic en el punto de corte` : `${clip.title} · arrastra para mover · ←/→ mueve · Alt + ←/→ recorta borde derecho · Ctrl + Alt + ←/→ recorta borde izquierdo · Shift amplía el paso`} aria-label={`${clip.title}, inicio ${formatTimecode(position.start, frameRate)}, duración ${formatTimecode(position.duration, frameRate)}. Flechas para mover; Alt más flechas recorta el borde derecho; Ctrl más Alt recorta el izquierdo`}>
+                  <button key={clip.id} disabled={isLocked} className={`timeline-clip ${density} ${overlapIds.has(clip.id) ? 'overlap-warning' : ''} ${clip.color} ${selected === clip.id ? 'clip-selected' : ''} ${clip.kind === 'audio' ? 'audio-clip clip-kind-audio' : ''} ${clip.kind === 'adjustment' ? 'adjustment-clip clip-kind-fx' : ''} ${(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-text' : ''} ${clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-video' : ''} ${tool === 'razor' ? 'razor-cursor' : ''}`} style={{ left: `${position.start * scale}px`, width: `${pixelWidth}px`, top: `${5 + (laneLayouts.get(track.id)?.rows.get(clip.id) ?? 0) * (laneLayouts.get(track.id)?.rowHeight ?? 42)}px`, zIndex: selected === clip.id ? 3 : 1 }} onPointerMove={(event) => { if (tool === 'razor') { const rect = event.currentTarget.getBoundingClientRect(); setRazorTime(position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale))) } }} onPointerLeave={() => setRazorTime(null)} onPointerDown={(event) => { if (tool === 'razor') { event.preventDefault(); event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const cutTime = position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale)); onSplitClip(clip.id, cutTime); setRazorTime(null); return } beginGesture(event, clip, 'move') }} onClick={() => { if (tool === 'select') onSelect(clip.id) }} title={tool === 'razor' ? `${clip.title} · corte en ${formatTimecode(razorTime ?? position.start, frameRate)} · haz clic en el punto de corte` : `${clip.title} · arrastra para mover · ←/→ mueve · Alt + ←/→ recorta borde derecho · Ctrl + Alt + ←/→ recorta borde izquierdo · Shift amplía el paso`} aria-label={`${clip.title}, inicio ${formatTimecode(position.start, frameRate)}, duración ${formatTimecode(position.duration, frameRate)}. Flechas para mover; Alt más flechas recorta el borde derecho; Ctrl más Alt recorta el izquierdo`}>
                     <span className={`clip-art ${clip.thumbnail}`} />
+                    {clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') && <div className="video-filmstrip-strip" />}
+                    {clip.transitionIn && <div className="timeline-transition-badge" title={`Transición: ${clip.transitionIn.effectId}`}>◪</div>}
                     {clip.kind === 'audio' && waveforms && <span className="waveform">{Array.from({ length: 92 }, (_, i) => <i key={i} style={{ height: `${15 + Math.abs(Math.sin(i * 1.7) * Math.cos(i * 0.27)) * 65}%` }} />)}</span>}
                     {clip.fadeIn ? <span className="clip-fade-in" style={{ width: `${Math.min(50, clip.fadeIn / Math.max(position.duration, 0.1) * 100)}%` }} /> : null}
                     {clip.fadeOut ? <span className="clip-fade-out" style={{ width: `${Math.min(50, clip.fadeOut / Math.max(position.duration, 0.1) * 100)}%` }} /> : null}
                     {clip.kind === 'audio' && <span className="clip-volume-line" style={{ bottom: `${Math.min(100, clip.volume ?? 100)}%` }} />}
                     {clip.keyframes?.map((keyframe) => <span key={`${keyframe.property}-${keyframe.time}`} className="clip-keyframe" style={{ left: `${Math.max(0, Math.min(100, (keyframe.time - position.start) / Math.max(position.duration, 0.01) * 100))}%` }} title={`${keyframe.property} · ${formatTimecode(keyframe.time, frameRate)}`} />)}
+                    {clip.kind === 'adjustment' && clipLabels && pixelWidth >= 48 && (
+                      <span className="clip-label adjustment-label">
+                        <Sparkles size={11} />
+                        <span className="fx-badge" style={{ background: '#7c3aed', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 3px', borderRadius: '3px', marginRight: '3px' }}>FX</span>
+                        <span>{clip.title}</span>
+                        {clip.effects && clip.effects.length > 0 && <span className="effects-count-badge" style={{ background: 'rgba(255,255,255,0.2)', fontSize: '9px', padding: '1px 4px', borderRadius: '10px', marginLeft: '3px' }}>{clip.effects.length}</span>}
+                        {pixelWidth >= 115 && <small>{formatTimecode(position.duration, frameRate)}</small>}
+                      </span>
+                    )}
                     {clip.kind === 'video' && clipLabels && pixelWidth >= 48 && (
-                      <span className="clip-label">
-                        {clip.text !== undefined || clip.thumbnail === 'text-overlay' ? <Type size={11} /> : <Film size={11} />}
-                        <span>{clip.text ?? clip.title}</span>
+                      <span className="clip-label video-clip-badge">
+                        {clip.freezeTime !== undefined ? <Snowflake size={11} style={{ color: '#38bdf8' }} /> : clip.text !== undefined || clip.thumbnail === 'text-overlay' ? <Type size={11} className="text-[#c0558f]" /> : <Film size={11} className="text-[#3b6fd4]" />}
+                        <span className="truncate">{clip.text ?? clip.title}</span>
+                        {clip.speed && clip.speed !== 1.0 && pixelWidth >= 80 && (
+                          <em className="clip-anim-tag" style={{ background: 'rgba(56, 189, 248, 0.25)', color: '#38bdf8' }}>{clip.speed}x</em>
+                        )}
                         {clip.textAnimation?.in && clip.textAnimation.in !== 'none' && pixelWidth >= 85 && (
                           <em className="clip-anim-tag">{clip.textAnimation.in.toUpperCase()}</em>
                         )}
                         {pixelWidth >= 115 && <small>{formatTimecode(position.duration, frameRate)}</small>}
                       </span>
                     )}
-                    {clip.kind === 'audio' && clipLabels && pixelWidth >= 60 && <span className="clip-label audio-clip-label"><AudioLines size={10} /><span>{clip.title}</span>{pixelWidth >= 120 && <small>{formatTimecode(position.duration, frameRate)}</small>}</span>}
+                    {clip.kind === 'audio' && clipLabels && pixelWidth >= 60 && <span className="clip-label audio-clip-label"><AudioLines size={10} className="text-[#3fae68]" /><span>{clip.title}</span>{pixelWidth >= 120 && <small>{formatTimecode(position.duration, frameRate)}</small>}</span>}
                     {selected === clip.id && !isLocked && tool === 'select' && <><i className="trim-handle left" onPointerDown={(event) => beginGesture(event, clip, 'trim-left')} /><i className="trim-handle right" onPointerDown={(event) => beginGesture(event, clip, 'trim-right')} /></>}
                   </button>
                 )
@@ -284,76 +417,6 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
           {tool === 'razor' && razorTime !== null && <div className="razor-guide" style={{ left: `${razorTime * scale}px` }}><span>{formatTimecode(razorTime, frameRate)}</span></div>}
           <div className="playhead" style={{ left: `${playhead * scale}px` }}><i /><span className="playhead-line" /><b className="playhead-time">{formatTimecode(playhead, frameRate)}</b></div>
         </div>
-      </div>
-    </div>
-    <div className="timeline-bottom">
-      <div>
-        <IconButton label={t('Añadir marcador en el cabezal', 'Add marker at playhead')} onClick={() => onAddMarker(playhead)}><Plus size={14} /></IconButton>
-        <button className="snap-control" role="switch" aria-checked={snap} onClick={onToggleSnap} aria-label={t('Ajuste a fotogramas', 'Snap to frames')}>{t('Ajuste', 'Snap')} <span className={`toggle small ${snap ? 'on' : ''}`}><i /></span></button>
-        <span className="bottom-divider" />
-        <button className={`timeline-tool ${tool === 'select' ? 'active' : ''}`} aria-pressed={tool === 'select'} onClick={() => onSetTool('select')}>{t('Selección', 'Select')} <span className="shortcut">V</span></button>
-        <button className={`timeline-tool ${tool === 'razor' ? 'active' : ''}`} aria-label={t('Corte (Razor)', 'Razor tool')} aria-pressed={tool === 'razor'} onClick={() => onSetTool(tool === 'razor' ? 'select' : 'razor')}><Scissors size={13} /> {t('Cortar (Razor)', 'Razor')} <span className="shortcut">C</span></button>
-        {onAddTextClip && (
-          <button type="button" className="timeline-tool" onClick={onAddTextClip} title={t('Insertar texto o subtítulo en el cabezal', 'Insert text or subtitle at playhead')}>
-            <IconNleTitleHook size={12} /> {t('Texto', 'Text')}
-          </button>
-        )}
-        {onAutoSubtitles && (
-          <button type="button" className="timeline-tool" onClick={onAutoSubtitles} title={t('Generar subtítulos sincronizados con el audio del video', 'Generate subtitles synced with video audio')}>
-            <IconNleCaptions size={12} /> {t('Subtítulos', 'Subtitles')}
-          </button>
-        )}
-        {onClearSubtitles && (
-          <button
-            type="button"
-            className="timeline-tool destructive-tool"
-            onClick={onClearSubtitles}
-            title={t('Borrar todos los subtítulos de la secuencia para volver a crearlos (Alt + Supr)', 'Delete all sequence subtitles to recreate them (Alt + Delete)')}
-          >
-            <Trash2 size={12} /> {t('Borrar subtítulos', 'Clear subtitles')} <span className="shortcut">Alt+Supr</span>
-          </button>
-        )}
-        {selectedClipObj && (
-          <>
-            <span className="bottom-divider" />
-            <button
-              type="button"
-              className="timeline-tool"
-              disabled={!canSplitSelectedAtPlayhead}
-              onClick={() => { if (canSplitSelectedAtPlayhead) onSplitClip(selectedClipObj.id, playhead) }}
-              title={t('Dividir clip seleccionado en el cabezal (S)', 'Split selected clip at playhead (S)')}
-            >
-              <Scissors size={12} /> {t('Dividir aquí', 'Split here')} <span className="shortcut">S</span>
-            </button>
-            {onDuplicateClip && (
-              <button
-                type="button"
-                className="timeline-tool"
-                disabled={selectedTrackLocked}
-                onClick={() => onDuplicateClip(selectedClipObj.id)}
-                title={t('Duplicar clip seleccionado (Ctrl+D)', 'Duplicate selected clip (Ctrl+D)')}
-              >
-                <CopyPlus size={12} /> {t('Duplicar', 'Duplicate')}
-              </button>
-            )}
-            {onDeleteClip && (
-              <button
-                type="button"
-                className="timeline-tool destructive-tool"
-                disabled={selectedTrackLocked}
-                onClick={() => onDeleteClip(selectedClipObj.id)}
-                title={t('Eliminar clip seleccionado (Supr)', 'Delete selected clip (Del)')}
-              >
-                <Trash2 size={12} />
-              </button>
-            )}
-          </>
-        )}
-      </div>
-      <div>
-        <span><Clock3 size={13} /> {frameRate} fps</span>
-        <span><Gauge size={13} /> {formatTimecode(Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration))), frameRate)}</span>
-        <IconButton label={expanded ? t('Restaurar tamaño de línea de tiempo', 'Restore timeline size') : t('Expandir línea de tiempo', 'Expand timeline')} active={expanded} onClick={onToggleExpanded}><Maximize2 size={14} /></IconButton>
       </div>
     </div>
   </section>

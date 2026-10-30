@@ -3,6 +3,15 @@ import type { ExportPresetId, ExportSettings, RenderProgress, RenderResult } fro
 import { loadMediaSource } from './media-storage'
 import { getInterpolatedOpacity, getInterpolatedTransform } from './keyframe-interpolation'
 import { drawAnimatedTextClipToCanvas } from './text-presets'
+import { computeFitRect } from './media-fit'
+import { computeTransitionInState } from '../effects/transition-math'
+import {
+  applyChromaticAberration,
+  applyFilmGrain,
+  applyPixelate,
+  applyVignette,
+  getEffectsCSSFilter,
+} from '../effects/pixel-effects'
 import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4ArrayBufferTarget } from 'mp4-muxer'
 import { Muxer as WebmMuxer, ArrayBufferTarget as WebmArrayBufferTarget } from 'webm-muxer'
 
@@ -17,7 +26,7 @@ export const EXPORT_PRESETS: Record<ExportPresetId, {
 }> = {
   'web-1080p': {
     label: '1080p Full HD (MP4 / Web)',
-    description: '1920 × 1080 · 30 fps · 8 Mbps MP4',
+    description: '1920 × 1080 · 30 fps · 8 Mbps',
     width: 1920,
     height: 1080,
     frameRate: 30,
@@ -26,7 +35,7 @@ export const EXPORT_PRESETS: Record<ExportPresetId, {
   },
   'social-vertical': {
     label: '1080p Vertical (TikTok / Reels / Shorts)',
-    description: '1080 × 1920 · 30 fps · 8 Mbps MP4',
+    description: '1080 × 1920 · 30 fps · 8 Mbps',
     width: 1080,
     height: 1920,
     frameRate: 30,
@@ -35,7 +44,7 @@ export const EXPORT_PRESETS: Record<ExportPresetId, {
   },
   'uhd-4k': {
     label: '4K Ultra HD (Master)',
-    description: '3840 × 2160 · 30 fps · 25 Mbps MP4',
+    description: '3840 × 2160 · 30 fps · 25 Mbps',
     width: 3840,
     height: 2160,
     frameRate: 30,
@@ -44,7 +53,7 @@ export const EXPORT_PRESETS: Record<ExportPresetId, {
   },
   'fast-720p': {
     label: '720p HD Rápido (Borrador)',
-    description: '1280 × 720 · 30 fps · 4 Mbps MP4',
+    description: '1280 × 720 · 30 fps · 4 Mbps',
     width: 1280,
     height: 720,
     frameRate: 30,
@@ -53,7 +62,7 @@ export const EXPORT_PRESETS: Record<ExportPresetId, {
   },
   'audio-only': {
     label: 'Audio Master (Mixdown estéreo)',
-    description: 'WAV PCM 48 kHz 24/16-bit estéreo',
+    description: 'WAV · PCM 48 kHz · 24/16-bit · Estéreo',
     width: 1920,
     height: 1080,
     frameRate: 30,
@@ -324,37 +333,37 @@ async function renderWithWebCodecs({
 
   const muxer = isMp4
     ? new Mp4Muxer({
-        target: mp4Target!,
-        video: {
-          codec: 'avc',
-          width: settings.width,
-          height: settings.height,
-        },
-        audio: canEncodeAudio && audioBuffer
-          ? {
-              codec: 'aac',
-              numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
-              sampleRate: audioBuffer.sampleRate,
-            }
-          : undefined,
-        fastStart: 'in-memory',
-      })
+      target: mp4Target!,
+      video: {
+        codec: 'avc',
+        width: settings.width,
+        height: settings.height,
+      },
+      audio: canEncodeAudio && audioBuffer
+        ? {
+          codec: 'aac',
+          numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+          sampleRate: audioBuffer.sampleRate,
+        }
+        : undefined,
+      fastStart: 'in-memory',
+    })
     : new WebmMuxer({
-        target: webmTarget!,
-        video: {
-          codec: videoCodec.startsWith('vp09') ? 'V_VP9' : 'V_VP8',
-          width: settings.width,
-          height: settings.height,
-          frameRate: settings.frameRate,
-        },
-        audio: canEncodeAudio && audioBuffer
-          ? {
-              codec: 'A_OPUS',
-              numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
-              sampleRate: audioBuffer.sampleRate,
-            }
-          : undefined,
-      })
+      target: webmTarget!,
+      video: {
+        codec: videoCodec.startsWith('vp09') ? 'V_VP9' : 'V_VP8',
+        width: settings.width,
+        height: settings.height,
+        frameRate: settings.frameRate,
+      },
+      audio: canEncodeAudio && audioBuffer
+        ? {
+          codec: 'A_OPUS',
+          numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+          sampleRate: audioBuffer.sampleRate,
+        }
+        : undefined,
+    })
 
   const videoEncoder = new VideoEncoder({
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
@@ -444,13 +453,14 @@ async function renderWithWebCodecs({
       track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
     )
     const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
-    const textClips = activeClips.filter((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay')
 
     for (const [assetId, element] of visualAssets) {
       if (element instanceof HTMLVideoElement) {
         const activeClip = mediaClips.find((c) => resolveClipAssetId(c, assets) === assetId)
         if (activeClip) {
-          const expectedSourceTime = Math.max(0, time - activeClip.start)
+          const expectedSourceTime = activeClip.freezeTime !== undefined
+            ? activeClip.freezeTime
+            : Math.max(0, (time - activeClip.start) * (activeClip.speed ?? 1.0))
           if (Math.abs(element.currentTime - expectedSourceTime) > 0.04) {
             await new Promise<void>((r) => {
               const onDone = () => {
@@ -469,17 +479,20 @@ async function renderWithWebCodecs({
     ctx.fillStyle = '#000000'
     ctx.fillRect(0, 0, settings.width, settings.height)
 
-    for (const clip of [...mediaClips, ...textClips]) {
-      const aId = resolveClipAssetId(clip, assets)
-      drawClipToCanvas(
-        ctx,
-        clip,
-        aId ? visualAssets.get(aId) : undefined,
-        time,
-        settings.width,
-        settings.height,
-        sequenceSize?.width,
-      )
+    for (const track of [...activeVideoTracks].reverse()) {
+      const trackClips = track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration)
+      for (const clip of trackClips) {
+        const aId = resolveClipAssetId(clip, assets)
+        drawClipToCanvas(
+          ctx,
+          clip,
+          aId ? visualAssets.get(aId) : undefined,
+          time,
+          settings.width,
+          settings.height,
+          sequenceSize,
+        )
+      }
     }
 
     const timestampMicros = Math.round(time * 1_000_000)
@@ -740,7 +753,7 @@ export async function renderSequence({
       0,
       settings.width,
       settings.height,
-      sequenceSize?.width,
+      sequenceSize,
     )
   }
 
@@ -750,7 +763,7 @@ export async function renderSequence({
     const vid = aId ? visualAssets.get(aId) : undefined
     if (vid instanceof HTMLVideoElement) {
       try { vid.currentTime = 0 } catch { /* ignore */ }
-      void vid.play().catch(() => {})
+      void vid.play().catch(() => { })
     }
   }
 
@@ -767,7 +780,7 @@ export async function renderSequence({
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       audioCtx = new AudioCtx()
       if (audioCtx.state === 'suspended') {
-        void audioCtx.resume().catch(() => {})
+        void audioCtx.resume().catch(() => { })
       }
       const dest = audioCtx.createMediaStreamDestination()
       sourceNode = audioCtx.createBufferSource()
@@ -835,15 +848,21 @@ export async function renderSequence({
         track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
       )
       const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
-      const textClips = activeClips.filter((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay')
 
       // Synchronize video element playback/position for media clips
       for (const [assetId, element] of visualAssets) {
         if (element instanceof HTMLVideoElement) {
           const activeClip = mediaClips.find((c) => resolveClipAssetId(c, assets) === assetId)
           if (activeClip) {
-            const expectedSourceTime = Math.max(0, time - activeClip.start)
-            if (!element.paused) {
+            const expectedSourceTime = activeClip.freezeTime !== undefined
+              ? activeClip.freezeTime
+              : Math.max(0, (time - activeClip.start) * (activeClip.speed ?? 1.0))
+            if (activeClip.freezeTime !== undefined) {
+              if (!element.paused) element.pause()
+              if (Math.abs(element.currentTime - expectedSourceTime) > 0.04) {
+                try { element.currentTime = expectedSourceTime } catch { /* ignore */ }
+              }
+            } else if (!element.paused) {
               if (Math.abs(element.currentTime - expectedSourceTime) > 0.8) {
                 try { element.currentTime = expectedSourceTime } catch { /* ignore */ }
               }
@@ -873,17 +892,20 @@ export async function renderSequence({
         }
       }
 
-      for (const clip of [...mediaClips, ...textClips]) {
-        const aId = resolveClipAssetId(clip, assets)
-        drawClipToCanvas(
-          ctx,
-          clip,
-          aId ? visualAssets.get(aId) : undefined,
-          time,
-          settings.width,
-          settings.height,
-          sequenceSize?.width,
-        )
+      for (const track of [...activeVideoTracks].reverse()) {
+        const trackClips = track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration)
+        for (const clip of trackClips) {
+          const aId = resolveClipAssetId(clip, assets)
+          drawClipToCanvas(
+            ctx,
+            clip,
+            aId ? visualAssets.get(aId) : undefined,
+            time,
+            settings.width,
+            settings.height,
+            sequenceSize,
+          )
+        }
       }
 
       // Force canvas capture frame if API is available
@@ -953,23 +975,39 @@ export async function renderSequence({
       }
       if (hiddenContainer) hiddenContainer.remove()
       if (audioCtx && audioCtx.state !== 'closed') {
-        void audioCtx.close().catch(() => {})
+        void audioCtx.close().catch(() => { })
       }
     } catch { /* ignore */ }
   }
 }
 
-function drawClipToCanvas(
+export function drawClipToCanvas(
   ctx: CanvasRenderingContext2D,
   clip: Clip,
   element: HTMLImageElement | HTMLVideoElement | undefined,
   time: number,
   canvasWidth: number,
   canvasHeight: number,
-  sequenceWidth?: number,
+  sequenceSize?: { width: number; height: number } | number,
 ) {
+  const resolvedSeqW =
+    typeof sequenceSize === 'number'
+      ? sequenceSize
+      : sequenceSize?.width || canvasWidth
+  const resolvedSeqH =
+    typeof sequenceSize === 'object' && sequenceSize?.height
+      ? sequenceSize.height
+      : typeof sequenceSize === 'number'
+        ? Math.round(sequenceSize * (canvasHeight / canvasWidth))
+        : canvasHeight
+
   if (clip.text !== undefined || clip.thumbnail === 'text-overlay') {
-    drawAnimatedTextClipToCanvas(ctx, clip, time, canvasWidth, canvasHeight, sequenceWidth)
+    drawAnimatedTextClipToCanvas(ctx, clip, time, canvasWidth, canvasHeight, resolvedSeqW)
+    return
+  }
+
+  if (clip.kind === 'adjustment') {
+    applyEffectsToCanvas(ctx, canvasWidth, canvasHeight, clip.effects)
     return
   }
 
@@ -978,31 +1016,60 @@ function drawClipToCanvas(
   const opacity = getInterpolatedOpacity(clip, time) / 100
   ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
 
-  const transform = getInterpolatedTransform(clip, time, { width: canvasWidth, height: canvasHeight })
+  if (clip.blendMode && clip.blendMode !== 'normal') {
+    ctx.globalCompositeOperation = clip.blendMode === 'add' ? 'lighter' : clip.blendMode
+  }
+
+  const transform = getInterpolatedTransform(clip, time, { width: resolvedSeqW, height: resolvedSeqH })
   const scaleX = (transform.scaleX ?? 100) / 100
   const scaleY = (transform.scaleY ?? 100) / 100
 
-  ctx.translate(transform.x, transform.y)
+  // Rescale position from sequence coordinate space to canvas resolution
+  const kx = canvasWidth / resolvedSeqW
+  const ky = canvasHeight / resolvedSeqH
+  const exportX = transform.x * kx
+  const exportY = transform.y * ky
+
+  ctx.translate(exportX, exportY)
+
+  const trans = computeTransitionInState(clip.transitionIn, clip.start, time, resolvedSeqW, resolvedSeqH)
+  if (trans) {
+    ctx.globalAlpha *= trans.opacity
+    ctx.translate(trans.offsetX * kx, trans.offsetY * ky)
+    ctx.scale(trans.scale, trans.scale)
+    if (trans.rotation) ctx.rotate((trans.rotation * Math.PI) / 180)
+  }
+
   if (transform.rotation) ctx.rotate((transform.rotation * Math.PI) / 180)
-  ctx.scale(scaleX, scaleY)
+
+  const flipX = clip.flipH ? -1 : 1
+  const flipY = clip.flipV ? -1 : 1
+  ctx.scale(scaleX * flipX, scaleY * flipY)
+
+  const clipFilter = getEffectsCSSFilter(clip.effects)
+  if (clipFilter) {
+    try { ctx.filter = clipFilter } catch { /* ignore */ }
+  }
 
   let rendered = false
+  let srcW = 0
+  let srcH = 0
 
   if (element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0) {
+    srcW = element.naturalWidth
+    srcH = element.naturalHeight
+  } else if (element instanceof HTMLVideoElement && element.readyState >= 1 && element.videoWidth > 0) {
+    srcW = element.videoWidth
+    srcH = element.videoHeight
+  }
+
+  if (element && srcW > 0 && srcH > 0) {
     try {
-      ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
+      const fitRect = computeFitRect(srcW, srcH, canvasWidth, canvasHeight, clip.fit ?? 'fit')
+      ctx.drawImage(element, -fitRect.w / 2, -fitRect.h / 2, fitRect.w, fitRect.h)
       rendered = true
     } catch {
-      // Image draw failed
-    }
-  } else if (element instanceof HTMLVideoElement) {
-    try {
-      if (element.readyState >= 1) {
-        ctx.drawImage(element, -canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
-        rendered = true
-      }
-    } catch {
-      // Video frame draw failed
+      // Image/Video draw failed
     }
   }
 
@@ -1011,13 +1078,68 @@ function drawClipToCanvas(
     ctx.fillStyle = clip.color === 'olive' ? '#2f4236' : clip.color === 'sand' ? '#443c2c' : '#22384a'
     ctx.fillRect(-canvasWidth / 2, -canvasHeight / 2, canvasWidth, canvasHeight)
     ctx.fillStyle = '#ffffff'
-    ctx.font = '28px sans-serif'
+    const fontSize = Math.max(14, Math.round(28 * (canvasHeight / resolvedSeqH)))
+    ctx.font = `${fontSize}px sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(clip.title, 0, 0)
   }
 
+  try { ctx.filter = 'none' } catch { /* ignore */ }
   ctx.restore()
+}
+
+function applyEffectsToCanvas(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  effects?: Clip['effects'],
+): void {
+  if (!effects || effects.length === 0) return
+
+  const cssFilter = getEffectsCSSFilter(effects)
+  if (cssFilter) {
+    try {
+      const tempCanvas = document.createElement('canvas')
+      tempCanvas.width = width
+      tempCanvas.height = height
+      const tempCtx = tempCanvas.getContext('2d')
+      if (tempCtx) {
+        tempCtx.drawImage(ctx.canvas, 0, 0)
+        ctx.save()
+        ctx.filter = cssFilter
+        ctx.clearRect(0, 0, width, height)
+        ctx.drawImage(tempCanvas, 0, 0)
+        ctx.restore()
+      }
+    } catch {
+      // Filter fallback
+    }
+  }
+
+  for (const fx of effects) {
+    if (!fx.enabled) continue
+    const factor = (fx.intensity ?? 100) / 100
+
+    if (fx.effectId === 'fx-vignette') {
+      applyVignette(ctx, width, height, 0.75, 0.4, factor)
+    } else if (fx.effectId === 'fx-pixelate') {
+      const size = Math.max(2, Math.round((fx.params.size ?? 16) * factor))
+      applyPixelate(ctx, width, height, size)
+    } else if (fx.effectId === 'fx-film-grain' || fx.effectId === 'fx-chromatic-aberration') {
+      try {
+        const imgData = ctx.getImageData(0, 0, width, height)
+        if (fx.effectId === 'fx-film-grain') {
+          applyFilmGrain(imgData, (fx.params.amount ?? 35) * factor, true)
+        } else if (fx.effectId === 'fx-chromatic-aberration') {
+          applyChromaticAberration(imgData, (fx.params.offset ?? 6) * factor)
+        }
+        ctx.putImageData(imgData, 0, 0)
+      } catch {
+        // Ignored in tainted / headless canvas
+      }
+    }
+  }
 }
 
 /**

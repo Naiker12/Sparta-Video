@@ -1,21 +1,29 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { AudioLines, ChevronDown, ChevronRight, FolderOpen, Image as ImageIcon, Layers2, LayoutGrid, List, LoaderCircle, MoreHorizontal, Pencil, Plus, Search, SlidersHorizontal, Trash2, Upload, Video, X } from 'lucide-react'
+import { Check, ChevronDown, Layers, Layers2, LayoutGrid, List, LoaderCircle, MoreHorizontal, Palette, Pencil, Plus, Search, Shuffle, SlidersHorizontal, Sparkles, Trash2, Type, Upload, Video, X } from 'lucide-react'
 import { ActionMenu } from './ActionMenu'
 import { IconNleCaptions, IconNleVoiceWave } from './StudioIcons'
 import type { MediaItem } from '../model'
 import { t } from '../services/locale'
+import { cn } from '../../../lib/utils'
+import { ToggleGroup, ToggleGroupItem } from '../../../components/ui/toggle-group'
 import { formatMediaDuration, loadMediaPreview, parseDurationFromDetail, pruneStoredMedia } from '../services/media-storage'
 import type { SubtitleLanguage } from '../services/subtitle-generator'
 import { TEXT_STYLE_PRESETS, type TextPresetCategory } from '../services/text-presets'
+import { EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
+import { parseCubeLUT } from '../effects/lut-parser'
+import { useEditorStore } from '../editor-store'
+import { toast } from '../../../components/ui/toast'
+
+export type LibraryTab = 'media' | 'text' | 'filters' | 'effects' | 'transitions' | 'templates'
 
 const PRESET_COMPACT_PREVIEW: Record<string, string> = {
   'hormozi-karaoke': 'VOZ EN VIVO',
   'capcut-pop-pill': 'POP DINÁMICO',
-  'cine-sub-minimal': 'CINE 4K PRO',
+  'cine-sub-minimal': 'CINE 4K',
   'editorial-hook': 'CAPÍTULO 01',
   'kinetic-neon-glow': 'CYBER NEÓN',
-  'lower-third-studio': 'DIRECCIÓN PRO',
+  'lower-third-studio': 'DIRECCIÓN',
   'typewriter-docu': 'DOCU ARCHIVO',
   'bounce-viral': 'REELS VIRAL',
 }
@@ -41,9 +49,55 @@ type Props = {
   onOpenProject: () => void
 }
 
-export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtractingSubtitles = false, subtitleProgressText, importStatus, onSelect, onAdd, onAddTextClip, onAutoSubtitles, onApplySubtitlePreset, onClearSubtitles, onRename, onDelete, onRelink, onImport, onImportFiles, onOpenProject }: Props) {
-  const [dockTab, setDockTab] = useState<'media' | 'text'>('media')
+export function MediaLibraryPanel({ assets, selectedMedia, projectName: _projectName, isExtractingSubtitles = false, subtitleProgressText, importStatus, onSelect, onAdd, onAddTextClip, onAutoSubtitles, onApplySubtitlePreset, onClearSubtitles, onRename, onDelete, onRelink, onImport, onImportFiles, onOpenProject: _onOpenProject }: Props) {
+  const [dockTab, setDockTab] = useState<LibraryTab>('media')
   const [textCategory, setTextCategory] = useState<'all' | TextPresetCategory>('all')
+
+  const applyEffectToSelectedClip = (effectId: string) => {
+    const state = useEditorStore.getState()
+    const selectedClipId = state.selectedClipId
+    const def = getEffectDef(effectId)
+    if (!def) return
+
+    if (!selectedClipId) {
+      toast.info(t('Selecciona un clip en la línea de tiempo para aplicar este efecto.', 'Select a clip on the timeline to apply this effect.'))
+      return
+    }
+
+    const clip = state.tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId)
+    if (!clip) return
+
+    const inst = createEffectInstance(effectId)
+    if (!inst) return
+
+    const existing = clip.effects ?? []
+    const nextEffects = def.kind === 'filter'
+      ? [...existing.filter((e) => getEffectDef(e.effectId)?.kind !== 'filter'), inst]
+      : [...existing, inst]
+
+    state.updateClip(clip.id, { effects: nextEffects })
+    toast.success(t(`"${def.name}" aplicado a "${clip.title}"`, `"${def.name}" applied to "${clip.title}"`))
+  }
+
+  const applyTransitionToSelectedClip = (transId: string) => {
+    const state = useEditorStore.getState()
+    const selectedClipId = state.selectedClipId
+    const def = getEffectDef(transId)
+    if (!def) return
+
+    if (!selectedClipId) {
+      toast.info(t('Selecciona un clip para asignarle una transición de entrada.', 'Select a clip to assign an in-transition.'))
+      return
+    }
+
+    state.updateClip(selectedClipId, {
+      transitionIn: {
+        effectId: transId,
+        duration: 0.6,
+      },
+    })
+    toast.success(t(`Transición "${def.name}" asignada al clip`, `Transition "${def.name}" assigned to clip`))
+  }
   const [captionLanguage, setCaptionLanguage] = useState<SubtitleLanguage>('spanish')
   const [captionsCollapsed, setCaptionsCollapsed] = useState<boolean>(() => {
     try {
@@ -122,42 +176,112 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
       onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingFiles(false) }}
       onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); setDraggingFiles(false); onImportFiles(event.dataTransfer.files) } }}
     >
-      <div className="panel-heading">
-        <div>
-          <span className="eyebrow">{t('PROYECTO', 'PROJECT')}</span>
-          <h2>
-            {t('Biblioteca de medios', 'Media library')}
-          </h2>
+      <div className="sr-only">
+        <span className="eyebrow">{t('PROYECTO', 'PROJECT')}</span>
+        <h2>
+          {t('Biblioteca de medios', 'Media library')}
+        </h2>
+        <div className="flex items-center gap-1">
+          <ActionMenu
+            label={t('Filtrar medios', 'Filter media')}
+            triggerClass="panel-icon-btn text-slate-400 hover:text-white p-1"
+            items={[
+              { label: t('Todos los medios', 'All media'), checked: kind === 'all', onSelect: () => setKind('all') },
+              { label: t('Vídeos', 'Videos'), checked: kind === 'video', onSelect: () => setKind('video') },
+              { label: t('Audio', 'Audio'), checked: kind === 'audio', onSelect: () => setKind('audio') },
+              { label: t('Imágenes', 'Images'), checked: kind === 'image', onSelect: () => setKind('image') },
+            ]}
+          >
+            <SlidersHorizontal size={15} />
+          </ActionMenu>
+          <ActionMenu label={t('Opciones de biblioteca', 'Library options')} items={libraryMenuItems}>
+            <MoreHorizontal size={17} />
+          </ActionMenu>
         </div>
-        <ActionMenu label={t('Opciones de biblioteca', 'Library options')} items={libraryMenuItems}>
-          <MoreHorizontal size={17} />
-        </ActionMenu>
       </div>
 
-      <div className="library-dock-switcher" role="tablist" aria-label={t('Modo de biblioteca', 'Library mode')}>
+      <div className="grid grid-cols-6 gap-1 p-1.5 bg-card border-b border-border select-none" role="tablist" aria-label={t('Modo de biblioteca', 'Library mode')}>
         <button
           type="button"
           role="tab"
           aria-selected={dockTab === 'media'}
-          className={`dock-switch-btn ${dockTab === 'media' ? 'active' : ''}`}
+          className={cn(
+            'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer select-none min-w-0 overflow-hidden',
+            dockTab === 'media' ? 'bg-primary/18 text-primary font-semibold shadow-xs' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+          )}
           onClick={() => setDockTab('media')}
         >
-          <Video size={13} />
-          <span>{t('Medios', 'Media')}</span>
+          <Video size={16} strokeWidth={1.5} className={dockTab === 'media' ? 'text-primary' : 'text-muted-foreground'} />
+          <span className="truncate max-w-full text-center whitespace-nowrap block text-[11px]">{t('Medios', 'Media')}</span>
         </button>
         <button
           type="button"
           role="tab"
           aria-selected={dockTab === 'text'}
-          className={`dock-switch-btn ${dockTab === 'text' ? 'active' : ''}`}
+          className={cn(
+            'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer select-none min-w-0 overflow-hidden',
+            dockTab === 'text' ? 'bg-primary/18 text-primary font-semibold shadow-xs' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+          )}
           onClick={() => setDockTab('text')}
         >
-          <IconNleCaptions size={13} />
-          <span>{t('Texto y Subtítulos', 'Text & Captions')}</span>
+          <Type size={16} strokeWidth={1.5} className={dockTab === 'text' ? 'text-primary' : 'text-muted-foreground'} />
+          <span className="truncate max-w-full text-center whitespace-nowrap block text-[11px]">{t('Texto', 'Text')}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={dockTab === 'transitions'}
+          className={cn(
+            'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer select-none min-w-0 overflow-hidden',
+            dockTab === 'transitions' ? 'bg-primary/18 text-primary font-semibold shadow-xs' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+          )}
+          onClick={() => setDockTab('transitions')}
+        >
+          <Shuffle size={16} strokeWidth={1.5} className={dockTab === 'transitions' ? 'text-primary' : 'text-muted-foreground'} />
+          <span className="truncate max-w-full text-center whitespace-nowrap block text-[11px]">{t('Transiciones', 'Transitions')}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={dockTab === 'effects'}
+          className={cn(
+            'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer select-none min-w-0 overflow-hidden',
+            dockTab === 'effects' ? 'bg-primary/18 text-primary font-semibold shadow-xs' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+          )}
+          onClick={() => setDockTab('effects')}
+        >
+          <Sparkles size={16} strokeWidth={1.5} className={dockTab === 'effects' ? 'text-primary' : 'text-muted-foreground'} />
+          <span className="truncate max-w-full text-center whitespace-nowrap block text-[11px]">{t('Efectos', 'Effects')}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={dockTab === 'filters'}
+          className={cn(
+            'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer select-none min-w-0 overflow-hidden',
+            dockTab === 'filters' ? 'bg-primary/18 text-primary font-semibold shadow-xs' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+          )}
+          onClick={() => setDockTab('filters')}
+        >
+          <Palette size={16} strokeWidth={1.5} className={dockTab === 'filters' ? 'text-primary' : 'text-muted-foreground'} />
+          <span className="truncate max-w-full text-center whitespace-nowrap block text-[11px]">{t('Filtros', 'Filters')}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={dockTab === 'templates'}
+          className={cn(
+            'flex flex-col items-center justify-center gap-1 py-1.5 px-0.5 rounded-[6px] text-[11px] font-medium transition-colors cursor-pointer select-none min-w-0 overflow-hidden',
+            dockTab === 'templates' ? 'bg-primary/18 text-primary font-semibold shadow-xs' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+          )}
+          onClick={() => setDockTab('templates')}
+        >
+          <Layers size={16} strokeWidth={1.5} className={dockTab === 'templates' ? 'text-primary' : 'text-muted-foreground'} />
+          <span className="truncate max-w-full text-center whitespace-nowrap block text-[11px]">{t('Plantillas', 'Templates')}</span>
         </button>
       </div>
 
-      {dockTab === 'text' ? (
+      {dockTab === 'text' && (
         <div className="text-studio-dock">
           {(() => {
             const activeSourceMedia =
@@ -393,22 +517,183 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
             <span>{t('Render en vivo + Export', 'Live + Export render')}</span>
           </div>
         </div>
-      ) : (
-        <>
+      )}
+
+      {dockTab === 'filters' && (
+        <div className="text-studio-dock">
+          <div className="text-studio-banner" style={{ padding: '10px 12px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+            <strong style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Palette size={13} /> {t('Filtros de color cinematográficos', 'Cinematic color filters')}
+            </strong>
+            <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
+              {t('Haz clic en un filtro para aplicarlo al clip seleccionado.', 'Click a filter to apply it to the selected clip.')}
+            </p>
+          </div>
+          <label className="keyframe-button" style={{ width: '100%', margin: '8px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer' }}>
+            <Upload size={13} /> {t('Importar LUT (.cube)', 'Import LUT (.cube)')}
+            <input
+              type="file"
+              accept=".cube"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                try {
+                  const text = await file.text()
+                  const lut = parseCubeLUT(text, file.name.replace(/\.cube$/i, ''))
+                  const def = registerCustomLutFilter(lut.title, lut.size)
+                  applyEffectToSelectedClip(def.id)
+                  toast.success(t(`LUT importada y aplicada: ${lut.title}`, `LUT imported and applied: ${lut.title}`))
+                } catch {
+                  toast.error(t('Error al importar archivo LUT .cube', 'Error importing .cube LUT file'))
+                }
+                e.target.value = ''
+              }}
+            />
+          </label>
+          <div className="text-presets-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', padding: '8px 0' }}>
+            {EFFECT_CATALOG.filter((e) => e.kind === 'filter').map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                className="text-preset-card"
+                onClick={() => applyEffectToSelectedClip(filter.id)}
+                style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', textAlign: 'left', minHeight: '80px', justifyContent: 'space-between' }}
+              >
+                <div>
+                  <span className="text-preset-badge" style={{ fontSize: '9px', marginBottom: '4px' }}>{filter.category}</span>
+                  <strong style={{ fontSize: '12px', display: 'block', color: 'var(--text)' }}>{filter.name}</strong>
+                  <span style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, display: 'block' }}>{filter.description}</span>
+                </div>
+                <span className="pill-action-tag" style={{ alignSelf: 'flex-end', fontSize: '9px' }}>{t('Aplicar', 'Apply')}</span>
+              </button>
+            ))}
+          </div>
+          <div className="media-foot">
+            <span><Palette size={13} /> {EFFECT_CATALOG.filter((e) => e.kind === 'filter').length} {t('filtros', 'filters')}</span>
+            <span>{t('Tiempo real WebGL2', 'Real-time WebGL2')}</span>
+          </div>
+        </div>
+      )}
+
+      {dockTab === 'effects' && (
+        <div className="text-studio-dock">
+          <div className="text-studio-banner" style={{ padding: '10px 12px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+            <strong style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Sparkles size={13} /> {t('Efectos visuales y de shader', 'Visual & shader effects')}
+            </strong>
+            <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
+              {t('Añade desenfoque, grano, resplandor o viñeta al clip.', 'Add blur, grain, glow, or vignette to the clip.')}
+            </p>
+          </div>
           <button
             type="button"
-            className="project-card"
-            onClick={onOpenProject}
-            aria-label={`${t('Preferencias del proyecto', 'Project preferences')} ${projectName}`}
-            title={t('Abrir preferencias del proyecto', 'Open project preferences')}
+            className="keyframe-button primary-pill"
+            style={{ width: '100%', margin: '8px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+            onClick={() => {
+              useEditorStore.getState().addAdjustmentLayer()
+              toast.success(t('Capa de ajuste FX añadida a la línea de tiempo', 'FX Adjustment layer added to timeline'))
+            }}
           >
-            <span className="project-icon"><FolderOpen size={16} /></span>
-            <span className="project-card-copy">
-              <strong>{projectName}</strong>
-              <span>{assets.length} {t('medios · Guardado local', 'items · Saved locally')}</span>
-            </span>
+            <Sparkles size={13} /> {t('＋ Añadir Capa de Ajuste (FX)', '＋ Add Adjustment Layer (FX)')}
           </button>
+          <div className="text-presets-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', padding: '8px 0' }}>
+            {EFFECT_CATALOG.filter((e) => e.kind === 'effect').map((effect) => (
+              <button
+                key={effect.id}
+                type="button"
+                className="text-preset-card"
+                onClick={() => applyEffectToSelectedClip(effect.id)}
+                style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', textAlign: 'left', minHeight: '80px', justifyContent: 'space-between' }}
+              >
+                <div>
+                  <span className="text-preset-badge" style={{ fontSize: '9px', marginBottom: '4px' }}>{effect.category}</span>
+                  <strong style={{ fontSize: '12px', display: 'block', color: 'var(--text)' }}>{effect.name}</strong>
+                  <span style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, display: 'block' }}>{effect.description}</span>
+                </div>
+                <span className="pill-action-tag" style={{ alignSelf: 'flex-end', fontSize: '9px' }}>{t('Añadir', 'Add')}</span>
+              </button>
+            ))}
+          </div>
+          <div className="media-foot">
+            <span><Sparkles size={13} /> {EFFECT_CATALOG.filter((e) => e.kind === 'effect').length} {t('efectos', 'effects')}</span>
+            <span>{t('Shader FBO Ping-pong', 'FBO Ping-pong Shader')}</span>
+          </div>
+        </div>
+      )}
 
+      {dockTab === 'transitions' && (
+        <div className="text-studio-dock">
+          <div className="text-studio-banner" style={{ padding: '10px 12px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+            <strong style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Shuffle size={13} /> {t('Transiciones de escena', 'Scene transitions')}
+            </strong>
+            <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
+              {t('Selecciona un clip y elige cómo entra en escena.', 'Select a clip and choose its in-transition.')}
+            </p>
+          </div>
+          <div className="text-presets-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', padding: '8px 0' }}>
+            {EFFECT_CATALOG.filter((e) => e.kind === 'transition').map((trans) => (
+              <button
+                key={trans.id}
+                type="button"
+                className="text-preset-card"
+                onClick={() => applyTransitionToSelectedClip(trans.id)}
+                style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', textAlign: 'left', minHeight: '80px', justifyContent: 'space-between' }}
+              >
+                <div>
+                  <span className="text-preset-badge" style={{ fontSize: '9px', marginBottom: '4px' }}>{trans.category}</span>
+                  <strong style={{ fontSize: '12px', display: 'block', color: 'var(--text)' }}>{trans.name}</strong>
+                  <span style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, display: 'block' }}>{trans.description}</span>
+                </div>
+                <span className="pill-action-tag" style={{ alignSelf: 'flex-end', fontSize: '9px' }}>{t('Asignar', 'Assign')}</span>
+              </button>
+            ))}
+          </div>
+          <div className="media-foot">
+            <span><Shuffle size={13} /> {EFFECT_CATALOG.filter((e) => e.kind === 'transition').length} {t('transiciones', 'transitions')}</span>
+            <span>{t('Disolución y cortes', 'Dissolves & cuts')}</span>
+          </div>
+        </div>
+      )}
+
+      {dockTab === 'templates' && (
+        <div className="text-studio-dock">
+          <div className="text-studio-banner" style={{ padding: '10px 12px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+            <strong style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Layers size={13} /> {t('Plantillas de estilo integradas', 'Integrated style templates')}
+            </strong>
+            <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
+              {t('Inserta títulos, subtítulos virales y tercios inferiores profesionales.', 'Insert titles, viral captions, and professional lower thirds.')}
+            </p>
+          </div>
+          <div className="text-presets-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', padding: '8px 0' }}>
+            {TEXT_STYLE_PRESETS.slice(0, 6).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="text-preset-card"
+                onClick={() => onAddTextClip?.(preset.id)}
+                style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', textAlign: 'left', minHeight: '80px', justifyContent: 'space-between' }}
+              >
+                <div>
+                  <span className="text-preset-badge" style={{ fontSize: '9px', marginBottom: '4px' }}>{preset.badge}</span>
+                  <strong style={{ fontSize: '12px', display: 'block', color: 'var(--text)' }}>{t(preset.name, preset.nameEn)}</strong>
+                  <span style={{ fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.3, display: 'block' }}>{preset.animation.in} · {preset.defaultDuration}s</span>
+                </div>
+                <span className="pill-action-tag" style={{ alignSelf: 'flex-end', fontSize: '9px' }}>{t('Insertar', 'Insert')}</span>
+              </button>
+            ))}
+          </div>
+          <div className="media-foot">
+            <span><Layers size={13} /> {TEXT_STYLE_PRESETS.length} {t('plantillas', 'templates')}</span>
+            <span>{t('Listo para usar', 'Ready to use')}</span>
+          </div>
+        </div>
+      )}
+
+      {dockTab === 'media' && (
+        <>
           {importStatus?.isImporting && (
             <div className="media-importing-card" role="status" aria-live="polite">
               <div className="media-importing-head">
@@ -436,49 +721,60 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
             </div>
           )}
 
-          <div className="search-box">
-            <Search size={14} />
-            <input
-              placeholder={t('Buscar medios', 'Search media')}
-              aria-label={t('Buscar medios', 'Search media')}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <kbd>Ctrl K</kbd>
-            {search && <button className="clear-search" onClick={() => setSearch('')} aria-label={t('Limpiar búsqueda', 'Clear search')}>×</button>}
+          <div className="px-2.5 py-2">
+            <div className="relative flex items-center w-full h-8 px-2.5 rounded-[6px] bg-input border-0 text-xs focus-within:ring-2 focus-within:ring-primary hover:bg-input-hover transition-colors">
+              <Search size={14} className="text-muted-foreground mr-2 shrink-0" />
+              <input
+                placeholder={t('Buscar medios', 'Search media')}
+                aria-label={t('Buscar medios', 'Search media')}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="flex-1 min-w-0 bg-transparent text-foreground placeholder:text-muted-foreground outline-none text-xs"
+              />
+              <kbd className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded font-mono shrink-0 whitespace-nowrap ml-1.5">
+                Ctrl K
+              </kbd>
+              {search && <button className="clear-search ml-1 text-muted-foreground hover:text-foreground cursor-pointer" onClick={() => setSearch('')} aria-label={t('Limpiar búsqueda', 'Clear search')}>×</button>}
+            </div>
           </div>
 
-          <div className="library-filters" role="group" aria-label={t('Filtrar medios por tipo', 'Filter media by type')}>
+          <ToggleGroup
+            value={kind}
+            onValueChange={(val) => setKind((val || 'all') as typeof kind)}
+            size="sm"
+            className="flex items-center gap-1.5 px-2.5 pb-2 bg-transparent"
+            aria-label={t('Filtrar medios por tipo', 'Filter media by type')}
+          >
             {(['all', 'video', 'audio', 'image'] as const).map((value) => (
-              <button
-                type="button"
-                className={kind === value ? 'filter-chip active' : 'filter-chip'}
-                aria-pressed={kind === value}
+              <ToggleGroupItem
                 key={value}
-                onClick={() => setKind(value)}
+                value={value}
+                aria-pressed={kind === value}
+                className={cn(
+                  'h-7 px-3 text-xs rounded-full font-medium transition-colors select-none cursor-pointer border-0',
+                  kind === value
+                    ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
+                    : 'bg-input text-muted-foreground hover:text-foreground hover:bg-input-hover'
+                )}
               >
-                {value === 'all' ? t('Todo', 'All') : value === 'video' ? t('Vídeo', 'Video') : value === 'audio' ? t('Audio', 'Audio') : t('Imagen', 'Image')}
-                {value === kind && <span>{visible.length}</span>}
-              </button>
+                {value === 'all' ? t('Todo', 'All') : value === 'video' ? t('Video', 'Video') : value === 'audio' ? t('Audio', 'Audio') : t('Imagen', 'Image')}
+              </ToggleGroupItem>
             ))}
-            <ActionMenu label={t('Filtrar medios', 'Filter media')} items={libraryMenuItems}>
-              <SlidersHorizontal size={14} />
-            </ActionMenu>
-          </div>
+          </ToggleGroup>
 
-          <div className={`media-grid ${listView ? 'media-list' : ''} ${!visible.length ? 'media-grid-empty' : ''}`}>
+          <div className={`media-grid ${listView ? 'media-list' : ''} ${!visible.length ? 'media-grid-empty' : ''} px-2.5`}>
             {visible.map((item) => {
-              const details = item.detail.split('·').map((part) => part.trim())
               const knownTime =
                 (item.durationSeconds ? formatMediaDuration(item.durationSeconds) : null) ??
                 item.detail.match(/(\d{1,2}:\d{2}:\d{2}|\d{2}:\d{2})/)?.[1]
-              const status = item.status ?? 'unknown'
-              const statusLabel = status === 'catalog-only' ? t('Solo catálogo', 'Catalog only') : status === 'ready' ? t('Disponible', 'Ready') : status === 'processing' ? t('Procesando', 'Processing') : status === 'missing' ? t('Sin archivo', 'Missing file') : status === 'error' ? t('Error', 'Error') : t('Sin estado', 'Unknown status')
-              const errorDetail = details.slice(1).join(' · ') || t('No hay más información del error.', 'No further error details are available.')
+              const status = item.status ?? 'ready'
+              const isSelected = selectedMedia === item.id
+              const subLabel = item.type === 'video' ? t('Video', 'Video') : item.type === 'audio' ? t('Audio', 'Audio') : t('Imagen', 'Image')
+
               return (
                 <div className={`media-entry status-${status}`} key={item.id}>
                   <button
-                    className={`media-card ${selectedMedia === item.id ? 'media-selected' : ''}`}
+                    className={`media-card ${isSelected ? 'media-selected' : ''}`}
                     draggable
                     onPointerDown={() => onSelect(item)}
                     onDragStart={(event) => {
@@ -494,15 +790,24 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                   >
                     <div className={`media-thumb ${item.thumb} ${imagePreviews[item.id] ? 'has-preview' : ''} ${status === 'processing' ? 'is-processing' : ''}`}>
                       {imagePreviews[item.id] && <img className="media-preview-image" src={imagePreviews[item.id]} alt="" draggable={false} />}
+                      {item.type === 'audio' && !imagePreviews[item.id] && (
+                        <div className="audio-card-wave-preview">
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <span key={i} style={{ height: `${20 + Math.abs(Math.sin(i * 0.8)) * 60}%` }} />
+                          ))}
+                        </div>
+                      )}
+                      {isSelected && (
+                        <span className="media-select-check" aria-hidden="true">
+                          <Check size={10} strokeWidth={3} />
+                        </span>
+                      )}
                       {status === 'processing' && (
                         <div className="media-processing-overlay" aria-live="polite">
                           <LoaderCircle size={18} className="spin text-cyan-400" />
                           <span className="media-processing-text">{t('Procesando…', 'Processing…')}</span>
                         </div>
                       )}
-                      <span className="thumb-kind">
-                        {item.type === 'audio' ? <AudioLines size={13} /> : item.type === 'image' ? <ImageIcon size={13} /> : <Video size={13} />}
-                      </span>
                       <span className="duration" aria-label={knownTime ?? t('Duración no disponible', 'Duration unavailable')}>{knownTime ?? '—'}</span>
                       <span
                         className="media-add"
@@ -525,40 +830,26 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
                       </span>
                     </div>
                     <div className="media-title" title={item.title}>{item.title}</div>
-                    <div className="media-detail">{details[0]}</div>
+                    <div className="media-detail">{subLabel}</div>
                   </button>
                   <div className="media-entry-footer">
-                    {status !== 'ready' && <div className={`media-status-badge status-badge-${status}`} aria-label={`${t('Estado', 'Status')}: ${statusLabel}`} title={getStatusDescription(item.status)}>
-                      {status === 'processing' ? <LoaderCircle size={12} className="spin" /> : <span />}{statusLabel}
-                    </div>}
                     <div className="media-entry-actions">
-                      <button type="button" className="media-entry-action" aria-label={t('Cambiar nombre', 'Rename')} title={t('Cambiar nombre', 'Rename')} onClick={() => { setRenameTarget(item); setRenameDraft(item.title) }}><Pencil size={13} /></button>
-                      <button type="button" className="media-entry-action destructive" aria-label={t('Quitar del proyecto', 'Remove from project')} title={t('Quitar del proyecto', 'Remove from project')} onClick={() => setDeleteTarget(item)}><Trash2 size={13} /></button>
+                      <button type="button" className="media-entry-action" aria-label={t('Cambiar nombre', 'Rename')} title={t('Cambiar nombre', 'Rename')} onClick={(e) => { e.stopPropagation(); setRenameTarget(item); setRenameDraft(item.title) }}><Pencil size={12} /></button>
+                      <button type="button" className="media-entry-action destructive" aria-label={t('Quitar del proyecto', 'Remove from project')} title={t('Quitar del proyecto', 'Remove from project')} onClick={(e) => { e.stopPropagation(); setDeleteTarget(item) }}><Trash2 size={12} /></button>
                     </div>
                   </div>
-                  {(status === 'catalog-only' || status === 'missing') && (
-                    <button
-                      type="button"
-                      className="media-relink-action"
-                      title={t('Selecciona el archivo original desde tu equipo para relocalizarlo', 'Select the original file from your computer to relink it')}
-                      onClick={() => { relinkTargetId.current = item.id; relinkInputRef.current?.click() }}
-                    >
-                      <Upload size={11} />{status === 'missing' ? t('Relocalizar archivo', 'Relink file') : t('Vincular archivo', 'Link file')}
-                    </button>
-                  )}
-                  {status === 'error' && <details className="media-error-detail"><summary>{t('Ver detalle', 'View details')}</summary><p>{item.detail || errorDetail}</p></details>}
                 </div>
               )
             })}
             {!visible.length && (
               <div className="library-empty-card">
                 <div className="library-empty-icon" aria-hidden="true">
-                  <Upload size={18} />
+                  <Upload size={22} className="text-muted-foreground/50" />
                 </div>
                 <div className="library-empty">
                   {assets.length
                     ? t('No hay medios que coincidan con la búsqueda o el filtro.', 'No media matches the search or filter.')
-                    : t('La biblioteca está vacía. Importa videos, audio o imágenes para comenzar.', 'The library is empty. Import videos, audio, or images to get started.')}
+                    : t('Arrastra archivos aquí', 'Drag files here')}
                 </div>
                 {!assets.length && (
                   <span className="library-empty-sub" aria-hidden="true">
@@ -572,18 +863,21 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
           {draggingFiles && <div className="import-drop-overlay"><Upload size={22} /><strong>{t('Suelta para importar', 'Drop to import')}</strong><span>{t('Se añadirá una ficha de catálogo', 'A catalog entry will be added')}</span></div>}
           <input ref={relinkInputRef} className="visually-hidden" style={{ display: 'none' }} type="file" accept="video/*,audio/*,image/*" onChange={(event) => { const file = event.target.files?.[0]; const id = relinkTargetId.current; if (file && id) onRelink(id, file); relinkTargetId.current = null; event.target.value = '' }} />
 
-          <button className="import-box" onClick={onImport}>
-            <div className="import-icon"><Upload size={15} /></div>
-            <div>
-              <strong>{t('Importar medios', 'Import media')}</strong>
-              <span>{t('Explorar archivos locales', 'Browse local files')}</span>
-            </div>
-            <ChevronRight size={14} />
+          <button
+            type="button"
+            className="w-[calc(100%-20px)] mx-auto my-2.5 h-9 rounded-[8px] bg-primary text-primary-foreground font-semibold text-xs hover:brightness-110 flex items-center justify-center gap-2 cursor-pointer transition-all shadow-xs border-0"
+            onClick={onImport}
+          >
+            <Upload size={14} strokeWidth={2} />
+            <span>{t('Importar medios', 'Import media')}</span>
           </button>
 
-          <div className="media-foot">
-            <span><Layers2 size={13} /> {assets.length} {t('elementos', 'items')}</span>
-            <span>{assets.some((a) => a.status === 'ready') ? `${assets.filter((a) => a.status === 'ready').length} ${t('disponibles', 'ready')}` : t('Solo catálogo', 'Catalog only')}</span>
+          <div className="sr-only" aria-live="polite">
+            <span className="flex items-center gap-1.5">
+              <Layers2 size={13} />
+              <span>{assets.length} {assets.length === 1 ? t('elemento', 'item') : t('elementos', 'items')}</span>
+            </span>
+            <span>{assets.some((a) => a.status === 'ready') ? `${assets.filter((a) => a.status === 'ready').length} ${assets.filter((a) => a.status === 'ready').length === 1 ? t('disponible', 'ready') : t('disponibles', 'ready')}` : t('Solo catálogo', 'Catalog only')}</span>
           </div>
         </>
       )}
@@ -611,13 +905,4 @@ export function MediaLibraryPanel({ assets, selectedMedia, projectName, isExtrac
       </Dialog.Root>
     </aside>
   )
-}
-
-function getStatusDescription(status: MediaItem['status']) {
-  if (!status) return t('El modelo todavía no registra el estado de este medio.', 'The media status has not been recorded yet.')
-  if (status === 'catalog-only') return t('Solo se guardaron metadatos; el archivo fuente no está vinculado.', 'Only metadata was saved; the source file is not linked.')
-  if (status === 'ready') return t('El archivo original se guardó localmente y está listo para la vista previa.', 'The original file is saved locally and ready for preview.')
-  if (status === 'processing') return t('El medio se está procesando.', 'The media is processing.')
-  if (status === 'missing') return t('No se encontró una referencia válida al archivo fuente.', 'No valid source file reference was found.')
-  return t('El medio tiene un error. La importación actual no conserva un diagnóstico de decodificación.', 'This media has an error. The current import does not retain decoder diagnostics.')
 }

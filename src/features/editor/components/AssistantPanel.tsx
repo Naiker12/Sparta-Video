@@ -197,17 +197,41 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
     </div>
     <div className="assistant-mode-tabs" role="tablist" aria-label={t('Modo del asistente', 'Assistant mode')}>
       <div className="assistant-mode-tabs-inner has-audio-tab">
-        <button type="button" role="tab" aria-selected={mode === 'create'} className={mode === 'create' ? 'active' : ''} onClick={() => setMode('create')}>
-          <IconNleScript size={12} />
-          {t('Crear video', 'Create video')}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'create'}
+          aria-label={t('Crear video', 'Create video')}
+          title={t('Crear video', 'Create video')}
+          className={mode === 'create' ? 'active' : ''}
+          onClick={() => setMode('create')}
+        >
+          <IconNleScript size={12} className="shrink-0" />
+          <span className="truncate">{t('Crear', 'Create')}</span>
         </button>
-        <button type="button" role="tab" aria-selected={mode === 'edit'} className={mode === 'edit' ? 'active' : ''} onClick={() => setMode('edit')}>
-          <IconNleMontage size={12} />
-          {t('Editar proyecto', 'Edit project')}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'edit'}
+          aria-label={t('Editar proyecto', 'Edit project')}
+          title={t('Editar proyecto', 'Edit project')}
+          className={mode === 'edit' ? 'active' : ''}
+          onClick={() => setMode('edit')}
+        >
+          <IconNleMontage size={12} className="shrink-0" />
+          <span className="truncate">{t('Editar', 'Edit')}</span>
         </button>
-        <button type="button" role="tab" aria-label={t('Generador de audio', 'Audio generator')} aria-selected={mode === 'audio'} className={mode === 'audio' ? 'active' : ''} onClick={() => setMode('audio')}>
-          <IconNleVoiceWave size={12} />
-          {t('Audio', 'Audio')}
+        <button
+          type="button"
+          role="tab"
+          aria-label={t('Generador de audio', 'Audio generator')}
+          title={t('Generador de audio', 'Audio generator')}
+          aria-selected={mode === 'audio'}
+          className={mode === 'audio' ? 'active' : ''}
+          onClick={() => setMode('audio')}
+        >
+          <IconNleVoiceWave size={12} className="shrink-0" />
+          <span className="truncate">{t('Audio', 'Audio')}</span>
         </button>
       </div>
     </div>

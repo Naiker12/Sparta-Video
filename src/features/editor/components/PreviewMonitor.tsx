@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Expand, Film, Grid2X2, LoaderCircle, Pause, Pencil, Play, SkipBack, SkipForward, StepBack, StepForward, Trash2, Type } from 'lucide-react'
-import { IconButton } from './controls'
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Expand, Film, LoaderCircle, Monitor, Pause, Pencil, Play, SkipBack, SkipForward, Smartphone, Trash2 } from 'lucide-react'
+import { cn } from '../../../lib/utils'
 import { ActionMenu } from './ActionMenu'
 import type { Clip, MediaItem, TimelineMarker } from '../model'
 import { formatTimecode, parseTimecode } from '../timecode'
@@ -8,13 +8,17 @@ import { t } from '../services/locale'
 import { loadMediaSource } from '../services/media-storage'
 import { getInterpolatedOpacity, getInterpolatedTransform } from '../services/keyframe-interpolation'
 import { computeTextAnimationState, getDefaultTextStyle } from '../services/text-presets'
+import { useEditorStore } from '../editor-store'
 import { toast } from '../../../components/ui/toast'
+import { computeTransitionInState } from '../effects/transition-math'
+import { getEffectsCSSFilter } from '../effects/pixel-effects'
 
 type Props = {
   playhead: number
   frameRate: number
   duration: number
   clip?: Clip
+  adjustmentLayers?: Clip[]
   textOverlays?: Clip[]
   selectedClipId?: string
   media?: MediaItem
@@ -54,6 +58,7 @@ export function PreviewMonitor({
   frameRate,
   duration,
   clip,
+  adjustmentLayers = [],
   textOverlays = [],
   selectedClipId,
   media,
@@ -71,8 +76,8 @@ export function PreviewMonitor({
   isMuted = false,
   volume = 1,
 }: Props) {
-  const [safeMargins, setSafeMargins] = useState(false)
-  const [thirds, setThirds] = useState(false)
+  const [safeMargins] = useState(false)
+  const [thirds] = useState(false)
   const [zoom, setZoom] = useState<ZoomPreset>('fit')
   const [stageSize, setStageSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const [hoverScrub, setHoverScrub] = useState<{ time: number; ratio: number } | null>(null)
@@ -91,9 +96,6 @@ export function PreviewMonitor({
     ? getInterpolatedTransform(clip, playhead, sequenceSize)
     : { x: sequenceSize.width / 2, y: sequenceSize.height / 2, scaleX: 100, scaleY: 100, rotation: 0 }
   const clipOpacity = clip ? getInterpolatedOpacity(clip, playhead) / 100 : 1
-  const offsetX = (transform.x / sequenceSize.width - 0.5) * 100
-  const offsetY = (transform.y / sequenceSize.height - 0.5) * 100
-  const aspectLabel = getAspectLabel(sequenceSize.width, sequenceSize.height)
   const isTextOnlyPrimary = !!clip && (clip.text !== undefined || clip.thumbnail === 'text-overlay')
   const sourceAssetId = !isTextOnlyPrimary ? (clip?.sourceAssetId ?? media?.id) : undefined
   const previewTitle = clip?.title ?? textOverlays[0]?.title ?? media?.title
@@ -160,13 +162,17 @@ export function PreviewMonitor({
   useEffect(() => {
     const video = videoRef.current
     if (!video || !sourceUrl || !isVideo) return
-    const sourceTime = clipStart !== undefined ? Math.max(0, playhead - clipStart) : Math.max(0, playhead)
+    const rawOffset = clipStart !== undefined ? Math.max(0, playhead - clipStart) : Math.max(0, playhead)
+    const clipSpeed = clip?.speed ?? 1.0
+    const sourceTime = clip?.freezeTime !== undefined ? clip.freezeTime : rawOffset * clipSpeed
     if (video.readyState >= 1 && Math.abs(video.currentTime - sourceTime) > (playing ? 0.35 : 0.04)) {
       try { video.currentTime = sourceTime } catch { /* The media element will seek when metadata is ready. */ }
     }
+    video.playbackRate = clipSpeed
+    video.preservesPitch = clip?.preservePitch ?? true
     video.volume = Math.max(0, Math.min(1, volume))
     video.muted = isMuted
-    if (playing) {
+    if (playing && clip?.freezeTime === undefined) {
       void video.play().catch(() => {
         // Fallback if browser policy blocks unmuted autoplay without prior interaction
         if (!video.muted) {
@@ -177,16 +183,12 @@ export function PreviewMonitor({
     } else {
       video.pause()
     }
-  }, [sourceUrl, isVideo, clipStart, clip?.id, playhead, playing, volume, isMuted])
+  }, [sourceUrl, isVideo, clipStart, clip?.id, clip?.speed, clip?.preservePitch, clip?.freezeTime, playhead, playing, volume, isMuted])
 
   const toggleFullscreen = async () => {
     if (!stageRef.current) return
     if (document.fullscreenElement) await document.exitFullscreen()
     else await stageRef.current.requestFullscreen?.()
-  }
-  const mediaTransform = {
-    transform: `translate(${offsetX}%, ${offsetY}%) scale(${transform.scaleX / 100}, ${transform.scaleY / 100}) rotate(${transform.rotation}deg)`,
-    opacity: clipOpacity,
   }
 
   // Encaja el lienzo de la secuencia dentro del escenario disponible (como Premiere / Resolve)
@@ -213,9 +215,46 @@ export function PreviewMonitor({
     ? { width: `${Math.round(boxWidth)}px`, height: `${Math.round(boxHeight)}px` }
     : { aspectRatio: `${sequenceSize.width}/${sequenceSize.height}` }
 
-  const markerTimes = markers.map((marker) => marker.time).sort((a, b) => a - b)
-  const prevMarker = [...markerTimes].reverse().find((time) => time < playhead - 1e-3)
-  const nextMarker = markerTimes.find((time) => time > playhead + 1e-3)
+  const isLegacyX = sequenceSize.width === 1080 && Math.abs(transform.x - 960) < 5 && (!clip?.keyframes || !clip.keyframes.some((k) => k.property === 'position'))
+  const isLegacyY = sequenceSize.height === 1920 && Math.abs(transform.y - 540) < 5 && (!clip?.keyframes || !clip.keyframes.some((k) => k.property === 'position'))
+  const effectiveTransformX = isLegacyX ? 540 : transform.x
+  const effectiveTransformY = isLegacyY ? 960 : transform.y
+
+  const scaleBoxX = boxWidth > 0 ? boxWidth / sequenceSize.width : 1
+  const scaleBoxY = boxHeight > 0 ? boxHeight / sequenceSize.height : 1
+  const offsetPxX = Math.round((effectiveTransformX - sequenceSize.width / 2) * scaleBoxX * 10) / 10
+  const offsetPxY = Math.round((effectiveTransformY - sequenceSize.height / 2) * scaleBoxY * 10) / 10
+
+  const clipFit = clip?.fit ?? 'fit'
+  const objectFitStyle = clipFit === 'fill' ? 'cover' : clipFit === 'stretch' ? 'fill' : 'contain'
+  const blendModeStyle = clip?.blendMode && clip.blendMode !== 'normal'
+    ? (clip.blendMode === 'add' ? 'plus-lighter' : clip.blendMode)
+    : undefined
+  const flipScaleX = (clip?.flipH ? -1 : 1) * (transform.scaleX / 100)
+  const flipScaleY = (clip?.flipV ? -1 : 1) * (transform.scaleY / 100)
+
+  const transState = clip?.transitionIn
+    ? computeTransitionInState(clip.transitionIn, clip.start, playhead, sequenceSize.width, sequenceSize.height)
+    : null
+
+  const combinedEffects = [...(clip?.effects ?? []), ...(adjustmentLayers?.flatMap((l) => l.effects ?? []) ?? [])]
+  const effFilter = getEffectsCSSFilter(combinedEffects)
+
+  const transOffsetX = transState ? (transState.offsetX / sequenceSize.width) * (boxWidth || 1) : 0
+  const transOffsetY = transState ? (transState.offsetY / sequenceSize.height) * (boxHeight || 1) : 0
+  const transScale = transState ? transState.scale : 1
+  const transRotation = transState ? transState.rotation : 0
+  const transOpacity = transState ? transState.opacity : 1
+
+  const mediaTransform: React.CSSProperties = {
+    transform: `translate(${offsetPxX + transOffsetX}px, ${offsetPxY + transOffsetY}px) scale(${flipScaleX * transScale}, ${flipScaleY * transScale}) rotate(${transform.rotation + transRotation}deg)`,
+    opacity: clipOpacity * transOpacity,
+    objectFit: objectFitStyle,
+    mixBlendMode: blendModeStyle as React.CSSProperties['mixBlendMode'],
+    filter: effFilter || undefined,
+    clipPath: transState?.clipPath,
+  }
+
   const zoomLabel = zoom === 'fit' ? t('Ajustar', 'Fit') : zoom
 
   const commitTimecode = () => {
@@ -350,19 +389,14 @@ export function PreviewMonitor({
   }
 
   return <section className="preview-panel">
-    <div className="section-label monitor-header">
-      <div className="monitor-header-left">
-        <span className="monitor-title">{t('Programa', 'Program')}</span>
-        {previewTitle && <span className="monitor-active-clip-pill" title={previewTitle}>{previewTitle}</span>}
-        {hasActiveTextOverlays && (
-          <span className="monitor-text-layer-badge" title={t('Capas de texto activas en el cabezal', 'Text layers active at playhead')}>
-            <Type size={10} /> {textOverlays.length}
-          </span>
-        )}
+    <div className="h-9 px-3 flex items-center justify-between border-b border-border bg-card select-none">
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-[13px] font-semibold text-foreground whitespace-nowrap shrink-0">{t('Programa', 'Program')}</span>
+        <span className="sr-only">Sequence 01</span>
         {showAspectMismatchAlert && onSetSequence && (
           <button
             type="button"
-            className="monitor-adapt-sequence-banner"
+            className="monitor-adapt-sequence-banner inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[4px] bg-primary/20 text-primary border border-primary/30 text-[11px] hover:bg-primary/30 transition-colors shrink-0"
             title={isVideoVertical
               ? t('Clic para adaptar la secuencia a formato vertical 9:16 (1080×1920)', 'Click to adapt sequence to vertical 9:16 (1080×1920)')
               : t('Clic para adaptar la secuencia a formato horizontal 16:9 (1920×1080)', 'Click to adapt sequence to horizontal 16:9 (1920×1080)')}
@@ -374,39 +408,30 @@ export function PreviewMonitor({
               })
             }}
           >
-            <span>{isVideoVertical ? '📱' : '🖥️'}</span>
-            <span>
+            {isVideoVertical ? <Smartphone size={12} aria-hidden="true" /> : <Monitor size={12} aria-hidden="true" />}
+            <span className="whitespace-nowrap">
               {isVideoVertical
-                ? t('Vídeo 9:16 detectado · Adaptar secuencia', '9:16 video detected · Adapt sequence')
-                : t('Vídeo 16:9 detectado · Adaptar secuencia', '16:9 video detected · Adapt sequence')}
+                ? t('9:16 detectado · Adaptar', '9:16 detected · Adapt')
+                : t('16:9 detectado · Adaptar', '16:9 detected · Adapt')}
             </span>
           </button>
         )}
       </div>
-      <div className="monitor-header-actions">
-        <div className="monitor-overlay-toggles" role="group" aria-label={t('Guías del monitor', 'Monitor guides')}>
-          <button type="button" className={`monitor-mini-btn ${safeMargins ? 'active' : ''}`} aria-pressed={safeMargins} aria-label={t('Márgenes seguros', 'Safe margins')} title={t('Márgenes seguros', 'Safe margins')} onClick={() => setSafeMargins((value) => !value)}><Crosshair size={13} /></button>
-          <button type="button" className={`monitor-mini-btn ${thirds ? 'active' : ''}`} aria-pressed={thirds} aria-label={t('Regla de tercios', 'Rule of thirds')} title={t('Regla de tercios', 'Rule of thirds')} onClick={() => setThirds((value) => !value)}><Grid2X2 size={13} /></button>
-        </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-xs text-muted-foreground font-mono tabular-nums whitespace-nowrap shrink-0">{sequenceSize.width} × {sequenceSize.height} · {Math.round(frameRate)} fps</span>
         <ActionMenu
-          label={t('Zoom del monitor', 'Monitor zoom')}
-          triggerClass="monitor-zoom-btn"
-          popupClass="monitor-zoom-popup"
-          items={([
-            ['fit', t('Ajustar', 'Fit')],
-            ['50%', '50%'],
-            ['100%', '100%'],
-            ['200%', '200%'],
-          ] as const).map(([value, label]) => ({
-            label,
-            checked: zoom === value,
-            onSelect: () => setZoom(value as ZoomPreset),
-          }))}
+          label={t('Calidad de reproducción', 'Playback quality')}
+          triggerClass="h-7 px-2.5 text-xs rounded-[6px] bg-input border-0 text-foreground hover:bg-input-hover flex items-center gap-1 cursor-pointer transition-colors focus:ring-2 focus:ring-primary"
+          popupClass="monitor-quality-popup"
+          items={[
+            { label: t('Completa', 'Full'), checked: true, onSelect: () => {} },
+            { label: '1/2', checked: false, onSelect: () => {} },
+            { label: '1/4', checked: false, onSelect: () => {} },
+          ]}
         >
-          <span>{zoomLabel}</span>
-          <ChevronDown size={11} aria-hidden="true" />
+          <span>{t('Calidad: Completa', 'Quality: Full')}</span>
+          <ChevronDown size={11} aria-hidden="true" className="text-muted-foreground" />
         </ActionMenu>
-        <IconButton label={t('Monitor a pantalla completa', 'Fullscreen monitor')} onClick={() => void toggleFullscreen()}><Expand size={13} /></IconButton>
       </div>
     </div>
     <div className={`preview-stage ${zoom !== 'fit' ? 'is-zoomed' : ''}`} ref={stageRef}>
@@ -434,7 +459,7 @@ export function PreviewMonitor({
               ? t('Clic para adaptar la secuencia a 1080×1920 (9:16) y eliminar bandas negras', 'Click to adapt sequence to 1080×1920 (9:16) and eliminate black bars')
               : t('Clic para adaptar la secuencia a 1920×1080 (16:9)', 'Click to adapt sequence to 1920×1080 (16:9)')}
           >
-            <span className="pill-badge-icon">{isVideoVertical ? '📱' : '🖥️'}</span>
+            <span className="pill-badge-icon">{isVideoVertical ? <Smartphone size={14} aria-hidden="true" /> : <Monitor size={14} aria-hidden="true" />}</span>
             <span className="pill-text-block">
               <strong>{isVideoVertical ? t('Vídeo vertical 9:16 detectado', 'Vertical 9:16 video detected') : t('Vídeo horizontal 16:9 detectado', 'Horizontal 16:9 video detected')}</strong>
               <small>{isVideoVertical ? t('Clic para adaptar secuencia a 1080×1920 (pantalla completa)', 'Click to adapt sequence to 1080×1920 (fullscreen)') : t('Clic para adaptar secuencia a 1920×1080 (pantalla completa)', 'Click to adapt sequence to 1920×1080 (fullscreen)')}</small>
@@ -451,6 +476,12 @@ export function PreviewMonitor({
           const vh = video.videoHeight
           if (vw > 0 && vh > 0) {
             setDetectedVideoFormat({ width: vw, height: vh, isVertical: vh > vw })
+            if (sourceAssetId) {
+              const currentAsset = useEditorStore.getState().assets.find((a) => a.id === sourceAssetId)
+              if (currentAsset && (!currentAsset.width || !currentAsset.height)) {
+                useEditorStore.getState().updateAsset(sourceAssetId, { width: vw, height: vh })
+              }
+            }
           }
           video.volume = Math.max(0, Math.min(1, volume))
           video.muted = isMuted
@@ -461,12 +492,18 @@ export function PreviewMonitor({
               ...(clip.start > 0 && clip.start <= 0.16 ? { start: 0 } : {}),
             })
           }
-          const seekTime = clipStart !== undefined ? Math.max(0, playhead - clipStart) : Math.max(0, playhead)
+          const clipSpeed = clip?.speed ?? 1.0
+          const seekTime = clip?.freezeTime !== undefined
+            ? clip.freezeTime
+            : (clipStart !== undefined ? Math.max(0, (playhead - clipStart) * clipSpeed) : Math.max(0, playhead * clipSpeed))
           try { video.currentTime = seekTime } catch { /* The browser will seek when metadata is ready. */ }
-          if (playing) void video.play().catch(() => { })
+          if (playing && clip?.freezeTime === undefined) void video.play().catch(() => { })
         }} onTimeUpdate={(event) => {
-          if (playing) {
-            const next = clipStart !== undefined ? clipStart + event.currentTarget.currentTime : event.currentTarget.currentTime
+          if (playing && clip?.freezeTime === undefined) {
+            const clipSpeed = clip?.speed ?? 1.0
+            const next = clipStart !== undefined
+              ? clipStart + event.currentTarget.currentTime / clipSpeed
+              : event.currentTarget.currentTime / clipSpeed
             if (Math.abs(next - playhead) > 0.12) onSeek(duration > 0 ? Math.min(duration, next) : next)
           }
         }} />}
@@ -663,6 +700,11 @@ export function PreviewMonitor({
 
                 {isSelected && !isEditing && (
                   <>
+                    <div className="text-rotation-badge">
+                      {Math.round(customScaleX * 100)}% - {Math.round(customRot)}°
+                    </div>
+                    <div className="text-rotation-handle" />
+                    <div className="text-rotation-knob" title={t('Rotación del texto', 'Text rotation')} />
                     <div
                       className="preview-text-resize-handle handle-nw"
                       title={t('Arrastra para cambiar tamaño de letra', 'Drag to resize font')}
@@ -741,77 +783,103 @@ export function PreviewMonitor({
         ) : (
           <button
             type="button"
-            className="timecode timecode-current timecode-button"
+            className="timecode timecode-current timecode-button text-primary font-mono tabular-nums font-semibold text-xs"
             title={t('Clic para escribir un código de tiempo', 'Click to type a timecode')}
             onClick={() => setTimecodeDraft(timecode)}
           >
             {timecode}
           </button>
         )}
-        <span className="timecode total-time">/ {formatTimecode(duration, frameRate)}</span>
+        <span className="timecode total-time font-mono tabular-nums text-muted-foreground text-xs">/ {formatTimecode(duration, frameRate)}</span>
       </div>
-      <div className="transport">
-        <IconButton label={t('Ir al inicio', 'Go to start')} onClick={() => onSeek(0)}><SkipBack size={14} /></IconButton>
-        <IconButton label={t('Marcador anterior', 'Previous marker')} disabled={prevMarker === undefined} onClick={() => { if (prevMarker !== undefined) onSeek(prevMarker) }}><StepBack size={14} /></IconButton>
-        <IconButton label={t('Fotograma anterior', 'Previous frame')} onClick={() => onSeek(Math.max(0, playhead - 1 / frameRate))}><ChevronLeft size={16} /></IconButton>
-        {isPlayable ? <button className={`play-button ${playing ? 'active' : ''}`} aria-label={playing ? t('Pausar', 'Pause') : t('Reproducir', 'Play')} title={playing ? t('Pausar reproducción (Espacio)', 'Pause playback (Space)') : t('Reproducir secuencia (Espacio)', 'Play sequence (Space)')} onClick={onTogglePlay}>{playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}</button> : <button className="play-button" aria-label={t('Reproducción no disponible', 'Playback unavailable')} title={t('La reproducción estará disponible cuando se conecte el motor de medios.', 'Playback will be available when the media engine is connected.')} disabled><Play size={14} fill="currentColor" /></button>}
-        <IconButton label={t('Fotograma siguiente', 'Next frame')} onClick={() => onSeek(Math.min(duration, playhead + 1 / frameRate))}><ChevronRight size={16} /></IconButton>
-        <IconButton label={t('Marcador siguiente', 'Next marker')} disabled={nextMarker === undefined} onClick={() => { if (nextMarker !== undefined) onSeek(nextMarker) }}><StepForward size={14} /></IconButton>
-        <IconButton label={t('Ir al final', 'Go to end')} onClick={() => onSeek(duration)}><SkipForward size={14} /></IconButton>
-      </div>
-      <div className="transport-hud-right">
-        {onSetSequence ? (
-          <ActionMenu
-            label={t('Relación de aspecto y resolución', 'Aspect ratio and resolution')}
-            triggerClass="monitor-spec monitor-aspect-menu-btn"
-            popupClass="monitor-aspect-popup"
-            items={[
-              { heading: t('Formato de secuencia', 'Sequence format') },
-              {
-                label: `9:16 · 1080 × 1920 (${t('TikTok / Reels / Shorts', 'TikTok / Reels / Shorts')})`,
-                checked: sequenceSize.width === 1080 && sequenceSize.height === 1920,
-                onSelect: () => onSetSequence({ width: 1080, height: 1920, frameRate }),
-              },
-              {
-                label: `16:9 · 1920 × 1080 (${t('YouTube / Horizontal', 'YouTube / Horizontal')})`,
-                checked: sequenceSize.width === 1920 && sequenceSize.height === 1080,
-                onSelect: () => onSetSequence({ width: 1920, height: 1080, frameRate }),
-              },
-              {
-                label: `1:1 · 1080 × 1080 (${t('Cuadrado / Instagram', 'Square / Instagram')})`,
-                checked: sequenceSize.width === 1080 && sequenceSize.height === 1080,
-                onSelect: () => onSetSequence({ width: 1080, height: 1080, frameRate }),
-              },
-              {
-                label: `4:5 · 1080 × 1350 (${t('Vertical feed / Retrato', 'Vertical feed / Portrait')})`,
-                checked: sequenceSize.width === 1080 && sequenceSize.height === 1350,
-                onSelect: () => onSetSequence({ width: 1080, height: 1350, frameRate }),
-              },
-              {
-                label: `16:9 · 1280 × 720 (${t('HD Ligero', 'Light HD')})`,
-                checked: sequenceSize.width === 1280 && sequenceSize.height === 720,
-                onSelect: () => onSetSequence({ width: 1280, height: 720, frameRate }),
-              },
-            ]}
+      <div className="transport flex items-center gap-1.5">
+        <button
+          type="button"
+          className="w-8 h-8 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-input border-0 flex items-center justify-center cursor-pointer transition-colors"
+          aria-label={t('Ir al inicio', 'Go to start')}
+          title={t('Ir al inicio', 'Go to start')}
+          onClick={() => onSeek(0)}
+        >
+          <SkipBack size={14} />
+        </button>
+        <button
+          type="button"
+          className="w-8 h-8 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-input border-0 flex items-center justify-center cursor-pointer transition-colors"
+          aria-label={t('Fotograma anterior', 'Previous frame')}
+          title={t('Fotograma anterior', 'Previous frame')}
+          onClick={() => onSeek(Math.max(0, playhead - 1 / frameRate))}
+        >
+          <ChevronLeft size={16} />
+        </button>
+        {isPlayable ? (
+          <button
+            className={cn(
+              'w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer select-none bg-primary text-primary-foreground shadow-md hover:brightness-110 active:scale-95 border-0',
+              playing && 'ring-2 ring-primary/40'
+            )}
+            aria-label={playing ? t('Pausar', 'Pause') : t('Reproducir', 'Play')}
+            title={playing ? t('Pausar reproducción (Espacio)', 'Pause playback (Space)') : t('Reproducir secuencia (Espacio)', 'Play sequence (Space)')}
+            onClick={onTogglePlay}
           >
-            <span className="monitor-spec-aspect-chip">{aspectLabel}</span>
-            <span className="monitor-spec-res-chip">{sequenceSize.width}×{sequenceSize.height}</span>
-            <ChevronDown size={11} aria-hidden="true" />
-          </ActionMenu>
+            {playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" className="ml-0.5" />}
+          </button>
         ) : (
-          <>
-            <span className="monitor-spec">{aspectLabel}</span>
-            <span className="monitor-spec">{sequenceSize.width}×{sequenceSize.height}</span>
-          </>
+          <button
+            className="w-10 h-10 rounded-full flex items-center justify-center bg-muted text-muted-foreground/40 cursor-not-allowed select-none border-0"
+            aria-label={t('Reproducción no disponible', 'Playback unavailable')}
+            disabled
+          >
+            <Play size={15} fill="currentColor" className="ml-0.5" />
+          </button>
         )}
-        <span className="monitor-spec">{Math.round(frameRate)} fps</span>
+        <button
+          type="button"
+          className="w-8 h-8 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-input border-0 flex items-center justify-center cursor-pointer transition-colors"
+          aria-label={t('Fotograma siguiente', 'Next frame')}
+          title={t('Fotograma siguiente', 'Next frame')}
+          onClick={() => onSeek(Math.min(duration, playhead + 1 / frameRate))}
+        >
+          <ChevronRight size={16} />
+        </button>
+        <button
+          type="button"
+          className="w-8 h-8 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-input border-0 flex items-center justify-center cursor-pointer transition-colors"
+          aria-label={t('Ir al final', 'Go to end')}
+          title={t('Ir al final', 'Go to end')}
+          onClick={() => onSeek(duration)}
+        >
+          <SkipForward size={14} />
+        </button>
+      </div>
+      <div className="transport-hud-right flex items-center gap-1.5">
+        <ActionMenu
+          label={t('Zoom del monitor', 'Monitor zoom')}
+          triggerClass="h-7 px-2.5 rounded-[6px] bg-input border-0 text-xs text-foreground flex items-center gap-1 cursor-pointer hover:bg-input-hover transition-colors"
+          popupClass="monitor-zoom-popup"
+          items={([
+            ['fit', t('Ajustar', 'Fit')],
+            ['50%', '50%'],
+            ['100%', '100%'],
+            ['200%', '200%'],
+          ] as const).map(([value, label]) => ({
+            label,
+            checked: zoom === value,
+            onSelect: () => setZoom(value as ZoomPreset),
+          }))}
+        >
+          <span>{zoomLabel}</span>
+          <ChevronDown size={11} aria-hidden="true" className="text-muted-foreground" />
+        </ActionMenu>
+        <button
+          type="button"
+          className="w-8 h-8 rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-input border-0 flex items-center justify-center cursor-pointer transition-colors"
+          aria-label={t('Monitor a pantalla completa', 'Fullscreen monitor')}
+          title={t('Pantalla completa', 'Fullscreen')}
+          onClick={() => void toggleFullscreen()}
+        >
+          <Expand size={14} />
+        </button>
       </div>
     </div>
   </section>
-}
-
-function getAspectLabel(width: number, height: number) {
-  const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b)
-  const divisor = gcd(width, height) || 1
-  return `${width / divisor}:${height / divisor}`
 }

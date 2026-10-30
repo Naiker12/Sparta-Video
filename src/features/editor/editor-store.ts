@@ -29,7 +29,7 @@ export type EditorState = {
   setActiveTool: (tool: 'select' | 'razor') => void
   selectClip: (id: string) => void; selectMedia: (id: string) => void; setPlayhead: (time: number) => void
   setZoom: (zoom: number) => void; setPlaying: (playing: boolean) => void; addAssets: (assets: MediaItem[]) => void
-  updateAsset: (assetId: string, changes: Partial<Pick<MediaItem, 'title' | 'type' | 'detail' | 'thumb' | 'status' | 'durationSeconds'>>) => void; removeAsset: (assetId: string) => void
+  updateAsset: (assetId: string, changes: Partial<Pick<MediaItem, 'title' | 'type' | 'detail' | 'thumb' | 'status' | 'durationSeconds' | 'width' | 'height'>>) => void; removeAsset: (assetId: string) => void
   addMedia: (asset: MediaItem, at?: number, trackId?: string) => string
   addTextClip: (options?: AddTextClipOptions) => string
   addSubtitleSequence: (entries: SubtitleEntryInput[], options?: { replaceExisting?: boolean }) => number
@@ -39,6 +39,8 @@ export type EditorState = {
   nudgeAllSubtitlesTime: (deltaSeconds: number) => number
   autoGenerateSubtitles: (presetId?: string, customScript?: string) => number
   updateClip: (clipId: string, changes: Partial<Clip>) => void
+  addAdjustmentLayer: (start?: number, duration?: number) => string
+  freezeFrame: (clipId: string, atTime?: number, duration?: number) => string | null
   moveClip: (clipId: string, start: number, duration?: number) => void; moveClipToNewTrack: (clipId: string) => void; splitClip: (clipId: string, time: number) => void
   deleteClip: (clipId: string) => void; duplicateClip: (clipId: string) => string; ripplePackTrack: (trackId?: string) => number; autoAudioBalance: () => number; autoSceneMarkers: () => number
   addMarker: (time: number, label?: string) => void; removeMarker: (markerId: string) => void; toggleSnap: () => void; addTrack: (kind: 'video' | 'audio') => void
@@ -59,6 +61,10 @@ const copyTracks = (tracks: Track[]): Track[] => tracks.map((track) => ({
     keyframes: clip.keyframes?.map((keyframe) => ({ ...keyframe })),
     textStyle: clip.textStyle ? { ...clip.textStyle } : undefined,
     textAnimation: clip.textAnimation ? { ...clip.textAnimation } : undefined,
+    crop: clip.crop ? { ...clip.crop } : undefined,
+    effects: clip.effects?.map((eff) => ({ ...eff, params: { ...eff.params } })),
+    transitionIn: clip.transitionIn ? { ...clip.transitionIn, params: clip.transitionIn.params ? { ...clip.transitionIn.params } : undefined } : undefined,
+    transitionOut: clip.transitionOut ? { ...clip.transitionOut, params: clip.transitionOut.params ? { ...clip.transitionOut.params } : undefined } : undefined,
   })),
 }))
 const copyMarkers = (markers: TimelineMarker[]) => markers.map((marker) => ({ ...marker }))
@@ -136,15 +142,42 @@ export const subscribeProjectSaveStatus = (listener: (status: ProjectSaveStatus)
   return () => window.removeEventListener(PROJECT_SAVE_EVENT, handle)
 }
 const sameStoredProject = (left: PersistedProjectState, right: PersistedProjectState) => left.projectName === right.projectName && left.sequence === right.sequence && left.tracks === right.tracks && left.assets === right.assets && left.markers === right.markers && left.snapToFrames === right.snapToFrames && left.mutedTracks === right.mutedTracks && left.lockedTracks === right.lockedTracks
+const normalizeLegacyClipTransforms = (state: PersistedProjectState): PersistedProjectState => {
+  const isVertical = state.sequence.height > state.sequence.width && state.sequence.width === 1080
+  if (!isVertical) return state
+  let changed = false
+  const tracks = state.tracks.map((track) => {
+    let trackChanged = false
+    const clips = track.clips.map((clip) => {
+      if (clip.transform && clip.transform.x === 960 && clip.transform.y === 540 && (!clip.keyframes || !clip.keyframes.some((k) => k.property === 'position'))) {
+        trackChanged = true
+        changed = true
+        return {
+          ...clip,
+          transform: {
+            ...clip.transform,
+            x: 540,
+            y: 960,
+          },
+        }
+      }
+      return clip
+    })
+    return trackChanged ? { ...track, clips } : track
+  })
+  return changed ? { ...state, tracks } : state
+}
+
 const projectStorage: PersistStorage<PersistedProjectState> = {
   getItem(name) {
     try {
       const raw = localStorage.getItem(name)
       if (!raw) { lastStoredProject = null; publishSaveStatus('unsaved'); return null }
       const value = JSON.parse(raw) as { state: PersistedProjectState; version?: number }
-      lastStoredProject = value.state
+      const cleaned = normalizeLegacyClipTransforms(normalizeLegacyMediaTypes(cleanSeededProject(value.state)))
+      lastStoredProject = cleaned
       publishSaveStatus('saved')
-      return value
+      return { ...value, state: cleaned }
     } catch { lastStoredProject = null; publishSaveStatus('error'); return null }
   },
   setItem(name, value) {
@@ -164,7 +197,46 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
   tracks: emptyTracks(), assets: [], markers: [], selectedClipId: '', selectedMediaId: null,
   playhead: 0, zoom: 1, playing: false, snapToFrames: true, activeTool: 'select', mutedTracks: [], lockedTracks: [], past: [], future: [],
   setProjectName: (name) => set((state) => { const projectName = name.trim() || 'Sin título'; return projectName === state.projectName ? state : commit(state, { projectName }) }),
-  setSequence: (sequence) => set((state) => JSON.stringify(sequence) === JSON.stringify(state.sequence) ? state : commit(state, { sequence: { ...sequence } })),
+  setSequence: (sequence) => set((state) => {
+    if (JSON.stringify(sequence) === JSON.stringify(state.sequence)) return state
+    const prev = state.sequence
+    const next = { ...sequence }
+    const rx = prev.width > 0 ? next.width / prev.width : 1
+    const ry = prev.height > 0 ? next.height / prev.height : 1
+
+    if (rx === 1 && ry === 1) {
+      return commit(state, { sequence: next })
+    }
+
+    const tracks = copyTracks(state.tracks).map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => {
+        const updated: Clip = { ...clip }
+        if (updated.transform) {
+          updated.transform = {
+            ...updated.transform,
+            x: Math.round(updated.transform.x * rx * 10) / 10,
+            y: Math.round(updated.transform.y * ry * 10) / 10,
+          }
+        }
+        if (updated.keyframes && updated.keyframes.length > 0) {
+          updated.keyframes = updated.keyframes.map((kf) => {
+            if (kf.property === 'position') {
+              return {
+                ...kf,
+                valueX: kf.valueX !== undefined ? Math.round(kf.valueX * rx * 10) / 10 : undefined,
+                valueY: kf.valueY !== undefined ? Math.round(kf.valueY * ry * 10) / 10 : undefined,
+              }
+            }
+            return kf
+          })
+        }
+        return updated
+      }),
+    }))
+
+    return commit(state, { sequence: next, tracks })
+  }),
   setActiveTool: (activeTool) => set({ activeTool }),
   selectClip: (id) => set({ selectedClipId: id, selectedMediaId: null }),
   selectMedia: (id) => set({ selectedMediaId: id, selectedClipId: '' }),
@@ -631,6 +703,113 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
     }))
     return JSON.stringify(tracks) === JSON.stringify(state.tracks) ? state : commit(state, { tracks }, `clip:${clipId}:${Object.keys(changes).sort().join(',')}`)
   }),
+  addAdjustmentLayer: (start, duration) => {
+    let clipId = ''
+    set((state) => {
+      let tracks = copyTracks(state.tracks)
+      let targetTrack = tracks.find((t) => t.kind === 'video' && !state.lockedTracks.includes(t.id))
+      if (!targetTrack) {
+        let num = tracks.filter((t) => t.kind === 'video').length + 1
+        while (tracks.some((t) => t.id === `v${num}`)) num += 1
+        targetTrack = {
+          id: `v${num}`,
+          name: `Vídeo ${String(num).padStart(2, '0')}`,
+          kind: 'video',
+          clips: [],
+        }
+        tracks.unshift(targetTrack)
+      }
+
+      clipId = `c${nextClip++}`
+      while (tracks.some((t) => t.clips.some((c) => c.id === clipId))) clipId = `c${nextClip++}`
+
+      const startPos = start ?? state.playhead
+      const dur = duration ?? 5.0
+
+      const newClip: Clip = {
+        id: clipId,
+        title: 'Capa FX',
+        start: startPos,
+        duration: dur,
+        color: 'bg-violet-600',
+        thumbnail: 'adjustment-layer',
+        kind: 'adjustment',
+        effects: [],
+      }
+
+      const updatedTracks = tracks.map((t) =>
+        t.id === targetTrack!.id ? { ...t, clips: [...t.clips, newClip] } : t,
+      )
+
+      return {
+        ...commit(state, { tracks: updatedTracks }),
+        selectedClipId: clipId,
+        selectedMediaId: null,
+      }
+    })
+    return clipId
+  },
+  freezeFrame: (clipId, atTime, duration = 3.0) => {
+    let frozenId: string | null = null
+    set((state) => {
+      const track = state.tracks.find((t) => t.clips.some((c) => c.id === clipId))
+      const clip = track?.clips.find((c) => c.id === clipId)
+      if (!track || !clip || state.lockedTracks.includes(track.id)) return state
+
+      const fps = state.sequence.frameRate
+      const splitTime = atTime ?? state.playhead
+      const boundedTime = Math.max(clip.start, Math.min(clip.start + clip.duration, splitTime))
+      const localOffset = boundedTime - clip.start
+      const freezeSourceTime = localOffset * (clip.speed ?? 1.0)
+
+      frozenId = `c${nextClip++}`
+      while (state.tracks.some((t) => t.clips.some((c) => c.id === frozenId))) frozenId = `c${nextClip++}`
+
+      const frozenClip: Clip = {
+        ...clip,
+        id: frozenId,
+        title: `${clip.title} (Congelado)`,
+        start: boundedTime,
+        duration,
+        freezeTime: freezeSourceTime,
+      }
+
+      const updatedClips: Clip[] = []
+      for (const c of track.clips) {
+        if (c.id === clipId) {
+          if (localOffset > 1 / fps) {
+            updatedClips.push({ ...c, duration: localOffset })
+          }
+          updatedClips.push(frozenClip)
+          const remaining = c.duration - localOffset
+          if (remaining > 1 / fps) {
+            let rightId = `c${nextClip++}`
+            while (state.tracks.some((t) => t.clips.some((candidate) => candidate.id === rightId))) rightId = `c${nextClip++}`
+            updatedClips.push({
+              ...c,
+              id: rightId,
+              start: boundedTime + duration,
+              duration: remaining,
+            })
+          }
+        } else if (c.start >= boundedTime) {
+          updatedClips.push({ ...c, start: c.start + duration })
+        } else {
+          updatedClips.push(c)
+        }
+      }
+
+      const tracks = copyTracks(state.tracks).map((t) =>
+        t.id === track.id ? { ...t, clips: updatedClips } : t,
+      )
+
+      return {
+        ...commit(state, { tracks }),
+        selectedClipId: frozenId!,
+      }
+    })
+    return frozenId
+  },
   moveClip: (clipId, start, duration) => set((state) => {
     const owner = state.tracks.find((track) => track.clips.some((clip) => clip.id === clipId))
     if (!owner || state.lockedTracks.includes(owner.id)) return state
