@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, Columns2, CopyPlus, FileDown, FileUp, Film, FolderOpen, Maximize2, Pencil, PlusCircle, Redo2, Scissors, Settings2, Trash2, Undo2, Upload, Video, Zap } from 'lucide-react'
 import type { AssistantMode } from './features/editor/components/AssistantPanel'
 import { InspectorPanel } from './features/editor/components/InspectorPanel'
@@ -31,9 +31,9 @@ import './App.css'
 import './styles/editor-polish.css'
 import './styles/toast.css'
 
-const AssistantPanel = lazy(() => import('./features/editor/components/AssistantPanel').then(({ AssistantPanel: Component }) => ({ default: Component })))
-const ExportDialog = lazy(() => import('./features/editor/components/ExportDialog').then(({ ExportDialog: Component }) => ({ default: Component })))
-const PreferencesSheet = lazy(() => import('./features/editor/components/PreferencesSheet').then(({ PreferencesSheet: Component }) => ({ default: Component })))
+import { AssistantPanel } from './features/editor/components/AssistantPanel'
+import { ExportDialog } from './features/editor/components/ExportDialog'
+import { PreferencesSheet } from './features/editor/components/PreferencesSheet'
 
 // Layout is a convenience preference. Keep the editor usable if browser storage is blocked.
 const layoutMemory = new Map<string, string>()
@@ -174,7 +174,7 @@ function App() {
   const hasTextClips = tracks.some((track) => track.clips.some((clip) => clip.text !== undefined || clip.thumbnail === 'text-overlay'))
   const hasTimelineClips = tracks.some((track) => track.clips.length > 0)
   const canExport = (hasReadyAssets || hasTextClips) && hasTimelineClips && sequenceDuration > 0
-  const [chatOpen, setChatOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(true)
   const [assistantMode, setAssistantMode] = useState<AssistantMode>('edit')
   const [saveStatus, setSaveStatus] = useState(getProjectSaveStatus)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -846,12 +846,12 @@ function App() {
       </Panel>
       <Separator id="assistant-separator" className="panel-separator" aria-label={t('Redimensionar panel del asistente', 'Resize assistant panel')} />
       <Panel id="assistant" panelRef={assistantPanelRef} defaultSize="24%" minSize="260px" maxSize="40%" collapsedSize="0%" collapsible className="resize-panel-content assistant-workspace-panel">
-        {chatOpen && <Suspense fallback={<aside className="assistant-panel assistant-loading" role="status" aria-label={t('Abriendo el asistente', 'Opening assistant')}><div className="assistant-loading-heading"><span className="assistant-loading-mark"><Zap size={15} /></span><span><strong>Sparta AI</strong><small>{t('Preparando el espacio de trabajo…', 'Preparing your workspace…')}</small></span></div><div className="assistant-loading-body"><i /><i /><i /></div><div className="assistant-loading-compose"><span /><b /></div></aside>}><AssistantPanel open onClose={toggleAssistant} projectName={projectName} activeMode={assistantMode} onModeChange={setAssistantMode} /></Suspense>}
+        <AssistantPanel open onClose={toggleAssistant} projectName={projectName} activeMode={assistantMode} onModeChange={setAssistantMode} />
       </Panel>
     </Group>
-    {settingsOpen && <Suspense fallback={null}><PreferencesSheet open={settingsOpen} onOpenChange={setSettingsOpen} onResetLayout={resetWorkspace} snapToFrames={snapToFrames} onToggleSnap={toggleSnap} saveStatus={saveStatus} /></Suspense>}
+    {settingsOpen && <PreferencesSheet open={settingsOpen} onOpenChange={setSettingsOpen} onResetLayout={resetWorkspace} snapToFrames={snapToFrames} onToggleSnap={toggleSnap} saveStatus={saveStatus} />}
     <RenameProjectDialog open={renameOpen} name={projectName} onOpenChange={setRenameOpen} onSave={(name) => { setProjectName(name); toast.success(t('Proyecto renombrado', 'Project renamed'), { description: name }) }} />
-    {exportOpen && <Suspense fallback={null}><ExportDialog open={exportOpen} projectName={projectName} sequenceDuration={sequenceDuration} sequenceSize={sequence} tracks={tracks} assets={assets} mutedTracks={mutedTracks} onOpenChange={setExportOpen} /></Suspense>}
+    {exportOpen && <ExportDialog open={exportOpen} projectName={projectName} sequenceDuration={sequenceDuration} sequenceSize={sequence} tracks={tracks} assets={assets} mutedTracks={mutedTracks} onOpenChange={setExportOpen} />}
     <Toaster />
   </main>
 }

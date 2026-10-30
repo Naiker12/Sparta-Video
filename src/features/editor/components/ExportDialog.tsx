@@ -170,13 +170,6 @@ export function ExportDialog({
     abortControllerRef.current = controller
     setIsExporting(true)
 
-    const exportToast = toast.loading(
-      t('Iniciando exportación…', 'Starting export…'),
-      {
-        description: `${settings.fileName} (${settings.width}×${settings.height})`,
-      },
-    )
-
     try {
       const result = await renderSequence({
         tracks,
@@ -188,11 +181,6 @@ export function ExportDialog({
         signal: controller.signal,
         onProgress: (prog) => {
           setProgress(prog)
-          if (prog.stage === 'rendering' || prog.stage === 'encoding') {
-            toast.loading(prog.message ?? t('Procesando secuencia…', 'Processing sequence…'), {
-              id: exportToast,
-            })
-          }
         },
       })
 
@@ -200,7 +188,6 @@ export function ExportDialog({
       downloadRenderResult(result)
 
       toast.success(t('Vídeo exportado con éxito', 'Video exported successfully'), {
-        id: exportToast,
         description: `${result.fileName} · ${formatBytes(result.sizeBytes)}`,
         duration: 7000,
       })
@@ -209,11 +196,10 @@ export function ExportDialog({
     } catch (error) {
       const isAbort = error instanceof Error && /cancelada/i.test(error.message)
       if (isAbort) {
-        toast.info(t('Exportación cancelada', 'Export cancelled'), { id: exportToast })
+        toast.info(t('Exportación cancelada', 'Export cancelled'))
       } else {
         const message = error instanceof Error ? error.message : t('Error desconocido durante la exportación.', 'Unknown export error.')
         toast.error(t('Fallo en la exportación', 'Export failed'), {
-          id: exportToast,
           description: message,
           duration: 8000,
         })

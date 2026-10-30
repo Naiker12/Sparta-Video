@@ -187,7 +187,7 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
       }
     }
     if (!followLatestRef.current) return
-    feed.scrollTo({ top: feed.scrollHeight, behavior: requesting ? 'auto' : 'smooth' })
+    if (typeof feed.scrollTo === 'function') feed.scrollTo({ top: feed.scrollHeight, behavior: requesting ? 'auto' : 'smooth' }); else feed.scrollTop = feed.scrollHeight;
   }, [messages, requesting, mode])
 
   const updateScrollFollow = () => {
@@ -201,7 +201,7 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
   const jumpToLatest = () => {
     followLatestRef.current = true
     setShowLatestButton(false)
-    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
+    if (feedRef.current) { if (typeof feedRef.current.scrollTo === 'function') feedRef.current.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' }); else feedRef.current.scrollTop = feedRef.current.scrollHeight; }
   }
 
   const scrollToMessageStart = (id: string) => {
@@ -210,7 +210,7 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
       const message = feed?.querySelector<HTMLElement>(`[data-message-id="${id}"]`)
       if (!feed || !message) return
       const top = message.getBoundingClientRect().top - feed.getBoundingClientRect().top + feed.scrollTop - 8
-      feed.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+      if (typeof feed.scrollTo === 'function') feed.scrollTo({ top: Math.max(0, top), behavior: 'smooth' }); else feed.scrollTop = Math.max(0, top);
     })
   }
 
