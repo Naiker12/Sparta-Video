@@ -202,15 +202,15 @@ export function EditorWorkspace({
     >
       <Panel id="editor" defaultSize="100%" minSize="60%" className="editor-workspace-panel">
         <Group
-          id="sparta-workspace"
+          id="sparta-main-vertical"
           groupRef={mainVerticalGroupRef}
           className="editor-vertical-group"
           orientation="vertical"
-          defaultLayout={verticalLayout.defaultLayout ?? { stage: 61, timeline: 39 }}
+          defaultLayout={verticalLayout.defaultLayout ?? { stage: 58, timeline: 42 }}
           onLayoutChanged={verticalLayout.onLayoutChanged}
           resizeTargetMinimumSize={{ fine: 6, coarse: 10 }}
         >
-          <Panel id="stage" defaultSize="61%" minSize="32%" maxSize="80%" className="bg-transparent overflow-hidden h-full">
+          <Panel id="stage" defaultSize="58%" minSize="30%" maxSize="68%" className="bg-transparent overflow-hidden h-full">
             <div className="upper-workspace">
               <Group
                 id="sparta-upper-workspace"
@@ -369,7 +369,7 @@ export function EditorWorkspace({
             className="panel-separator panel-separator-horizontal"
             aria-label={t('Redimensionar monitor y línea de tiempo', 'Resize monitor and timeline')}
           />
-          <Panel id="timeline" defaultSize="42%" minSize="20%" className="resize-panel-content">
+          <Panel id="timeline" defaultSize="42%" minSize="32%" className="resize-panel-content">
             <TimelinePanel
               tracks={tracks}
               assets={assets}

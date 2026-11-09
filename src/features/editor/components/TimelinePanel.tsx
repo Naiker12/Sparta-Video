@@ -74,17 +74,22 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
     tracks.forEach((track) => track.clips.forEach((clip) => {
       if (clip.kind !== 'video' || clip.text !== undefined || clip.thumbnail === 'text-overlay') return
       const assetId = clip.sourceAssetId ?? assets.find((asset) => asset.title === clip.title)?.id
-      if (assetId && !videoPreviews[assetId]) clipAssets.set(assetId, clip.title)
+      if (assetId && !(assetId in videoPreviews)) clipAssets.set(assetId, clip.title)
     }))
     if (!clipAssets.size) return
     void Promise.all([...clipAssets.keys()].map(async (id) => [id, await loadMediaPreview(id).catch(() => null)] as const)).then((entries) => {
-      const loaded = entries.filter((entry): entry is readonly [string, string] => !!entry[1])
       if (cancelled) {
-        loaded.forEach(([, url]) => URL.revokeObjectURL(url))
+        entries.forEach(([, url]) => { if (url) URL.revokeObjectURL(url) })
         return
       }
-      videoPreviewUrls.current.push(...loaded.map(([, url]) => url))
-      setVideoPreviews((current) => ({ ...current, ...Object.fromEntries(loaded) }))
+      const newUrls: string[] = []
+      const nextMap: Record<string, string> = {}
+      for (const [id, url] of entries) {
+        if (url) newUrls.push(url)
+        nextMap[id] = url ?? ''
+      }
+      videoPreviewUrls.current.push(...newUrls)
+      setVideoPreviews((current) => ({ ...current, ...nextMap }))
     })
     return () => { cancelled = true }
   }, [tracks, assets, videoPreviews])

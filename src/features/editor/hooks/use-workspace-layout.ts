@@ -24,7 +24,7 @@ export const layoutStorage: Storage = {
   getItem(key) {
     try {
       const raw = window.localStorage.getItem(key) ?? layoutMemory.get(key) ?? null
-      if (raw && (key.includes('sparta-workspace') || key === 'sparta-workspace')) {
+      if (raw && (key.includes('sparta-') || key.includes('workspace') || key.includes('panel'))) {
         try {
           const parsed = JSON.parse(raw)
           let modified = false
@@ -34,13 +34,23 @@ export const layoutStorage: Storage = {
             parsed.editor = Math.max(45, rest)
             modified = true
           }
+          if (typeof parsed.timeline === 'number' && (parsed.timeline < 30 || (typeof parsed.stage === 'number' && parsed.stage > 70))) {
+            parsed.stage = 58
+            parsed.timeline = 42
+            modified = true
+          }
           for (const k of Object.keys(parsed)) {
             const entry = parsed[k]
-            if (entry && Array.isArray(entry.layout) && typeof entry.layout[0] === 'number' && entry.layout[0] < 20) {
-              entry.layout[0] = 24
-              const rest = 100 - entry.layout[0] - (entry.layout[2] ?? 0)
-              entry.layout[1] = Math.max(45, rest)
-              modified = true
+            if (entry && Array.isArray(entry.layout)) {
+              if (entry.layout.length === 3 && typeof entry.layout[0] === 'number' && entry.layout[0] < 20) {
+                entry.layout[0] = 24
+                const rest = 100 - entry.layout[0] - (entry.layout[2] ?? 0)
+                entry.layout[1] = Math.max(45, rest)
+                modified = true
+              } else if (entry.layout.length === 2 && typeof entry.layout[1] === 'number' && entry.layout[1] < 30) {
+                entry.layout = [58, 42]
+                modified = true
+              }
             }
           }
           if (modified) {
@@ -140,7 +150,7 @@ export function useWorkspaceLayout() {
           })
         }
         const vertLayout = mainVerticalGroupRef.current?.getLayout() as Record<string, number> | undefined
-        if (vertLayout && typeof vertLayout.timeline === 'number' && vertLayout.timeline < 20) {
+        if (vertLayout && typeof vertLayout.timeline === 'number' && vertLayout.timeline < 32) {
           mainVerticalGroupRef.current?.setLayout({ stage: 58, timeline: 42 })
         }
       } catch {

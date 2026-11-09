@@ -79,10 +79,11 @@ export async function generateProjectCover(
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
 
-    // 1. Try to find a visual clip with image/video media
+    // 1. Try to find a visual clip with image/video media (limit search to first 3 to prevent stalls)
     const visualClips = state.tracks
       .flatMap((t) => t.clips)
       .filter((c) => Boolean(c.sourceAssetId))
+      .slice(0, 3)
 
     let drawnMedia = false
 

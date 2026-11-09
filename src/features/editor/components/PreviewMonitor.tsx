@@ -194,9 +194,18 @@ export function PreviewMonitor({
       if (!keep && source.url) URL.revokeObjectURL(source.url)
       return keep
     }))
-    layerSourcesRef.current = retained
-    setLayerSources(retained)
+
+    const currentKeys = Object.keys(current)
+    const retainedKeys = Object.keys(retained)
+    const isSameRetained = currentKeys.length === retainedKeys.length && currentKeys.every((k) => current[k]?.url === retained[k]?.url)
+    if (!isSameRetained) {
+      layerSourcesRef.current = retained
+      setLayerSources(retained)
+    }
+
     const missing = visualSources.filter(({ clip: item, assetId }) => retained[item.id]?.assetId !== assetId)
+    if (!missing.length) return
+
     void Promise.all(missing.map(async ({ clip: item, assetId }) => {
       try {
         return { clipId: item.id, assetId, url: await loadMediaSource(assetId) }
@@ -209,12 +218,20 @@ export function PreviewMonitor({
         return
       }
       const next = { ...layerSourcesRef.current }
+      let changed = false
       loaded.forEach(({ clipId, assetId, url }) => {
-        if (wanted.get(clipId) === assetId) next[clipId] = { assetId, url }
+        if (wanted.get(clipId) === assetId) {
+          if (next[clipId]?.url !== url) {
+            next[clipId] = { assetId, url }
+            changed = true
+          }
+        }
         else if (url) URL.revokeObjectURL(url)
       })
-      layerSourcesRef.current = next
-      setLayerSources(next)
+      if (changed) {
+        layerSourcesRef.current = next
+        setLayerSources(next)
+      }
     })
     return () => { cancelled = true }
   }, [visualSources])

@@ -49,9 +49,21 @@ export function AppRoot() {
 
       autosaveRef.current = autosave
 
-      // 2. Subscribe to store changes to schedule autosave
-      const unsubscribeStore = useEditorStore.subscribe(() => {
-        autosave.scheduleSave()
+      // 2. Subscribe to store changes to schedule autosave only when persistable content changes
+      const unsubscribeStore = useEditorStore.subscribe((state, prevState) => {
+        const persistableChanged =
+          state.projectName !== prevState.projectName ||
+          state.sequence !== prevState.sequence ||
+          state.tracks !== prevState.tracks ||
+          state.assets !== prevState.assets ||
+          state.markers !== prevState.markers ||
+          state.snapToFrames !== prevState.snapToFrames ||
+          state.mutedTracks !== prevState.mutedTracks ||
+          state.lockedTracks !== prevState.lockedTracks
+
+        if (persistableChanged) {
+          autosave.scheduleSave()
+        }
       })
 
       // 3. Flush on beforeunload
