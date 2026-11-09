@@ -275,3 +275,4 @@ export const YOUTUBE_TEMPLATES: SpartaTemplate[] = [
     },
   },
 ]
+

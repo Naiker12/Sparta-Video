@@ -292,3 +292,4 @@ export const BUSINESS_TEMPLATES: SpartaTemplate[] = [
     },
   },
 ]
+

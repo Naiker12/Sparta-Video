@@ -352,4 +352,55 @@ describe('editor project operations', () => {
     expect(right).toBeDefined()
     expect(right?.start).toBeCloseTo(5.0, 1)
   })
+
+  it('supports multi-clip selection, toggle, and atomic deletion of multiple clips', () => {
+    const store = useEditorStore.getState()
+    store.resetProject()
+
+    // Add 3 text clips
+    const c1 = store.addTextClip({ text: 'Clip 1', at: 0, duration: 2 })
+    const c2 = store.addTextClip({ text: 'Clip 2', at: 2, duration: 2 })
+    const c3 = store.addTextClip({ text: 'Clip 3', at: 4, duration: 2 })
+
+    // Single select
+    store.selectClip(c1)
+    expect(useEditorStore.getState().selectedClipId).toBe(c1)
+    expect(useEditorStore.getState().selectedClipIds).toEqual([c1])
+
+    // Toggle select c2 (shift/ctrl-click)
+    store.selectClip(c2, { toggle: true })
+    expect(useEditorStore.getState().selectedClipIds).toEqual([c1, c2])
+
+    // Toggle select c3
+    store.selectClip(c3, { toggle: true })
+    expect(useEditorStore.getState().selectedClipIds).toEqual([c1, c2, c3])
+
+    // Toggle c2 off
+    store.selectClip(c2, { toggle: true })
+    expect(useEditorStore.getState().selectedClipIds).toEqual([c1, c3])
+
+    // Select all
+    store.selectAllClips()
+    expect(useEditorStore.getState().selectedClipIds).toContain(c1)
+    expect(useEditorStore.getState().selectedClipIds).toContain(c2)
+    expect(useEditorStore.getState().selectedClipIds).toContain(c3)
+
+    // Move selected clips in block (+1.5s)
+    store.moveSelectedClips(1.5)
+    const stateAfterMove = useEditorStore.getState()
+    const movedC1 = stateAfterMove.tracks.flatMap((t) => t.clips).find((c) => c.id === c1)
+    expect(movedC1?.start).toBeCloseTo(1.5, 1)
+
+    // Delete selected clips atomically
+    store.deleteSelectedClips()
+    const stateAfterDelete = useEditorStore.getState()
+    expect(stateAfterDelete.tracks.flatMap((t) => t.clips).filter((c) => [c1, c2, c3].includes(c.id))).toHaveLength(0)
+    expect(stateAfterDelete.selectedClipId).toBe('')
+    expect(stateAfterDelete.selectedClipIds).toHaveLength(0)
+
+    // Undo restores all 3 clips
+    store.undo()
+    const stateAfterUndo = useEditorStore.getState()
+    expect(stateAfterUndo.tracks.flatMap((t) => t.clips).filter((c) => [c1, c2, c3].includes(c.id))).toHaveLength(3)
+  })
 })

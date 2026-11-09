@@ -43,6 +43,7 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
   const projectName = useEditorStore((state) => state.projectName)
   const sequence = useEditorStore((state) => state.sequence)
   const selectedClipId = useEditorStore((state) => state.selectedClipId)
+  const selectedClipIds = useEditorStore((state) => state.selectedClipIds)
   const selectedMediaId = useEditorStore((state) => state.selectedMediaId)
   const playhead = useEditorStore((state) => state.playhead)
   const playing = useEditorStore((state) => state.playing)
@@ -89,6 +90,9 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
   const toggleLock = useEditorStore((state) => state.toggleLock)
   const addAdjustmentLayer = useEditorStore((state) => state.addAdjustmentLayer)
   const freezeFrame = useEditorStore((state) => state.freezeFrame)
+  const clearClipSelection = useEditorStore((state) => state.clearClipSelection)
+  const deleteSelectedClips = useEditorStore((state) => state.deleteSelectedClips)
+  const selectAllClips = useEditorStore((state) => state.selectAllClips)
 
   const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId)
   const selectedClipTrack = tracks.find((t) => t.clips.some((c) => c.id === selectedClipId))
@@ -457,6 +461,7 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
         assets={assets}
         markers={markers}
         selectedClipId={selectedClipId}
+        selectedClipIds={selectedClipIds}
         selectedMediaId={selectedMediaId}
         playhead={playhead}
         playing={playing}
@@ -483,6 +488,9 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
         setAssistantMode={setAssistantMode}
         toggleAssistant={toggleAssistant}
         selectClip={selectClip}
+        clearClipSelection={clearClipSelection}
+        deleteSelectedClips={deleteSelectedClips}
+        selectAllClips={selectAllClips}
         selectMedia={selectMedia}
         setPlayhead={setPlayhead}
         setPlaying={setPlaying}

@@ -417,3 +417,4 @@ export const STICKMAN_TEMPLATES: SpartaTemplate[] = [
     },
   },
 ]
+

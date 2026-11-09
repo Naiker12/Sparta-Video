@@ -59,3 +59,4 @@ describe('Template Catalog v2 (24 modular templates)', () => {
     }
   })
 })
+

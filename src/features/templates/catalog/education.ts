@@ -292,3 +292,4 @@ export const EDUCATION_TEMPLATES: SpartaTemplate[] = [
     },
   },
 ]
+

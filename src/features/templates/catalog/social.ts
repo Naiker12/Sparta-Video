@@ -338,3 +338,4 @@ export const SOCIAL_TEMPLATES: SpartaTemplate[] = [
     },
   },
 ]
+

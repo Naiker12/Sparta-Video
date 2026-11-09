@@ -74,3 +74,4 @@ describe('Project Migrations Runner', () => {
     expect(() => runProjectMigrations({ random: 'garbage' })).toThrow(/no reconocido/i)
   })
 })
+

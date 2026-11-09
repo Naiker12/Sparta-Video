@@ -260,3 +260,4 @@ export const CINEMATIC_TEMPLATES: SpartaTemplate[] = [
     },
   },
 ]
+

@@ -22,6 +22,7 @@ interface EditorWorkspaceProps {
   assets: MediaItem[]
   markers: TimelineMarker[]
   selectedClipId: string | null
+  selectedClipIds?: string[]
   selectedMediaId: string | null
   playhead: number
   playing: boolean
@@ -52,7 +53,10 @@ interface EditorWorkspaceProps {
   assistantMode: AssistantMode
   setAssistantMode: (mode: AssistantMode) => void
   toggleAssistant: () => void
-  selectClip: (id: string) => void
+  selectClip: (id: string, options?: { toggle?: boolean; append?: boolean }) => void
+  clearClipSelection?: () => void
+  deleteSelectedClips?: () => void
+  selectAllClips?: () => void
   selectMedia: (id: string) => void
   setPlayhead: (time: number) => void
   setPlaying: (playing: boolean) => void
@@ -107,6 +111,7 @@ export function EditorWorkspace({
   assets,
   markers,
   selectedClipId,
+  selectedClipIds,
   selectedMediaId,
   playhead,
   playing,
@@ -133,6 +138,9 @@ export function EditorWorkspace({
   setAssistantMode,
   toggleAssistant,
   selectClip,
+  clearClipSelection,
+  deleteSelectedClips,
+  selectAllClips,
   selectMedia,
   setPlayhead,
   setPlaying,
@@ -375,6 +383,7 @@ export function EditorWorkspace({
               assets={assets}
               markers={markers}
               selected={selectedClipId ?? ''}
+              selectedIds={selectedClipIds}
               playhead={playhead}
               zoom={zoom}
               frameRate={frameRate}
@@ -386,6 +395,9 @@ export function EditorWorkspace({
               onMuteTrack={toggleMute}
               onLockTrack={toggleLock}
               onSelect={selectClip}
+              onClearSelection={clearClipSelection}
+              onDeleteSelectedClips={deleteSelectedClips}
+              onSelectAll={selectAllClips}
               onSeek={setPlayhead}
               onZoom={setZoom}
               onAddTrack={addTrack}

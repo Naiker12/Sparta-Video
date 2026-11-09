@@ -18,15 +18,20 @@ export type SubtitleEntryInput = {
   presetId?: string
 }
 
-export type ProjectSnapshot = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks' | 'selectedClipId' | 'selectedMediaId'>
+export type ProjectSnapshot = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks' | 'selectedClipId' | 'selectedClipIds' | 'selectedMediaId'>
 export type EditorState = {
   projectName: string; sequence: SequenceSettings; tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]
-  selectedClipId: string; selectedMediaId: string | null; playhead: number; zoom: number; playing: boolean; snapToFrames: boolean
+  selectedClipId: string; selectedClipIds: string[]; selectedMediaId: string | null; playhead: number; zoom: number; playing: boolean; snapToFrames: boolean
   activeTool: 'select' | 'razor'
   mutedTracks: string[]; lockedTracks: string[]; past: ProjectSnapshot[]; future: ProjectSnapshot[]
   setProjectName: (name: string) => void; setSequence: (sequence: SequenceSettings) => void
   setActiveTool: (tool: 'select' | 'razor') => void
-  selectClip: (id: string) => void; selectMedia: (id: string) => void; setPlayhead: (time: number) => void
+  selectClip: (id: string, options?: { toggle?: boolean; append?: boolean }) => void
+  selectAllClips: () => void
+  clearClipSelection: () => void
+  deleteSelectedClips: () => void
+  moveSelectedClips: (deltaTime: number) => void
+  selectMedia: (id: string) => void; setPlayhead: (time: number) => void
   setZoom: (zoom: number) => void; setPlaying: (playing: boolean) => void; addAssets: (assets: MediaItem[]) => void
   updateAsset: (assetId: string, changes: Partial<Pick<MediaItem, 'title' | 'type' | 'detail' | 'thumb' | 'status' | 'durationSeconds' | 'width' | 'height'>>) => void; removeAsset: (assetId: string) => void
   addMedia: (asset: MediaItem, at?: number, trackId?: string) => string
@@ -121,7 +126,7 @@ export const getPersistable = (state: EditorState = useEditorStore.getState()): 
 
 export const useEditorStore = create<EditorState>()((set, get) => ({
   projectName: 'Sin título', sequence: { width: 1920, height: 1080, frameRate: 24 },
-  tracks: emptyTracks(), assets: [], markers: [], selectedClipId: '', selectedMediaId: null,
+  tracks: emptyTracks(), assets: [], markers: [], selectedClipId: '', selectedClipIds: [], selectedMediaId: null,
   playhead: 0, zoom: 1, playing: false, snapToFrames: true, activeTool: 'select', mutedTracks: [], lockedTracks: [], past: [], future: [],
   setProjectName: (name) => set((state) => { const projectName = name.trim() || 'Sin título'; return projectName === state.projectName ? state : commit(state, { projectName }) }),
   setSequence: (sequence) => set((state) => {
@@ -165,8 +170,82 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     return commit(state, { sequence: next, tracks })
   }),
   setActiveTool: (activeTool) => set({ activeTool }),
-  selectClip: (id) => set({ selectedClipId: id, selectedMediaId: null }),
-  selectMedia: (id) => set({ selectedMediaId: id, selectedClipId: '' }),
+  selectClip: (id, options) => set((state) => {
+    if (!id) return { selectedClipId: '', selectedClipIds: [], selectedMediaId: null }
+    if (options?.toggle) {
+      const nextIds = state.selectedClipIds.includes(id)
+        ? state.selectedClipIds.filter((item) => item !== id)
+        : [...state.selectedClipIds, id]
+      return {
+        selectedClipIds: nextIds,
+        selectedClipId: nextIds[nextIds.length - 1] ?? '',
+        selectedMediaId: null,
+      }
+    }
+    if (options?.append) {
+      const nextIds = state.selectedClipIds.includes(id) ? state.selectedClipIds : [...state.selectedClipIds, id]
+      return {
+        selectedClipIds: nextIds,
+        selectedClipId: id,
+        selectedMediaId: null,
+      }
+    }
+    return {
+      selectedClipId: id,
+      selectedClipIds: [id],
+      selectedMediaId: null,
+    }
+  }),
+  selectAllClips: () => set((state) => {
+    const allIds = state.tracks
+      .filter((t) => !state.lockedTracks.includes(t.id))
+      .flatMap((t) => t.clips.map((c) => c.id))
+    return {
+      selectedClipIds: allIds,
+      selectedClipId: allIds[0] ?? '',
+      selectedMediaId: null,
+    }
+  }),
+  clearClipSelection: () => set({ selectedClipId: '', selectedClipIds: [] }),
+  deleteSelectedClips: () => set((state) => {
+    const idsToDelete = new Set(
+      state.selectedClipIds.length > 0 ? state.selectedClipIds : state.selectedClipId ? [state.selectedClipId] : [],
+    )
+    if (idsToDelete.size === 0) return state
+    const tracks = copyTracks(state.tracks).map((track) => {
+      if (state.lockedTracks.includes(track.id)) return track
+      return {
+        ...track,
+        clips: track.clips.filter((c) => !idsToDelete.has(c.id)),
+      }
+    })
+    return {
+      ...commit(state, { tracks }),
+      selectedClipId: '',
+      selectedClipIds: [],
+    }
+  }),
+  moveSelectedClips: (deltaTime) => set((state) => {
+    const ids = new Set(
+      state.selectedClipIds.length > 0 ? state.selectedClipIds : state.selectedClipId ? [state.selectedClipId] : [],
+    )
+    if (ids.size === 0 || Math.abs(deltaTime) < 0.001) return state
+    const fps = state.sequence.frameRate
+    const tracks = copyTracks(state.tracks).map((track) => {
+      if (state.lockedTracks.includes(track.id)) return track
+      return {
+        ...track,
+        clips: track.clips.map((c) => {
+          if (!ids.has(c.id)) return c
+          const rawStart = Math.max(0, c.start + deltaTime)
+          const nextStart = state.snapToFrames ? Math.round(rawStart * fps) / fps : rawStart
+          return { ...c, start: nextStart }
+        }),
+      }
+    })
+    return commit(state, { tracks })
+  }),
+  selectMedia: (id) => set({ selectedMediaId: id, selectedClipId: '', selectedClipIds: [] }),
   setPlayhead: (time) => set({ playhead: Math.max(0, time) }),
   setZoom: (zoom) => set({ zoom: Math.max(0.25, Math.min(2.4, zoom)) }),
   setPlaying: (playing) => set({ playing }),
@@ -772,7 +851,14 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     const owner = state.tracks.find((track) => track.clips.some((clip) => clip.id === clipId))
     if (!owner || state.lockedTracks.includes(owner.id)) return state
     const tracks = copyTracks(state.tracks).map((track) => ({ ...track, clips: track.clips.filter((clip) => clip.id !== clipId) }))
-    return JSON.stringify(tracks) === JSON.stringify(state.tracks) ? state : { ...commit(state, { tracks }), selectedClipId: state.selectedClipId === clipId ? '' : state.selectedClipId }
+    const nextSelectedIds = state.selectedClipIds.filter((id) => id !== clipId)
+    return JSON.stringify(tracks) === JSON.stringify(state.tracks)
+      ? state
+      : {
+          ...commit(state, { tracks }),
+          selectedClipId: state.selectedClipId === clipId ? (nextSelectedIds[0] ?? '') : state.selectedClipId,
+          selectedClipIds: nextSelectedIds,
+        }
   }),
   duplicateClip: (clipId) => {
     let duplicatedId = ''

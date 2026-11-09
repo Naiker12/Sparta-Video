@@ -11,7 +11,12 @@ import { cn } from '../../../shared/lib/utils'
 
 type Props = {
   tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]; selected: string; playhead: number; zoom: number; frameRate: number; snap: boolean; expanded: boolean; tool: 'select' | 'razor'
-  onSelect: (id: string) => void; onSeek: (time: number) => void; onZoom: (zoom: number) => void
+  selectedIds?: string[]
+  onSelect: (id: string, options?: { toggle?: boolean; append?: boolean }) => void
+  onClearSelection?: () => void
+  onDeleteSelectedClips?: () => void
+  onSelectAll?: () => void
+  onSeek: (time: number) => void; onZoom: (zoom: number) => void
   mutedTracks: string[]; lockedTracks: string[]; onMuteTrack: (id: string) => void; onLockTrack: (id: string) => void
   onAddTrack?: (kind: 'video' | 'audio') => void; onAddMedia: (item: MediaItem, at: number, trackId?: string) => void
   onMoveClip: (clipId: string, start: number, duration?: number) => void; onMoveClipToNewTrack: (clipId: string) => void; onSplitClip: (clipId: string, time: number) => void
@@ -27,7 +32,7 @@ type Gesture = { id: string; startX: number; originalStart: number; originalDura
 type GestureFeedback = { id: string; mode: Gesture['mode']; start: number; duration: number; originalStart: number; originalDuration: number }
 type SnapFeedback = { time: number; target: string }
 
-export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onFreezeFrame, onAddTextClip, onAddAdjustmentLayer, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool, onImportFiles, onApplyTransition }: Props) {
+export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onClearSelection, onDeleteSelectedClips, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onFreezeFrame, onAddTextClip, onAddAdjustmentLayer, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool, onImportFiles, onApplyTransition }: Props) {
   const scale = 31 * zoom
   const sequenceDuration = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration)), ...markers.map((marker) => marker.time))
   const rulerDuration = Math.max(10, sequenceDuration + 2)
@@ -279,12 +284,34 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
         >
           <Bookmark size={14} />
         </button>
-        {onDeleteClip && (
+        {selectedIds && selectedIds.length > 1 && (
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/40 text-primary text-[10px] font-semibold">
+            <span>{selectedIds.length} {t('clips seleccionados', 'clips selected')}</span>
+            {onClearSelection && (
+              <button
+                type="button"
+                onClick={onClearSelection}
+                className="hover:text-white transition-colors cursor-pointer ml-0.5"
+                title={t('Deseleccionar', 'Deselect')}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        )}
+        {(onDeleteSelectedClips || onDeleteClip) && (
           <button
             type="button"
-            onClick={() => { if (selected) onDeleteClip(selected) }}
-            className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-input border-0 transition-colors cursor-pointer"
-            title={t('Eliminar clip seleccionado (Supr)', 'Delete selected clip (Del)')}
+            onClick={() => {
+              if (onDeleteSelectedClips && selectedIds && selectedIds.length > 0) {
+                onDeleteSelectedClips()
+              } else if (selected && onDeleteClip) {
+                onDeleteClip(selected)
+              }
+            }}
+            disabled={!selected && (!selectedIds || selectedIds.length === 0)}
+            className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-input border-0 transition-colors cursor-pointer disabled:opacity-40"
+            title={t('Eliminar selección (Supr)', 'Delete selection (Del)')}
           >
             <Trash2 size={14} />
           </button>
@@ -430,8 +457,9 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
                 const density = pixelWidth < 48 ? 'clip-tiny' : pixelWidth < 105 ? 'clip-compact' : 'clip-full'
                 const fullClipTitle = clip.text ?? clip.title
                 const waveform = waveforms[clip.id]
+                const isSelected = selectedIds && selectedIds.length > 0 ? selectedIds.includes(clip.id) : selected === clip.id
                 return (
-                  <button key={clip.id} disabled={isLocked} className={`timeline-clip ${density} ${overlapIds.has(clip.id) ? 'overlap-warning' : ''} ${clip.color} ${selected === clip.id ? 'clip-selected' : ''} ${clip.kind === 'audio' ? 'audio-clip clip-kind-audio' : ''} ${clip.kind === 'adjustment' ? 'adjustment-clip clip-kind-fx' : ''} ${(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-text' : ''} ${clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-video' : ''} ${tool === 'razor' ? 'razor-cursor' : ''}`} style={{ left: `${position.start * scale}px`, width: `${pixelWidth}px`, top: `${5 + (laneLayouts.get(track.id)?.rows.get(clip.id) ?? 0) * (laneLayouts.get(track.id)?.rowHeight ?? 42)}px`, zIndex: selected === clip.id ? 3 : 1 }} onPointerMove={(event) => { if (tool === 'razor') { const rect = event.currentTarget.getBoundingClientRect(); setRazorTime(position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale))) } }} onPointerLeave={() => setRazorTime(null)} onPointerDown={(event) => { if (tool === 'razor') { event.preventDefault(); event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const cutTime = position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale)); onSplitClip(clip.id, cutTime); setRazorTime(null); return } beginGesture(event, clip, 'move') }} onClick={() => { if (tool === 'select') onSelect(clip.id) }} title={tool === 'razor' ? `${fullClipTitle} · corte en ${formatTimecode(razorTime ?? position.start, frameRate)} · haz clic en el punto de corte` : `${fullClipTitle} · inicio ${formatTimecode(position.start, frameRate)} · duración ${formatTimecode(position.duration, frameRate)} · arrastra para mover`} aria-label={`${fullClipTitle}, inicio ${formatTimecode(position.start, frameRate)}, duración ${formatTimecode(position.duration, frameRate)}. Flechas para mover; Alt más flechas recorta el borde derecho; Ctrl más Alt recorta el izquierdo`}>
+                  <button key={clip.id} disabled={isLocked} className={`timeline-clip ${density} ${overlapIds.has(clip.id) ? 'overlap-warning' : ''} ${clip.color} ${isSelected ? 'clip-selected ring-2 ring-primary/80 shadow-md shadow-primary/25' : ''} ${clip.kind === 'audio' ? 'audio-clip clip-kind-audio' : ''} ${clip.kind === 'adjustment' ? 'adjustment-clip clip-kind-fx' : ''} ${(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-text' : ''} ${clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-video' : ''} ${tool === 'razor' ? 'razor-cursor' : ''}`} style={{ left: `${position.start * scale}px`, width: `${pixelWidth}px`, top: `${5 + (laneLayouts.get(track.id)?.rows.get(clip.id) ?? 0) * (laneLayouts.get(track.id)?.rowHeight ?? 42)}px`, zIndex: isSelected ? 3 : 1 }} onPointerMove={(event) => { if (tool === 'razor') { const rect = event.currentTarget.getBoundingClientRect(); setRazorTime(position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale))) } }} onPointerLeave={() => setRazorTime(null)} onPointerDown={(event) => { if (tool === 'razor') { event.preventDefault(); event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const cutTime = position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale)); onSplitClip(clip.id, cutTime); setRazorTime(null); return } beginGesture(event, clip, 'move') }} onClick={(event) => { if (tool === 'select') { if (event.shiftKey || event.ctrlKey || event.metaKey) { onSelect(clip.id, { toggle: true }) } else { onSelect(clip.id) } } }} title={tool === 'razor' ? `${fullClipTitle} · corte en ${formatTimecode(razorTime ?? position.start, frameRate)} · haz clic en el punto de corte` : `${fullClipTitle} · inicio ${formatTimecode(position.start, frameRate)} · duración ${formatTimecode(position.duration, frameRate)} · arrastra para mover`} aria-label={`${fullClipTitle}, inicio ${formatTimecode(position.start, frameRate)}, duración ${formatTimecode(position.duration, frameRate)}. Flechas para mover; Alt más flechas recorta el borde derecho; Ctrl más Alt recorta el izquierdo`}>
                     <span className={`clip-art ${clip.thumbnail}`} />
                     {clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') && <div className="video-filmstrip-strip" style={videoPreviews[clip.sourceAssetId ?? assets.find((asset) => asset.title === clip.title)?.id ?? ''] ? { backgroundImage: `linear-gradient(rgba(8, 11, 17, .3), rgba(8, 11, 17, .3)), url("${videoPreviews[clip.sourceAssetId ?? assets.find((asset) => asset.title === clip.title)?.id ?? '']}")` } : undefined} />}
                     {clip.transitionIn && <div className="timeline-transition-badge" title={`Transición: ${clip.transitionIn.effectId}`}>◪</div>}
