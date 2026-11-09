@@ -68,15 +68,10 @@ export function HomeScreen({ onOpenProject, onOpenTemplates, onOpenPreferences }
     format: ProjectPresetFormat
     customResolution?: { width: number; height: number }
     fps: number
-    openTemplates?: boolean
   }) => {
     try {
       const record = await defaultProjectService.createProject(options)
-      if (options.openTemplates && onOpenTemplates) {
-        onOpenTemplates()
-      } else {
-        onOpenProject(record.id)
-      }
+      onOpenProject(record.id)
     } catch {
       toast.error(t('Error al crear el proyecto', 'Error creating project'))
     }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Film, LayoutTemplate, X } from 'lucide-react'
+import { Film, X } from 'lucide-react'
 import { FORMAT_RESOLUTIONS, type ProjectPresetFormat } from '../domain/project-factory'
 import { t } from '../../../shared/i18n/locale'
 import { Dialog, DialogContent, DialogTitle } from '../../../shared/ui/dialog'
@@ -12,7 +12,6 @@ interface NewProjectDialogProps {
     format: ProjectPresetFormat
     customResolution?: { width: number; height: number }
     fps: number
-    openTemplates?: boolean
   }) => void
 }
 
@@ -23,7 +22,6 @@ export function NewProjectDialog({ open, onOpenChange, onCreate }: NewProjectDia
   const [customHeight, setCustomHeight] = useState(1080)
   const [isCustom, setIsCustom] = useState(false)
   const [fps, setFps] = useState(24)
-  const [startFromTemplate, setStartFromTemplate] = useState(false)
 
   const currentResolution = isCustom
     ? { width: customWidth, height: customHeight }
@@ -36,7 +34,6 @@ export function NewProjectDialog({ open, onOpenChange, onCreate }: NewProjectDia
       format,
       customResolution: isCustom ? { width: customWidth, height: customHeight } : undefined,
       fps,
-      openTemplates: startFromTemplate,
     })
     onOpenChange(false)
   }
@@ -174,19 +171,6 @@ export function NewProjectDialog({ open, onOpenChange, onCreate }: NewProjectDia
               </div>
             </div>
           </div>
-
-          <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={startFromTemplate}
-              onChange={(e) => setStartFromTemplate(e.target.checked)}
-              className="rounded border-[#2d313c] text-primary focus:ring-0 focus:outline-none"
-            />
-            <span className="text-xs text-muted-foreground flex items-center gap-1.5">
-              <LayoutTemplate size={13} className="text-primary" />
-              {t('Empezar desde una plantilla…', 'Start from a template…')}
-            </span>
-          </label>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#272a33]">
             <button
