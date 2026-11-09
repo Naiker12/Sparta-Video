@@ -5,6 +5,9 @@ export type { ProjectPresetFormat }
 
 export type ProjectId = string
 
+export const CURRENT_PROJECT_SCHEMA_VERSION = 2 as const
+export type CurrentProjectSchemaVersion = typeof CURRENT_PROJECT_SCHEMA_VERSION
+
 export type PersistedProjectState = {
   projectName: string
   sequence: SequenceSettings
@@ -29,7 +32,7 @@ export type ProjectOrigin = {
 
 export type ProjectRecord = {
   id: ProjectId
-  schemaVersion: 2
+  schemaVersion: CurrentProjectSchemaVersion
   createdAt: string
   updatedAt: string
   origin?: ProjectOrigin

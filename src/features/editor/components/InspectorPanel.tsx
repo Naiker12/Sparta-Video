@@ -6,15 +6,15 @@ import type { Clip, ClipAnimation, EffectInstance, Keyframe, MediaItem, TextAnim
 import { CLIP_ANIM_COMBO, buildAnimationKeyframes, getDefaultClipAnimation } from '../services/clip-animation'
 import { ADJUST_PARAMS, EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
 import { parseCubeLUT } from '../effects/lut-parser'
-import { toast } from '../../../components/ui/toast-service'
+import { toast } from '../../../shared/ui/toast-service'
 import { ActionMenu } from './ActionMenu'
 import { formatTimecode } from '../timecode'
-import { t } from '../services/locale'
-import { Switch } from '../../../components/ui/switch'
-import { Slider } from '../../../components/ui/slider'
-import { Input } from '../../../components/ui/input'
-import { AccordionSection } from '../../../components/ui/accordion'
-import { cn } from '../../../lib/utils'
+import { t } from '../../../shared/i18n/locale'
+import { Switch } from '../../../shared/ui/switch'
+import { Slider } from '../../../shared/ui/slider'
+import { Input } from '../../../shared/ui/input'
+import { AccordionSection } from '../../../shared/ui/accordion'
+import { cn } from '../../../shared/lib/utils'
 import {
   TEXT_ANIMATIONS_IN,
   TEXT_ANIMATIONS_LOOP,

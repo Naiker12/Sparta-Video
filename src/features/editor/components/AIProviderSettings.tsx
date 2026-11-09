@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bot, Check, CircleAlert, Cpu, KeyRound, LoaderCircle, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
-import { t } from '../services/locale'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../components/ui/dialog'
-import { toast } from '../../../components/ui/toast-service'
+import { t } from '../../../shared/i18n/locale'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../shared/ui/dialog'
+import { toast } from '../../../shared/ui/toast-service'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import {
   AI_TASKS, discoverModels, forgetSessionKey, getSessionKey, hasSessionKey, makeProviderId, providerKinds, readProviderRegistry,

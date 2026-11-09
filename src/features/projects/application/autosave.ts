@@ -1,4 +1,10 @@
-import type { ProjectId, ProjectRecord, PersistedProjectState, ProjectWorkspace } from '../domain/project.types'
+import {
+  CURRENT_PROJECT_SCHEMA_VERSION,
+  type ProjectId,
+  type ProjectRecord,
+  type PersistedProjectState,
+  type ProjectWorkspace,
+} from '../domain/project.types'
 import type { ProjectRepository } from './project-repository'
 import { defaultProjectRepository } from '../infrastructure/idb-project-repository'
 
@@ -95,7 +101,7 @@ export class ProjectAutosave {
 
         const record: ProjectRecord = {
           id: this.projectId,
-          schemaVersion: 2,
+          schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
           origin: existing?.origin ?? { kind: 'blank' },

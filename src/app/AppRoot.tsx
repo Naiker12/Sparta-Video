@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { bootstrapApp } from './bootstrap'
 import { useAppShellStore } from './app-shell-store'
 import { HomeScreen } from '../features/projects/ui/HomeScreen'
 import { NewProjectDialog } from '../features/projects/ui/NewProjectDialog'
-import { App } from '../App'
+const App = lazy(() => import('../App').then((m) => ({ default: m.App })))
 import { defaultProjectRepository } from '../features/projects/infrastructure/idb-project-repository'
 import { defaultProjectService } from '../features/projects/application/project-service'
 import { ProjectAutosave } from '../features/projects/application/autosave'
@@ -146,7 +146,14 @@ export function AppRoot() {
 
   if (view === 'editor') {
     return (
-      <>
+      <Suspense
+        fallback={
+          <div className="w-full h-screen bg-[#0e1015] flex flex-col items-center justify-center text-muted-foreground gap-3 select-none">
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <span className="text-xs font-mono tracking-wider">{t('Cargando editor…', 'Loading editor…')}</span>
+          </div>
+        }
+      >
         <App
           onGoHome={() => void handleGoHome()}
           onNewProjectRequest={() => setNewProjectDialogOpen(true)}
@@ -156,7 +163,7 @@ export function AppRoot() {
           onOpenChange={setNewProjectDialogOpen}
           onCreate={(opts) => void handleCreateNewProject(opts)}
         />
-      </>
+      </Suspense>
     )
   }
 

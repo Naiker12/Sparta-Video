@@ -72,82 +72,55 @@ Puede ejecutarse de dos maneras:
 ### Calidad
 | Herramienta | Estado |
 |---|---|
-| Vitest + Testing Library | 75/75 pruebas unitarias passing (`npm test`) |
-| ESLint + oxlint | 0 errores (`npm run lint`) |
-| TypeScript | Compilación limpia |
+| Vitest + Testing Library | 140/140 pruebas unitarias passing (`npm test` / `npx vitest run`) |
+| ESLint | 0 errores (`npm run lint`) |
+| TypeScript | Compilación limpia con `tsc -b` |
+| Vite Build | Code-splitting con lazy loading (Home screen ~66 KB gzip) |
 | Cargo test | 7/7 pruebas Rust |
 
 ---
 
 ## 3. Arquitectura del código
 
+Sparta Video sigue una arquitectura limpia orientada a características (*Feature-Sliced Clean Architecture*):
+
 ```
 src/
-├── App.tsx                          # Shell principal, atajos globales, layout
-├── App.css                          # Estilos globales de la UI (migración pendiente)
-├── index.css                        # Base CSS + tokens importados
-├── styles/
-│   ├── tokens.css                   # Variables semánticas de diseño (colores, tipografía, espaciado)
-│   └── editor-polish.css            # Refinamientos de interacción y paneles
-├── components/ui/                   # Primitivas de UI reutilizables
-│   ├── button, input, slider,
-│   │   select, switch, tabs,
-│   │   accordion, badge,
-│   │   dialog, toggle-group
-│   ├── toast.tsx                    # Notificaciones accesibles (WAI-ARIA live regions)
-│   └── toast-service.ts             # API imperativa para toasts
-├── lib/utils.ts                     # clsx + tailwind-merge
-└── features/editor/
-    ├── model.ts                     # Tipos de dominio: Clip, Track, MediaItem, Keyframe, etc.
-    ├── editor-store.ts              # Zustand store: estado + acciones + undo/redo + persistencia
-    ├── timecode.ts                  # Conversión temporal, regla, SMPTE
-    ├── components/
-    │   ├── MediaLibraryPanel.tsx    # Biblioteca: catálogo, filtros, drag-and-drop
-    │   ├── PreviewMonitor.tsx       # Monitor: transporte, timecode, zoom, guías
-    │   ├── InspectorPanel.tsx       # Inspector: propiedades de clip, audio, movimiento
-    │   ├── TimelinePanel.tsx        # Timeline: pistas, clips, herramientas, snapping
-    │   ├── AssistantPanel.tsx       # Copiloto IA: chat, propuestas revisables, chips
-    │   ├── AIProviderSettings.tsx   # Configuración de proveedores y perfiles IA
-    │   ├── PreferencesSheet.tsx     # Drawer de preferencias (workspace, atajos)
-    │   ├── ExportDialog.tsx         # Modal de exportación con perfiles y progreso
-    │   ├── AudioGenerationPanel.tsx # ElevenLabs: voz y SFX con inserción en timeline
-    │   ├── RenameProjectDialog.tsx  # Cambio de nombre del proyecto
-    │   ├── ActionMenu.tsx           # Menú contextual reutilizable
-    │   ├── StudioIcons.tsx          # Iconos SVG propios complementarios
-    │   └── controls.tsx             # Primitivas de control de transporte
-    ├── effects/
-    │   ├── catalog.ts               # Catálogo de efectos (LUTs, pixel, transiciones) + registro
-    │   ├── lut-parser.ts            # Parser de archivos .cube LUT 3D
-    │   ├── pixel-effects.ts         # Efectos de píxel (brillo, contraste, saturación, etc.)
-    │   └── transition-math.ts       # Cálculos de transición (fade, wipe, etc.)
-    ├── render/
-    │   ├── compositor.ts            # Compositor WebGL (estructura lista, integración pendiente)
-    │   └── shaders.ts               # GLSL shaders para compositing GPU
-    └── services/
-        ├── contracts.ts             # Contratos TypeScript y esquemas Zod de servicios
-        ├── ai-chat.ts               # Cliente de chat (OpenAI/Anthropic/Gemini/custom)
-        ├── ai-operations.ts         # Operaciones tipadas de IA + parser + applyAIOperations
-        ├── ai-preferences.ts        # Preferencias de IA expuestas al asistente
-        ├── ai-provider-registry.ts  # Perfiles, catálogos y gestión de API keys
-        ├── appearance-preferences.ts # Preferencias de apariencia del editor
-        ├── audio-generation.ts      # ElevenLabs TTS y SFX
-        ├── audio-playback.ts        # TimelineAudioEngine: mezcla multipista en tiempo real
-        ├── export-engine.ts         # renderSequence: Canvas 2D + WebCodecs/MediaRecorder
-        ├── keyframe-interpolation.ts # Interpolación Hermite cúbica de keyframes
-        ├── locale.ts                # Función t() para texto bilingüe ES/EN
-        ├── media-catalog.ts         # Validación y normalización de MediaItem
-        ├── media-fit.ts             # Cálculo de fit/fill/stretch de clips en canvas
-        ├── media-storage.ts         # CRUD de blobs en IndexedDB
-        ├── project-file.ts          # Serialización/deserialización de .sparta
-        ├── subtitle-generator.ts    # Pipeline completo de subtítulos (VAD+Whisper+LLM)
-        ├── text-presets.ts          # Definición de plantillas de texto animado
-        └── whisper.worker.ts        # Web Worker: modelo Whisper local via @huggingface/transformers
-
+├── app/                             # Shell raíz y arranque de la aplicación
+│   ├── AppRoot.tsx                  # Enrutador principal: Inicio vs Editor (lazy-loaded)
+│   ├── app-shell-store.ts           # Estado global de pantalla activa ('home' | 'editor')
+│   └── bootstrap.ts                 # Inicialización de persistencia y migraciones
+├── App.tsx                          # Shell del editor cargado dinámicamente con suspense
+├── App.css                          # Estilos globales y tokens
+├── index.css                        # Import de tokens y Tailwind v4
+├── shared/                          # Componentes y utilidades compartidas
+│   ├── ui/                          # Primitivas accesibles consolidadas (Button, Dialog, Slider, etc.)
+│   ├── i18n/locale.ts               # Función t(es, en) de traducción centralizada
+│   └── lib/utils.ts                 # clsx + tailwind-merge (cn)
+├── features/
+│   ├── projects/                    # Multi-proyecto, IndexedDB, versiones y papelera
+│   │   ├── domain/                  # Entidades puras (ProjectRecord, ProjectSummary, Esquemas Zod)
+│   │   ├── application/             # Servicios (ProjectService, autosave, media-gc, legacy-migration)
+│   │   ├── infrastructure/          # Adaptador IndexedDB (sparta-video-projects-v1) y runner de migraciones
+│   │   └── ui/                      # HomeScreen (CapCut style), NewProjectDialog, ContinueBanner
+│   ├── templates/                   # Sistema de plantillas de vídeo
+│   │   ├── domain/                  # SpartaTemplate, TemplateSlot, instantiateTemplate
+│   │   ├── catalog/                 # Catálogo de plantillas clasificadas (Stickman, Redes, YouTube...)
+│   │   ├── application/             # TemplateRepository port
+│   │   ├── infrastructure/          # IdbTemplateRepository (integrado en sparta-video-projects-v1)
+│   │   └── ui/                      # TemplateGallery, TemplatePreview (60fps hover animado), SaveAsTemplateDialog
+│   └── editor/                      # Editor NLE completo
+│       ├── model.ts                 # Modelos de dominio de línea de tiempo (Track, Clip, Keyframe)
+│       ├── editor-store.ts          # Store de Zustand con undo/redo y operaciones de pista
+│       ├── components/              # Paneles del editor (Timeline, Inspector, Preview, Library, Assistant)
+│       ├── render/                  # Compositor WebGL y shaders para aceleración gráfica
+│       ├── effects/                 # LUT parser 3D, filtros de píxel y transiciones
+│       └── services/                # Export engine, subtítulos con Whisper, audio mixing, SRT converter
 src-tauri/
-├── src/lib.rs                       # Comandos Tauri: chat_with_provider, fetch_model_catalog, credenciales
-├── src/main.rs                      # Punto de entrada nativo
-├── capabilities/default.json        # Permisos IPC mínimos (fetch, dialog, path)
-└── tauri.conf.json                  # Ventana 1440×900, CSP, targets NSIS+MSI
+├── src/lib.rs                       # Comandos IPC Tauri: proxy seguro de IA, keyring de credenciales
+├── src/main.rs                      # Punto de entrada de aplicación nativa
+├── capabilities/default.json        # Permisos mínimos de IPC
+└── tauri.conf.json                  # Configuración de ventana y empaquetado de escritorio
 ```
 
 ---
@@ -155,31 +128,38 @@ src-tauri/
 ## 4. Modelo de dominio
 
 ```
-Proyecto (.sparta)
-├── projectName: string
-├── sequence: { width, height, frameRate }
-├── tracks: Track[]
-│   ├── id, name, kind ('video' | 'audio')
-│   └── clips: Clip[]
-│       ├── id, title, start, duration, color
-│       ├── sourceAssetId?              → referencia a MediaItem en IndexedDB
-│       ├── kind: 'video' | 'audio' | 'adjustment'
-│       ├── transform: { x, y, scaleX, scaleY, rotation }
-│       ├── opacity, blendMode, fit, crop, flipH, flipV
-│       ├── speed, preservePitch, freezeTime
-│       ├── effects: EffectInstance[]
-│       ├── transitionIn?, transitionOut?
-│       ├── volume, fadeIn, fadeOut
-│       ├── keyframes: Keyframe[]
-│       ├── text?, textStyle?, textAnimation?  → clips de texto/subtítulo
-├── assets: MediaItem[]
-│   ├── id, title, detail, thumb, type, durationSeconds
-│   ├── status: 'catalog-only' | 'ready' | 'missing' | 'processing' | 'error'
-│   └── width?, height?, sourcePath?
-├── markers: TimelineMarker[]
-├── snapToFrames: boolean
-├── mutedTracks: Set<string>
-└── lockedTracks: Set<string>
+Proyecto (.sparta / IndexedDB v2)
+├── id: ProjectId (UUID)
+├── schemaVersion: 2 (CURRENT_PROJECT_SCHEMA_VERSION)
+├── createdAt: ISO string
+├── updatedAt: ISO string
+├── origin: { kind: 'blank' | 'template' | 'import', templateId?: string }
+├── state: PersistedProjectState
+│   ├── projectName: string
+│   ├── sequence: { width, height, frameRate }
+│   ├── tracks: Track[]
+│   │   ├── id, name, kind ('video' | 'audio')
+│   │   └── clips: Clip[]
+│   │       ├── id, title, start, duration, color
+│   │       ├── sourceAssetId?          → referencia a MediaItem en IndexedDB
+│   │       ├── kind: 'video' | 'audio' | 'adjustment'
+│   │       ├── transform: { x, y, scaleX, scaleY, rotation }
+│   │       ├── opacity, blendMode, fit, crop, flipH, flipV
+│   │       ├── speed, preservePitch, freezeTime
+│   │       ├── effects: EffectInstance[]
+│   │       ├── transitionIn?, transitionOut?
+│   │       ├── volume, fadeIn, fadeOut
+│   │       ├── keyframes: Keyframe[]
+│   │       ├── text?, textStyle?, textAnimation?  → clips de texto/subtítulo
+│   ├── assets: MediaItem[]
+│   │   ├── id, title, detail, thumb, type, durationSeconds
+│   │   ├── status: 'catalog-only' | 'ready' | 'missing' | 'processing' | 'error'
+│   │   └── width?, height?, sourcePath?
+│   ├── markers: TimelineMarker[]
+│   ├── snapToFrames: boolean
+│   ├── mutedTracks: string[]
+│   └── lockedTracks: string[]
+└── workspace?: { playhead, zoom, selectedClipId }
 ```
 
 **Historial (undo/redo):** El store mantiene `past[]` y `future[]` de snapshots del proyecto. Cada acción llama a `commit()` con coalescencia temporal de 800 ms para agrupar gestos continuos.
@@ -192,37 +172,34 @@ Proyecto (.sparta)
 
 | Área | Detalle |
 |---|---|
-| **Shell y layout** | Paneles redimensionables, barra superior, atajos globales |
-| **Timeline** | Mover/trim/split clips, herramienta Razor, marcadores, snapping al cuadro, zoom, scroll sincronizado |
-| **Inspector** | Propiedades de clip (transform, opacity, blend, volume, fades, keyframes como datos) |
-| **Biblioteca** | Catálogo, filtros, búsqueda, lista/cuadrícula, drag-and-drop al timeline |
-| **Proyecto** | Guardar/abrir `.sparta`, IndexedDB para blobs, undo/redo con historial agrupado |
-| **Audio playback** | `TimelineAudioEngine` sincroniza pistas de audio con volumen y fundidos |
-| **Exportación** | Canvas 2D compositing, WebCodecs (H.264/VP9) + MediaRecorder fallback, WAV PCM |
-| **IA – Chat** | OpenAI / Anthropic / Gemini / Groq / compatibles; historial local por proyecto |
-| **IA – Operaciones** | 15 tipos de operación tipadas (add_marker, split_clip, move_clip, set_sequence, generate_subtitles, etc.) aplicadas atómicamente con 1 undo |
-| **Subtítulos** | Pipeline completo: VAD → Whisper local (Worker) → Whisper cloud → LLM fallback |
-| **Plantillas de texto** | 6 presets animados (Hormozi Karaoke, Pop Pill, Cine 4K, Impact Hook, Cyber Neon, Lower Third) |
+| **Pantalla de Inicio (Home)** | Vista estilo CapCut con banner de continuación, creación rápida por ratio de aspecto (16:9, 9:16, 1:1, etc.), proyectos recientes, galería de plantillas y papelera con restauración |
+| **Multi-proyecto & Autoguardado** | Repositorio IndexedDB unificado (`sparta-video-projects-v1`), autoguardado debounced en segundo plano, snapshots de versiones e historial recuperable |
+| **Code Splitting & Rendimiento** | Carga diferida (`React.lazy`) del editor desde la Home. El bundle inicial pesa únicamente ~66 KB gzip |
+| **Plantillas & Previews** | Galería de plantillas categorizadas con previsualizaciones interactivas animadas a 60 fps al pasar el ratón (stickman, karaoke hormozi, ranking dinámico, lower thirds) |
+| **Migraciones de Esquema** | Sistema de versionado con `CURRENT_PROJECT_SCHEMA_VERSION = 2` y runner de migraciones automático desde archivos V1 y estados legados |
+| **Shell y layout del editor** | Paneles redimensionables, barra de herramientas flotante, atajos globales |
+| **Timeline** | Mover/trim/split clips, herramienta Razor, marcadores, snapping al cuadro, zoom con rueda, scroll sincronizado |
+| **Inspector** | Propiedades de clip (transform, scale, position, rotation, crop, opacity, blend, volume, fades, keyframes) |
+| **Biblioteca de medios** | Catálogo, filtros por tipo (video, audio, imagen), búsqueda en tiempo real, importación de medios y drag-and-drop a la línea de tiempo |
+| **Audio playback & Waveform** | Sincronización en tiempo real de pistas con volumen, fundidos y visualización de forma de onda |
+| **Exportación** | Canvas 2D compositing, WebCodecs hardware-acelerado (H.264/VP9) + MediaRecorder fallback, WAV PCM, exportación de subtítulos SRT |
+| **IA – Chat & Copiloto** | OpenAI / Anthropic / Gemini / Groq / compatibles; historial local por proyecto y comandos atómicos |
+| **Subtítulos automáticos** | Pipeline integrado: Whisper local en Web Worker (ONNX) + Whisper cloud + exportación e importación SRT |
+| **Plantillas de texto animado** | Hormozi Karaoke, Pop Pill, Cine 4K, Impact Hook, Cyber Neon, Lower Third |
 | **Audio IA** | ElevenLabs TTS + SFX con inserción directa al timeline |
-| **Efectos** | Catálogo de 40+ efectos de color/grado + LUT 3D parser + pixel effects + transiciones |
-| **Animaciones de clip** | Sistema de animación para imagen/vídeo: 15 presets de entrada, 13 de salida, 13 combinados (Ken Burns, pan, float, pulse…). Genera keyframes automáticos interpolados en export. |
-| **Tauri** | Credential vault (Keyring), proxy AI APIs con timeout y sanitización |
-| **Toast** | Sistema de notificaciones accesible (WAI-ARIA live region) |
-| **Tests** | 75 unitarios Vitest + 7 Rust, ESLint 0 errores |
+| **Efectos y transiciones** | Catálogo de 40+ efectos de color/grado + LUT 3D parser (.cube) + pixel effects + transiciones |
+| **Arquitectura limpia** | UI unificada en `src/shared/ui`, traducciones centralizadas en `src/shared/i18n/locale.ts` |
+| **Tests** | 140 unitarios Vitest passing en 25 suites + 7 Rust, ESLint 0 errores |
 
-### ⚠️ Parcial / pendiente de conectar
+### ⚠️ Próximos pasos en la hoja de ruta
 
 | Área | Estado |
 |---|---|
-| **Preview de vídeo** | El monitor muestra estado vacío. La decodificación y compositing en tiempo real no está conectada al `PreviewMonitor` |
-| **Miniaturas reales** | Las fichas de media usan thumbs placeholder, no fotogramas decodificados del archivo |
-| **Keyframe playback** | Los keyframes se guardan en el modelo pero el motor de reproducción no los interpola durante el scrub |
-| **Compositor WebGL** | `render/compositor.ts` y `shaders.ts` existen pero no se usan en el preview (solo Canvas 2D en export) |
-| **Multi-selección** | El timeline solo permite seleccionar 1 clip a la vez |
-| **Relocalización de medios** | El flujo de "offline media → relink" no está implementado |
-| **Proxy workflow** | No hay transcodificación a baja resolución para edición fluida de archivos pesados |
-| **Waveform visual** | No se muestra la forma de onda del audio en los clips del timeline |
-| **Exportación de vídeo real** | El export dibuja frames de `<video>` elements mediante seeking; funciona para secuencias cortas pero puede tener timing issues en clips largos/complejos |
+| **Plantillas v2** | Catálogo extendido con manifiestos tipados Zod y wizard guiado de reemplazo de contenido |
+| **Multi-selección de clips** | Permitir seleccionar y arrastrar múltiples clips en simultáneo en el timeline |
+| **Curvas Bezier de Easing** | Curvas de aceleración visual en los keyframes de interpolación Hermite |
+| **Máscaras** | Soporte de máscaras alfa vectoriales y formas básicas (rectángulo, elipse, degradado) |
+| **Compositor WebGL en tiempo real** | Activar pipeline GLSL acelerado directamente en el viewport de edición |
 
 ---
 

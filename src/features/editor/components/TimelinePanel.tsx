@@ -5,9 +5,9 @@ import { Menu } from '@base-ui/react/menu'
 import type { Clip, MediaItem, TimelineMarker, Track, TransitionRef } from '../model'
 import { EFFECT_CATALOG } from '../effects/catalog'
 import { formatRulerTime, formatTimecode } from '../timecode'
-import { t } from '../services/locale'
+import { t } from '../../../shared/i18n/locale'
 import { loadAudioWaveform, loadMediaPreview } from '../services/media-storage'
-import { cn } from '../../../lib/utils'
+import { cn } from '../../../shared/lib/utils'
 
 type Props = {
   tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]; selected: string; playhead: number; zoom: number; frameRate: number; snap: boolean; expanded: boolean; tool: 'select' | 'razor'

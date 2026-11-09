@@ -16,8 +16,8 @@ import {
   Sun,
   X,
 } from 'lucide-react'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../components/ui/dialog'
-import { Switch } from '../../../components/ui/switch'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../shared/ui/dialog'
+import { Switch } from '../../../shared/ui/switch'
 import {
   AI_PREFS_KEY,
 } from '../services/ai-preferences'
@@ -35,7 +35,7 @@ import {
   type AppearanceTheme,
   useAppearancePreferences,
 } from '../services/appearance-preferences'
-import { setLanguage, t, useLanguage } from '../services/locale'
+import { setLanguage, t, useLanguage } from '../../../shared/i18n/locale'
 import { useAppShellStore } from '../../../app/app-shell-store'
 
 type Props = {

@@ -1,7 +1,7 @@
 import { Dialog } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
 import { useState } from 'react'
-import { t, useLanguage } from '../services/locale'
+import { t, useLanguage } from '../../../shared/i18n/locale'
 
 type Props = { open: boolean; name: string; onOpenChange: (open: boolean) => void; onSave: (name: string) => void }
 

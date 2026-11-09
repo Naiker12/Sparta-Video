@@ -19,7 +19,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { toast } from '../../../components/ui/toast-service'
+import { toast } from '../../../shared/ui/toast-service'
 import type { MediaItem, Track } from '../model'
 import type { ExportPresetId, ExportSettings, RenderProgress } from '../services/contracts'
 import {
@@ -29,7 +29,7 @@ import {
   renderSequence,
 } from '../services/export-engine'
 import { loadMediaPreview } from '../services/media-storage'
-import { t, useLanguage } from '../services/locale'
+import { t, useLanguage } from '../../../shared/i18n/locale'
 import { formatTimecode } from '../timecode'
 import { defaultProjectService } from '../../projects/application/project-service'
 import { useAppShellStore } from '../../../app/app-shell-store'

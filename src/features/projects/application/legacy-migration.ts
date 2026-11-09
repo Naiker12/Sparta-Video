@@ -1,6 +1,7 @@
 import type { ProjectRepository } from './project-repository'
 import type { ProjectRecord } from '../domain/project.types'
 import { defaultProjectRepository } from '../infrastructure/idb-project-repository'
+import { runProjectMigrations } from '../infrastructure/migrations/runner'
 
 export const LEGACY_STORAGE_KEY = 'sparta-video-project-v1'
 export const LEGACY_BACKUP_KEY = 'sparta-video-legacy-backup-v1'
@@ -30,36 +31,8 @@ export async function migrateLegacyProject(
     }
 
     const parsed = JSON.parse(raw)
-    const state = parsed.state ?? parsed
-    if (!state || !state.projectName) {
-      return { migrated: false }
-    }
-
     const newId = crypto.randomUUID()
-    const now = new Date().toISOString()
-
-    const record: ProjectRecord = {
-      id: newId,
-      schemaVersion: 2,
-      createdAt: now,
-      updatedAt: now,
-      origin: { kind: 'blank' },
-      state: {
-        projectName: state.projectName || 'Sin título',
-        sequence: state.sequence ?? { width: 1920, height: 1080, frameRate: 24 },
-        tracks: state.tracks ?? [],
-        assets: state.assets ?? [],
-        markers: state.markers ?? [],
-        snapToFrames: state.snapToFrames ?? true,
-        mutedTracks: state.mutedTracks ?? [],
-        lockedTracks: state.lockedTracks ?? [],
-      },
-      workspace: {
-        playhead: 0,
-        zoom: 1,
-        selectedClipId: null,
-      },
-    }
+    const record: ProjectRecord = runProjectMigrations(parsed, newId)
 
     // 1. Save to new IndexedDB repository
     await repo.saveProject(record)

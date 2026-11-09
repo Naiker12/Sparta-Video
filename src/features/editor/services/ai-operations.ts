@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { useEditorStore } from '../editor-store'
-import { t } from './locale'
+import { t } from '../../../shared/i18n/locale'
 
 export const aiOperationSchema = z.discriminatedUnion('type', [
   z.object({

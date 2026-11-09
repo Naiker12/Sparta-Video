@@ -18,7 +18,6 @@ import { VersionHistoryDialog } from './VersionHistoryDialog'
 import { TemplateGallery } from '../../templates/ui/TemplateGallery'
 import type { ProjectPresetFormat } from '../domain/project-factory'
 import { defaultProjectService } from '../application/project-service'
-import { downloadProjectFile } from '../../editor/services/project-file'
 import { loadMediaPreview } from '../../editor/services/media-storage'
 import { generateProjectCover } from '../application/cover-capture'
 import { setLanguage, t, useLanguage } from '../../../shared/i18n/locale'
@@ -94,6 +93,7 @@ export function HomeScreen({ onOpenProject, onOpenTemplates, onOpenPreferences }
       const project = await defaultProjectService.getProject(id)
       if (!project) return
       const fileData = defaultProjectService.exportProjectToData(project)
+      const { downloadProjectFile } = await import('../../editor/services/project-file')
       downloadProjectFile(fileData)
       toast.success(t('Archivo de proyecto exportado', 'Project file exported'), {
         description: `${project.state.projectName}.sparta`,

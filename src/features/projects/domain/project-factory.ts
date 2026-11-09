@@ -1,5 +1,5 @@
 import type { SequenceSettings, Track } from '../../editor/model'
-import type { ProjectRecord } from './project.types'
+import { CURRENT_PROJECT_SCHEMA_VERSION, type ProjectRecord } from './project.types'
 
 export type ProjectPresetFormat = '16:9' | '9:16' | '1:1' | '4:5' | '21:9'
 
@@ -45,7 +45,7 @@ export function createEmptyProject({
 
   return {
     id,
-    schemaVersion: 2,
+    schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
     createdAt: now,
     updatedAt: now,
     origin,

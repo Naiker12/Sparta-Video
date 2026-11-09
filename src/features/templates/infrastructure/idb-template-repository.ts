@@ -2,19 +2,21 @@ import { BUILTIN_TEMPLATES } from '../catalog/builtin-templates'
 import type { TemplateRepository } from '../application/template-repository'
 import type { SpartaTemplate } from '../domain/template.types'
 
-const DB_NAME = 'sparta-templates-db'
+const DB_NAME = 'sparta-video-projects-v1'
 const DB_VERSION = 1
-const STORE_TEMPLATES = 'user_templates'
+const STORE_TEMPLATES = 'templates'
+const LEGACY_DB_NAME = 'sparta-templates-db'
 
 export class IdbTemplateRepository implements TemplateRepository {
   dbName: string
   private dbPromise: Promise<IDBDatabase> | null = null
+  private migrationAttempted = false
 
   constructor(dbName = DB_NAME) {
     this.dbName = dbName
   }
 
-  private getDB(): Promise<IDBDatabase> {
+  private async getDB(): Promise<IDBDatabase> {
     if (this.dbPromise) return this.dbPromise
 
     this.dbPromise = new Promise((resolve, reject) => {
@@ -36,7 +38,50 @@ export class IdbTemplateRepository implements TemplateRepository {
       request.onerror = () => reject(request.error)
     })
 
-    return this.dbPromise
+    const db = await this.dbPromise
+
+    // Migrate templates from legacy DB if present
+    if (!this.migrationAttempted && typeof indexedDB !== 'undefined') {
+      this.migrationAttempted = true
+      void this.migrateFromLegacyDb(db).catch(() => {})
+    }
+
+    return db
+  }
+
+  private async migrateFromLegacyDb(targetDb: IDBDatabase): Promise<void> {
+    try {
+      const legacyOpen = indexedDB.open(LEGACY_DB_NAME, 1)
+      const legacyDb = await new Promise<IDBDatabase>((res, rej) => {
+        legacyOpen.onsuccess = () => res(legacyOpen.result)
+        legacyOpen.onerror = () => rej(legacyOpen.error)
+      })
+
+      if (legacyDb.objectStoreNames.contains('user_templates')) {
+        const legacyTx = legacyDb.transaction('user_templates', 'readonly')
+        const legacyStore = legacyTx.objectStore('user_templates')
+        const items = await new Promise<SpartaTemplate[]>((res, rej) => {
+          const req = legacyStore.getAll()
+          req.onsuccess = () => res(req.result as SpartaTemplate[])
+          req.onerror = () => rej(req.error)
+        })
+
+        if (items.length > 0) {
+          const targetTx = targetDb.transaction(STORE_TEMPLATES, 'readwrite')
+          const targetStore = targetTx.objectStore(STORE_TEMPLATES)
+          for (const item of items) {
+            targetStore.put(item)
+          }
+          await new Promise<void>((res, rej) => {
+            targetTx.oncomplete = () => res()
+            targetTx.onerror = () => rej(targetTx.error)
+          })
+        }
+      }
+      legacyDb.close()
+    } catch {
+      // Legacy DB does not exist or already migrated
+    }
   }
 
   async close(): Promise<void> {
@@ -119,4 +164,5 @@ export class IdbTemplateRepository implements TemplateRepository {
 }
 
 export const defaultTemplateRepository = new IdbTemplateRepository()
+
 

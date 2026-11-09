@@ -16,35 +16,35 @@ interface TemplatePreviewProps {
  */
 export function TemplatePreview({ template, isHovered, scrubProgress = 0 }: TemplatePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const animFrameRef = useRef<number | null>(null)
   const [internalProgress, setInternalProgress] = useState(0)
 
   // Continuously loop animation while hovered at 60fps
   useEffect(() => {
-    if (!isHovered) {
-      setInternalProgress(0)
-      return
-    }
+    if (!isHovered) return
 
+    let animId: number
     const start = performance.now()
     const loopDurationMs = 5000 // 5 seconds per full preview loop
 
     const tick = (now: number) => {
       const elapsed = (now - start) % loopDurationMs
       setInternalProgress(elapsed / loopDurationMs)
-      animFrameRef.current = requestAnimationFrame(tick)
+      animId = requestAnimationFrame(tick)
     }
 
-    animFrameRef.current = requestAnimationFrame(tick)
+    animId = requestAnimationFrame(tick)
 
     return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
-      animFrameRef.current = null
+      cancelAnimationFrame(animId)
     }
   }, [isHovered])
 
   // Active progress: user scrub overrides if scrubbing, otherwise auto-play
-  const effectiveProgress = scrubProgress > 0 ? scrubProgress : internalProgress
+  const effectiveProgress = isHovered
+    ? scrubProgress > 0
+      ? scrubProgress
+      : internalProgress
+    : scrubProgress || 0
   const currentTimeSec = effectiveProgress * template.durationSeconds
 
   // Determine active clip / scene
@@ -205,12 +205,10 @@ export function TemplatePreview({ template, isHovered, scrubProgress = 0 }: Temp
       const isHook = t < 0.25
       const isConflict = t >= 0.25 && t < 0.55
       const isClimax = t >= 0.55 && t < 0.85
-      const isCta = t >= 0.85
 
       // Running / walking bounce
       const runBounce = isHovered ? Math.abs(Math.sin(t * Math.PI * 14)) * 5 : 0
       const legCycle = isHovered ? Math.sin(t * Math.PI * 14) : 0
-      const armCycle = isHovered ? Math.cos(t * Math.PI * 14) : 0
 
       ctx.save()
       ctx.strokeStyle = '#ffffff'

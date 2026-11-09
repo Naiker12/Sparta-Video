@@ -1,8 +1,6 @@
 import {
   SPARTA_PROJECT_FORMAT,
   SPARTA_PROJECT_VERSION_V2,
-  spartaProjectFileV1Schema,
-  spartaProjectFileV2Schema,
   type SpartaProjectFileV2,
 } from '../domain/project.schema'
 import type { ProjectId, ProjectRecord, ProjectSummary } from '../domain/project.types'
@@ -13,6 +11,7 @@ import {
 } from '../domain/project-factory'
 import type { ProjectRepository } from './project-repository'
 import { defaultProjectRepository } from '../infrastructure/idb-project-repository'
+import { runProjectMigrations } from '../infrastructure/migrations/runner'
 
 export class ProjectService {
   private repo: ProjectRepository
@@ -86,57 +85,10 @@ export class ProjectService {
   }
 
   async importProjectFromData(raw: unknown): Promise<ProjectRecord> {
-    const now = new Date().toISOString()
     const newId = crypto.randomUUID()
-
-    // Try V2 schema first
-    const v2Parsed = spartaProjectFileV2Schema.safeParse(raw)
-    if (v2Parsed.success) {
-      const v2 = v2Parsed.data
-      const record: ProjectRecord = {
-        id: newId,
-        schemaVersion: 2,
-        createdAt: v2.createdAt || now,
-        updatedAt: now,
-        origin: { kind: 'import' },
-        state: v2.project,
-        workspace: v2.workspace,
-      }
-      await this.repo.saveProject(record)
-      return record
-    }
-
-    // Fallback to V1 schema
-    const v1Parsed = spartaProjectFileV1Schema.safeParse(raw)
-    if (v1Parsed.success) {
-      const v1 = v1Parsed.data
-      const record: ProjectRecord = {
-        id: newId,
-        schemaVersion: 2,
-        createdAt: v1.createdAt || now,
-        updatedAt: now,
-        origin: { kind: 'import' },
-        state: {
-          projectName: v1.project.name,
-          sequence: v1.project.sequence,
-          tracks: v1.project.tracks,
-          assets: v1.project.assets,
-          markers: v1.project.markers ?? [],
-          snapToFrames: v1.project.snapToFrames ?? true,
-          mutedTracks: [],
-          lockedTracks: [],
-        },
-        workspace: {
-          playhead: 0,
-          zoom: 1,
-          selectedClipId: null,
-        },
-      }
-      await this.repo.saveProject(record)
-      return record
-    }
-
-    throw new Error('Formato de archivo .sparta no válido o corrupto')
+    const record = runProjectMigrations(raw, newId)
+    await this.repo.saveProject(record)
+    return record
   }
 
   exportProjectToData(record: ProjectRecord): SpartaProjectFileV2 {

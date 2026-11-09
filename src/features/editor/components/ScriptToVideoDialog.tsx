@@ -4,7 +4,7 @@ import { buildScriptStoryboard, parseScriptIntoScenes } from '../services/script
 import { formatDurationCompact } from '../../../shared/lib/format-time'
 import { t } from '../../../shared/i18n/locale'
 import { toast } from '../../../shared/ui/toast-service'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../shared/ui/dialog'
 
 interface ScriptToVideoDialogProps {
   open: boolean

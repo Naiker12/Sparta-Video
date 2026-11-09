@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, Braces, Check, ChevronDown, ChevronRight, Eraser, ListChecks, LoaderCircle, LockKeyhole, PlayCircle, Send } from 'lucide-react'
 import { IconButton } from './controls'
-import { Badge } from '../../../components/ui/badge'
+import { Badge } from '../../../shared/ui/badge'
 import { AudioGenerationPanel } from './AudioGenerationPanel'
 import {
   IconNleAspectRatio,
@@ -17,8 +17,8 @@ import { AI_PREFS_EVENT } from '../services/ai-preferences'
 import { readProviderRegistry, type ProviderRegistry } from '../services/ai-provider-registry'
 import { sendAIChat, type AnalysisDepth, type ChatMessage } from '../services/ai-chat'
 import { applyAIOperations, extractAIProposal, formatOperationLabel } from '../services/ai-operations'
-import { toast } from '../../../components/ui/toast-service'
-import { t } from '../services/locale'
+import { toast } from '../../../shared/ui/toast-service'
+import { t } from '../../../shared/i18n/locale'
 
 export type AssistantMode = 'create' | 'edit' | 'audio'
 type Props = {
