@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useRef, useState, type MouseEvent } from 'react'
 import { ArrowRight, Clock, Layers, Play } from 'lucide-react'
 import type { SpartaTemplate } from '../domain/template.types'
 import { TemplatePreview } from './TemplatePreview'
@@ -13,12 +13,25 @@ interface TemplateCardProps {
 export function TemplateCard({ template, onSelect }: TemplateCardProps) {
   const [isHovered, setIsHovered] = useState(false)
   const [scrubProgress, setScrubProgress] = useState(0)
+  const scrubTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleMouseMove = (e: MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
     const x = e.clientX - rect.left
     const progress = Math.min(Math.max(x / rect.width, 0), 1)
     setScrubProgress(progress)
+
+    // When mouse stops moving for 500ms, seamlessly resume live 60fps auto-play
+    if (scrubTimerRef.current) clearTimeout(scrubTimerRef.current)
+    scrubTimerRef.current = setTimeout(() => {
+      setScrubProgress(0)
+    }, 500)
+  }
+
+  const handleMouseLeave = () => {
+    setIsHovered(false)
+    setScrubProgress(0)
+    if (scrubTimerRef.current) clearTimeout(scrubTimerRef.current)
   }
 
   const categoryLabels: Record<string, string> = {
@@ -33,18 +46,18 @@ export function TemplateCard({ template, onSelect }: TemplateCardProps) {
   return (
     <div
       onClick={() => onSelect(template)}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => {
-        setIsHovered(false)
+      onMouseEnter={() => {
+        setIsHovered(true)
         setScrubProgress(0)
       }}
-      className="group relative flex flex-col justify-between rounded-2xl border border-[#232733] bg-[#14161f] p-3.5 transition-all duration-300 hover:-translate-y-1 hover:border-primary/60 hover:bg-[#181b26] hover:shadow-2xl hover:shadow-primary/5 cursor-pointer select-none"
+      onMouseLeave={handleMouseLeave}
+      className="group relative flex flex-col justify-between rounded-2xl border border-[#232733] bg-[#14161f] p-3.5 transition-all duration-300 hover:-translate-y-1.5 hover:border-primary/80 hover:bg-[#181b26] hover:shadow-[0_10px_30px_rgba(59,130,246,0.15)] cursor-pointer select-none"
     >
       <div>
-        {/* Dynamic Aspect Ratio Interactive Preview Box with Hover Scrub */}
+        {/* Dynamic Aspect Ratio Interactive Preview Box with 60fps Live Playback & Hover Scrub */}
         <div
           onMouseMove={handleMouseMove}
-          className="relative mb-3 flex items-center justify-center rounded-xl bg-[#0c0d12] overflow-hidden aspect-video border border-white/8 group-hover:border-primary/40 transition-colors shadow-inner"
+          className="relative mb-3 flex items-center justify-center rounded-xl bg-[#0c0d12] overflow-hidden aspect-video border border-white/8 group-hover:border-primary/50 transition-colors shadow-inner"
         >
           {/* 60fps dynamic scene preview & kinetic animation */}
           <TemplatePreview
@@ -53,14 +66,14 @@ export function TemplateCard({ template, onSelect }: TemplateCardProps) {
             scrubProgress={scrubProgress}
           />
 
-          {/* Hover Play Button Overlay */}
+          {/* Hover Play Button Overlay (Smoothly dissolves on hover) */}
           <div
-            className={`absolute inset-0 bg-black/20 flex items-center justify-center pointer-events-none transition-opacity duration-200 ${
-              isHovered ? 'opacity-0' : 'opacity-100'
+            className={`absolute inset-0 bg-black/25 flex items-center justify-center pointer-events-none transition-all duration-300 ${
+              isHovered ? 'opacity-0 scale-75' : 'opacity-100 scale-100'
             }`}
           >
-            <div className="w-9 h-9 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
-              <Play size={15} fill="currentColor" className="ml-0.5" />
+            <div className="w-10 h-10 rounded-full bg-primary/95 text-primary-foreground flex items-center justify-center shadow-xl shadow-primary/30 border border-white/20 transform group-hover:scale-110 transition-transform">
+              <Play size={16} fill="currentColor" className="ml-0.5" />
             </div>
           </div>
 
@@ -124,13 +137,12 @@ export function TemplateCard({ template, onSelect }: TemplateCardProps) {
             e.stopPropagation()
             onSelect(template)
           }}
-          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground text-xs font-semibold transition-all shadow-xs"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/15 group-hover:bg-primary text-primary group-hover:text-primary-foreground text-xs font-semibold transition-all shadow-xs cursor-pointer"
         >
           <span>{t('Usar plantilla', 'Use template')}</span>
-          <ArrowRight size={12} className="transition-transform group-hover:translate-x-0.5" />
+          <ArrowRight size={12} className="transition-transform group-hover:translate-x-1" />
         </button>
       </div>
     </div>
   )
 }
-
