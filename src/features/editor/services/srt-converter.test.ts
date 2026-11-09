@@ -4,6 +4,10 @@ import {
   formatSrtTimestamp,
   parseSrtContent,
   parseSrtTimestamp,
+  formatVttTimestamp,
+  parseVttTimestamp,
+  exportTracksToVtt,
+  parseVttContent,
 } from './srt-converter'
 import type { Track } from '../model'
 
@@ -73,6 +77,60 @@ Segunda línea de diálogo.`
     expect(entries[0].duration).toBe(2.5)
     expect(entries[1].text).toBe('Segunda línea de diálogo.')
     expect(entries[1].start).toBe(4.2)
+  })
+
+  it('formats and parses WebVTT timestamps correctly', () => {
+    expect(formatVttTimestamp(0)).toBe('00:00:00.000')
+    expect(formatVttTimestamp(12.345)).toBe('00:00:12.345')
+    expect(formatVttTimestamp(3661.5)).toBe('01:01:01.500')
+
+    expect(parseVttTimestamp('00:00:12.345')).toBe(12.345)
+    expect(parseVttTimestamp('02:15.500')).toBe(135.5)
+  })
+
+  it('exports and parses WebVTT content symmetrically', () => {
+    const tracks: Track[] = [
+      {
+        id: 'v1',
+        name: 'Video',
+        kind: 'video',
+        clips: [
+          {
+            id: 'c1',
+            title: 'Sub 1',
+            start: 0.5,
+            duration: 3.0,
+            color: '',
+            thumbnail: 'text-overlay',
+            kind: 'video',
+            text: 'Texto de prueba WebVTT',
+          },
+        ],
+      },
+    ]
+
+    const vtt = exportTracksToVtt(tracks)
+    expect(vtt).toMatch(/^WEBVTT/)
+    expect(vtt).toContain('00:00:00.500 --> 00:00:03.500\nTexto de prueba WebVTT')
+
+    const entries = parseVttContent(vtt)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].text).toBe('Texto de prueba WebVTT')
+    expect(entries[0].start).toBe(0.5)
+    expect(entries[0].duration).toBe(3.0)
+  })
+
+  it('cleans HTML tags and cue settings when parsing WebVTT', () => {
+    const rawVtt = `WEBVTT
+
+00:00:01.000 --> 00:00:04.000 position:10% line:0%
+<v Narrador>Hola <b>mundo</b> con <i>estilo</i>.</v>`
+
+    const entries = parseVttContent(rawVtt)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].text).toBe('Hola mundo con estilo.')
+    expect(entries[0].start).toBe(1.0)
+    expect(entries[0].duration).toBe(3.0)
   })
 })
 

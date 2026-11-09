@@ -7,7 +7,12 @@ import { ScriptToVideoDialog } from '../components/ScriptToVideoDialog'
 import { SaveAsTemplateDialog } from '../../templates/ui/SaveAsTemplateDialog'
 import { VersionHistoryDialog } from '../../projects/ui/VersionHistoryDialog'
 import { useAppShellStore } from '../../../app/app-shell-store'
-import { downloadSrtFile, parseSrtContent } from '../services/srt-converter'
+import {
+  downloadSrtFile,
+  downloadVttFile,
+  parseSrtContent,
+  parseVttContent,
+} from '../services/srt-converter'
 import {
   getProjectSaveStatus,
   subscribeProjectSaveStatus,
@@ -363,18 +368,30 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
     }
   }
 
+  const handleExportVtt = () => {
+    const success = downloadVttFile(projectName, tracks)
+    if (success) {
+      toast.success(t('Subtítulos exportados (.vtt)', 'Subtitles exported (.vtt)'), {
+        description: `${projectName}.vtt`,
+      })
+    } else {
+      toast.info(t('No hay subtítulos en la línea de tiempo', 'No subtitles on the timeline'))
+    }
+  }
+
   const handleImportSrtFile = async (file: File) => {
     try {
       const text = await file.text()
-      const entries = parseSrtContent(text)
+      const isVtt = file.name.toLowerCase().endsWith('.vtt') || text.trim().startsWith('WEBVTT')
+      const entries = isVtt ? parseVttContent(text) : parseSrtContent(text)
       if (entries.length === 0) {
-        toast.info(t('El archivo .srt no contiene subtítulos legibles', 'The .srt file contains no readable subtitles'))
+        toast.info(t('El archivo no contiene subtítulos legibles', 'The file contains no readable subtitles'))
         return
       }
       const added = useEditorStore.getState().addSubtitleSequence(entries, { replaceExisting: false })
-      toast.success(t(`${added} subtítulos importados`, `${added} subtitles imported`))
+      toast.success(t(`${added} subtítulos importados (${isVtt ? 'WebVTT' : 'SRT'})`, `${added} subtitles imported (${isVtt ? 'WebVTT' : 'SRT'})`))
     } catch {
-      toast.error(t('Error al leer el archivo .srt', 'Error reading .srt file'))
+      toast.error(t('Error al leer el archivo de subtítulos', 'Error reading subtitles file'))
     }
   }
 
@@ -402,6 +419,8 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
         onOpenScriptToVideo={() => setScriptToVideoOpen(true)}
         onExportSrt={handleExportSrt}
         onImportSrt={() => srtFileInput.current?.click()}
+        onExportVtt={handleExportVtt}
+        onImportVtt={() => srtFileInput.current?.click()}
         onImportMedia={() => fileInput.current?.click()}
         onExportVideo={() => setExportOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -445,7 +464,7 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
         className="visually-hidden hidden"
         style={{ display: 'none' }}
         type="file"
-        accept=".srt"
+        accept=".srt,.vtt,text/vtt"
         tabIndex={-1}
         aria-hidden="true"
         onChange={(event) => {

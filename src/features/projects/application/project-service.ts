@@ -13,6 +13,14 @@ import type { ProjectRepository } from './project-repository'
 import { defaultProjectRepository } from '../infrastructure/idb-project-repository'
 import { runProjectMigrations } from '../infrastructure/migrations/runner'
 
+let lastSnapshotTimestamp = 0
+function getMonotonicSnapshotTimestamp(): string {
+  const now = Date.now()
+  const time = now <= lastSnapshotTimestamp ? lastSnapshotTimestamp + 1 : now
+  lastSnapshotTimestamp = time
+  return new Date(time).toISOString()
+}
+
 export class ProjectService {
   private repo: ProjectRepository
 
@@ -122,7 +130,7 @@ export class ProjectService {
     const snapshot: ProjectSnapshot = {
       id: crypto.randomUUID(),
       projectId,
-      createdAt: new Date().toISOString(),
+      createdAt: getMonotonicSnapshotTimestamp(),
       label: label.trim() || 'Snapshot',
       state: JSON.parse(JSON.stringify(project.state)) as ProjectRecord['state'],
       clipCount,

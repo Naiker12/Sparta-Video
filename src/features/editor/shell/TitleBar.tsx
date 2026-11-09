@@ -27,6 +27,8 @@ interface TitleBarProps {
   onOpenScriptToVideo?: () => void
   onExportSrt?: () => void
   onImportSrt?: () => void
+  onExportVtt?: () => void
+  onImportVtt?: () => void
   onImportMedia: () => void
   onExportVideo: () => void
   onOpenSettings: () => void
@@ -56,6 +58,8 @@ export function TitleBar({
   onOpenScriptToVideo,
   onExportSrt,
   onImportSrt,
+  onExportVtt,
+  onImportVtt,
   onImportMedia,
   onExportVideo,
   onOpenSettings,
@@ -143,6 +147,8 @@ export function TitleBar({
           onOpenScriptToVideo={onOpenScriptToVideo}
           onExportSrt={onExportSrt}
           onImportSrt={onImportSrt}
+          onExportVtt={onExportVtt}
+          onImportVtt={onImportVtt}
           onImportMedia={onImportMedia}
           onExportVideo={onExportVideo}
           onOpenSettings={onOpenSettings}

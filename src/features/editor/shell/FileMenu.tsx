@@ -20,6 +20,8 @@ interface FileMenuProps {
   onOpenScriptToVideo?: () => void
   onExportSrt?: () => void
   onImportSrt?: () => void
+  onExportVtt?: () => void
+  onImportVtt?: () => void
   onImportMedia: () => void
   onExportVideo: () => void
   onOpenSettings: () => void
@@ -43,6 +45,8 @@ export function FileMenu({
   onOpenScriptToVideo,
   onExportSrt,
   onImportSrt,
+  onExportVtt,
+  onImportVtt,
   onImportMedia,
   onExportVideo,
   onOpenSettings,
@@ -82,7 +86,7 @@ export function FileMenu({
                 {
                   label: t('Historial de versiones…', 'Version history…'),
                   icon: History,
-                  onSelect: onOpenHistory,
+                  onSelect: () => onOpenHistory(),
                 },
               ]
             : []),
@@ -91,7 +95,7 @@ export function FileMenu({
                 {
                   label: t('Guardar como plantilla…', 'Save as template…'),
                   icon: BookmarkPlus,
-                  onSelect: onSaveAsTemplate,
+                  onSelect: () => onSaveAsTemplate(),
                 },
               ]
             : []),
@@ -100,7 +104,7 @@ export function FileMenu({
                 {
                   label: t('Guion a Vídeo / Storyboard…', 'Script to Video / Storyboard…'),
                   icon: Clapperboard,
-                  onSelect: onOpenScriptToVideo,
+                  onSelect: () => onOpenScriptToVideo(),
                 },
               ]
             : []),
@@ -110,12 +114,15 @@ export function FileMenu({
             icon: FileUp,
             onSelect: onImportMedia,
           },
-          ...(onImportSrt
+          ...(onImportSrt || onImportVtt
             ? [
                 {
-                  label: t('Importar subtítulos (.srt)…', 'Import subtitles (.srt)…'),
+                  label: t('Importar subtítulos (.srt, .vtt)…', 'Import subtitles (.srt, .vtt)…'),
                   icon: FileText,
-                  onSelect: onImportSrt,
+                  onSelect: () => {
+                    if (onImportSrt) onImportSrt()
+                    else onImportVtt?.()
+                  },
                 },
               ]
             : []),
@@ -129,7 +136,16 @@ export function FileMenu({
                 {
                   label: t('Exportar subtítulos (.srt)…', 'Export subtitles (.srt)…'),
                   icon: FileDown,
-                  onSelect: onExportSrt,
+                  onSelect: () => onExportSrt(),
+                },
+              ]
+            : []),
+          ...(onExportVtt
+            ? [
+                {
+                  label: t('Exportar subtítulos (.vtt)…', 'Export subtitles (.vtt)…'),
+                  icon: FileDown,
+                  onSelect: () => onExportVtt(),
                 },
               ]
             : []),
