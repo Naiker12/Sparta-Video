@@ -61,6 +61,7 @@ const copyTracks = (tracks: Track[]): Track[] => tracks.map((track) => ({
     keyframes: clip.keyframes?.map((keyframe) => ({ ...keyframe })),
     textStyle: clip.textStyle ? { ...clip.textStyle } : undefined,
     textAnimation: clip.textAnimation ? { ...clip.textAnimation } : undefined,
+    clipAnimation: clip.clipAnimation ? { ...clip.clipAnimation } : undefined,
     crop: clip.crop ? { ...clip.crop } : undefined,
     effects: clip.effects?.map((eff) => ({ ...eff, params: { ...eff.params } })),
     transitionIn: clip.transitionIn ? { ...clip.transitionIn, params: clip.transitionIn.params ? { ...clip.transitionIn.params } : undefined } : undefined,

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Copy, CopyPlus, Film, Maximize2, MoreHorizontal, Plus, RotateCcw, Scissors, Settings, SlidersHorizontal, Snowflake, Sparkles, Trash2, Type, Upload, Volume2 } from 'lucide-react'
-import type { Clip, EffectInstance, Keyframe, MediaItem, TextAnimation, TextStyle } from '../model'
+import type { Clip, ClipAnimation, EffectInstance, Keyframe, MediaItem, TextAnimation, TextStyle } from '../model'
+import { CLIP_ANIM_COMBO, buildAnimationKeyframes, getDefaultClipAnimation } from '../services/clip-animation'
 import { ADJUST_PARAMS, EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
 import { parseCubeLUT } from '../effects/lut-parser'
 import { toast } from '../../../components/ui/toast-service'
@@ -150,19 +151,19 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
       onUpdateClip(clip.id, { keyframes: [...keyframes, newKeyframe] })
     }
   }
-  const applyZoomPreset = (fromScale: number, toScale: number) => {
+  // ─── Clip animation (imagen / vídeo) ─────────────────────────────────────
+  const clipAnim: ClipAnimation = clip?.clipAnimation ?? getDefaultClipAnimation()
+
+  const applyClipAnimation = (patch: Partial<ClipAnimation>) => {
     if (!clip || readOnly) return
-    const startT = Math.round(clip.start * 1000) / 1000
-    const endT = Math.round((clip.start + clip.duration) * 1000) / 1000
-    const others = (clip.keyframes ?? []).filter((kf) => kf.property !== 'scale')
-    onUpdateClip(clip.id, {
-      transform: { ...transform, scaleX: fromScale, scaleY: fromScale },
-      keyframes: [
-        ...others,
-        { property: 'scale', time: startT, valueX: fromScale, valueY: fromScale },
-        { property: 'scale', time: endT, valueX: toScale, valueY: toScale },
-      ],
-    })
+    const next: ClipAnimation = { ...clipAnim, ...patch }
+    const newKeyframes = buildAnimationKeyframes(clip, next, { width: sequenceSize.width, height: sequenceSize.height })
+    onUpdateClip(clip.id, { clipAnimation: next, keyframes: newKeyframes })
+  }
+
+  const clearClipAnimation = () => {
+    if (!clip || readOnly) return
+    onUpdateClip(clip.id, { clipAnimation: getDefaultClipAnimation(), keyframes: [] })
   }
   return <aside className="inspector-panel flex flex-col h-full bg-card overflow-hidden select-none">
     <span className="sr-only">{t('INSPECTOR', 'INSPECTOR')}</span>
@@ -1005,41 +1006,120 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
           </InspectorSection>
         )}
         {tab === 'Movimiento' && (
-          <InspectorSection title={t('MOVIMIENTO','MOTION')}>
-            {(['position', 'scale'] as const).map((property) => {
-              const active = (clip.keyframes ?? []).some((keyframe) => keyframe.property === property && keyframe.time === Math.round(playhead * 1000) / 1000)
-              return (
-                <div className="toggle-row" key={property}>
-                  <span>{property === 'position' ? t('Posición','Position') : t('Escala','Scale')}</span>
-                  <button className={`keyframe-button ${active ? 'active' : ''}`} disabled={readOnly} onClick={() => setKeyframe(property, Math.round(playhead * 1000) / 1000)}>
-                    {active ? t('◇ Quitar fotograma clave','◇ Remove keyframe') : <>◇ {t('Añadir fotograma clave','Add keyframe')}</>}
+          <>
+            {isTextClip ? (
+              <div className="inspector-convert-banner">
+                <p>{t('Los clips de texto tienen sus animaciones en la pestaña Texto.', 'Text clips have their animations in the Text tab.')}</p>
+                <div className="inspector-preset-pills">
+                  <button type="button" onClick={() => setTab('Texto')}>
+                    <Type size={11} /> {t('Ir a animaciones de texto →', 'Go to text animations →')}
                   </button>
                 </div>
-              )
-            })}
-            <div className="inspector-preset-pills">
-              <button type="button" disabled={readOnly} onClick={() => applyZoomPreset(100, 118)}>
-                <Maximize2 size={11} /> {t('Zoom In suave', 'Smooth Zoom In')}
-              </button>
-              <button type="button" disabled={readOnly} onClick={() => applyZoomPreset(118, 100)}>
-                <Maximize2 size={11} /> {t('Zoom Out suave', 'Smooth Zoom Out')}
-              </button>
-            </div>
-            <div className="keyframe-navigation">
-              <button disabled={!clip.keyframes?.some((keyframe) => keyframe.time < playhead)} onClick={() => { const previous = [...(clip.keyframes ?? [])].filter((keyframe) => keyframe.time < playhead).sort((a, b) => b.time - a.time)[0]; if (previous) onSeek(previous.time) }}>{t('Anterior','Previous')}</button>
-              <button disabled={!clip.keyframes?.some((keyframe) => keyframe.time > playhead)} onClick={() => { const next = [...(clip.keyframes ?? [])].filter((keyframe) => keyframe.time > playhead).sort((a, b) => a.time - b.time)[0]; if (next) onSeek(next.time) }}>{t('Siguiente','Next')}</button>
-            </div>
-            <div className="keyframe-list">
-              {[...(clip.keyframes ?? [])].sort((a, b) => a.time - b.time).map((keyframe) => (
-                <div className="keyframe-item" key={`${keyframe.property}-${keyframe.time}`}>
-                  <span>◇ {keyframe.property === 'position' ? t('Posición','Position') : t('Escala','Scale')}</span>
-                  <button type="button" className="keyframe-time-btn" onClick={() => onSeek(keyframe.time)}>{keyframe.time.toFixed(2)} s</button>
-                  <button type="button" className="keyframe-del-btn" aria-label={`Eliminar fotograma clave ${keyframe.time}`} disabled={readOnly} onClick={() => setKeyframe(keyframe.property, keyframe.time)}>×</button>
-                </div>
-              ))}
-            </div>
-            <p className="inspector-hint">{t('Los fotogramas clave interpolan suavemente posición y escala en tiempo real y en la exportación.','Keyframes smoothly interpolate position and scale in real-time and export.')}</p>
-          </InspectorSection>
+              </div>
+            ) : (
+              // Panel de animación para imagen / vídeo
+              <>
+                <InspectorSection title={t('ANIMACIÓN', 'ANIMATION')}>
+                  <div className="inspector-anim-grid" role="group" aria-label={t('Tipo de animación', 'Animation type')}>
+                    {CLIP_ANIM_COMBO.map((anim) => (
+                      <button
+                        key={anim.id}
+                        type="button"
+                        disabled={readOnly}
+                        aria-pressed={clipAnim.combo === anim.id}
+                        className={`inspector-anim-card ${clipAnim.combo === anim.id ? 'active' : ''}`}
+                        title={t(anim.description ?? anim.label, anim.descriptionEn ?? anim.labelEn)}
+                        onClick={() => applyClipAnimation({ combo: anim.id as ClipAnimation['combo'] })}
+                      >
+                        <span className="anim-card-tag">{anim.icon}</span>
+                        <strong>{t(anim.label, anim.labelEn)}</strong>
+                      </button>
+                    ))}
+                  </div>
+
+                  {clipAnim.combo !== 'none' && (
+                    <>
+                      <label className="toggle-row mt-3">
+                        <span>
+                          {t('Intensidad', 'Intensity')}{' '}
+                          <small className="fade-val">
+                            {clipAnim.intensity}%
+                            {clipAnim.intensity < 60
+                              ? ` · ${t('sutil', 'subtle')}`
+                              : clipAnim.intensity > 140
+                                ? ` · ${t('dramático', 'dramatic')}`
+                                : ` · ${t('normal', 'normal')}`}
+                          </small>
+                        </span>
+                        <input
+                          aria-label={t('Intensidad de la animación', 'Animation intensity')}
+                          type="range"
+                          min="10"
+                          max="200"
+                          step="5"
+                          disabled={readOnly}
+                          value={clipAnim.intensity}
+                          onChange={(e) => applyClipAnimation({ intensity: Number(e.target.value) })}
+                        />
+                      </label>
+                      <div className="inspector-preset-pills mt-1">
+                        {[['sutil', 'subtle', 40], ['normal', 'normal', 100], ['dinámico', 'dynamic', 160]].map(([lbl, lbEn, val]) => (
+                          <button
+                            key={val}
+                            type="button"
+                            disabled={readOnly}
+                            className={clipAnim.intensity === val ? 'active' : ''}
+                            onClick={() => applyClipAnimation({ intensity: val as number })}
+                          >
+                            {t(lbl as string, lbEn as string)}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-end mt-2">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          className="text-[11px] text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                          onClick={clearClipAnimation}
+                        >
+                          {t('Quitar animación', 'Remove animation')}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </InspectorSection>
+              </>
+            )}
+
+            {/* Fotogramas clave manuales — siempre accesibles */}
+            <InspectorSection title={t('FOTOGRAMAS CLAVE (AVANZADO)', 'KEYFRAMES (ADVANCED)')}>
+              {(['position', 'scale'] as const).map((property) => {
+                const active = (clip.keyframes ?? []).some((kf) => kf.property === property && kf.time === Math.round(playhead * 1000) / 1000)
+                return (
+                  <div className="toggle-row" key={property}>
+                    <span>{property === 'position' ? t('Posición', 'Position') : t('Escala', 'Scale')}</span>
+                    <button className={`keyframe-button ${active ? 'active' : ''}`} disabled={readOnly} onClick={() => setKeyframe(property, Math.round(playhead * 1000) / 1000)}>
+                      {active ? t('◇ Quitar fotograma clave', '◇ Remove keyframe') : <>◇ {t('Añadir fotograma clave', 'Add keyframe')}</>}
+                    </button>
+                  </div>
+                )
+              })}
+              <div className="keyframe-navigation">
+                <button disabled={!clip.keyframes?.some((kf) => kf.time < playhead)} onClick={() => { const p = [...(clip.keyframes ?? [])].filter((kf) => kf.time < playhead).sort((a, b) => b.time - a.time)[0]; if (p) onSeek(p.time) }}>{t('Anterior', 'Previous')}</button>
+                <button disabled={!clip.keyframes?.some((kf) => kf.time > playhead)} onClick={() => { const n = [...(clip.keyframes ?? [])].filter((kf) => kf.time > playhead).sort((a, b) => a.time - b.time)[0]; if (n) onSeek(n.time) }}>{t('Siguiente', 'Next')}</button>
+              </div>
+              <div className="keyframe-list">
+                {[...(clip.keyframes ?? [])].sort((a, b) => a.time - b.time).map((kf) => (
+                  <div className="keyframe-item" key={`${kf.property}-${kf.time}`}>
+                    <span>◇ {kf.property === 'position' ? t('Posición', 'Position') : kf.property === 'scale' ? t('Escala', 'Scale') : kf.property === 'rotation' ? t('Rotación', 'Rotation') : t('Opacidad', 'Opacity')}</span>
+                    <button type="button" className="keyframe-time-btn" onClick={() => onSeek(kf.time)}>{kf.time.toFixed(2)} s</button>
+                    <button type="button" className="keyframe-del-btn" aria-label={`Eliminar fotograma clave ${kf.time}`} disabled={readOnly} onClick={() => setKeyframe(kf.property, kf.time)}>×</button>
+                  </div>
+                ))}
+              </div>
+              <p className="inspector-hint">{t('Los fotogramas clave interpolan posición, escala, rotación y opacidad en la exportación.', 'Keyframes interpolate position, scale, rotation and opacity in export.')}</p>
+            </InspectorSection>
+          </>
         )}
         {tab === 'Efectos' && (
           <div className="space-y-2">

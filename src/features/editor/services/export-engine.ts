@@ -239,6 +239,36 @@ export interface RenderSequenceParams {
   signal?: AbortSignal
 }
 
+/**
+ * Returns the "ghost" clips that should be rendered at their held last frame
+ * when an incoming transitionIn is active on the next clip in the same track.
+ * This prevents the black background from showing through during transitions.
+ */
+function collectTransitionGhostClips(
+  tracks: import('../model').Track[],
+  time: number,
+  frameInterval: number,
+): Array<{ clip: import('../model').Clip; drawTime: number }> {
+  const result: Array<{ clip: import('../model').Clip; drawTime: number }> = []
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      if (!clip.transitionIn || clip.transitionIn.duration <= 0) continue
+      const elapsed = time - clip.start
+      if (elapsed < 0 || elapsed >= clip.transitionIn.duration) continue
+      // Find the clip that ended just before this one on the same track
+      const prev = track.clips
+        .filter((c) => c.id !== clip.id && c.start + c.duration <= clip.start + 0.001)
+        .sort((a, b) => (b.start + b.duration) - (a.start + a.duration))[0]
+      if (!prev) continue
+      // Hold the previous clip at its last frame (2 frames before end to avoid edge effects)
+      const holdTime = Math.max(prev.start, prev.start + prev.duration - frameInterval * 2)
+      // Draw with fadeIn/fadeOut zeroed so it appears at full opacity during the transition
+      result.push({ clip: { ...prev, fadeOut: 0, fadeIn: 0 }, drawTime: holdTime })
+    }
+  }
+  return result
+}
+
 async function renderWithWebCodecs({
   canvas,
   ctx,
@@ -511,6 +541,12 @@ async function renderWithWebCodecs({
       ...adjustmentClips.map((c) => c.clip),
       ...textAndSubtitleClips.map((c) => c.clip),
     ]
+
+    // Draw ghost clips first (previous clips held at their last frame during transitionIn)
+    for (const { clip: ghostClip, drawTime } of collectTransitionGhostClips(activeVideoTracks, time, frameInterval)) {
+      const aId = resolveClipAssetId(ghostClip, assets)
+      drawClipToCanvas(ctx, ghostClip, aId ? visualAssets.get(aId) : undefined, drawTime, settings.width, settings.height, sequenceSize)
+    }
 
     for (const clip of orderedClips) {
       const aId = resolveClipAssetId(clip, assets)
@@ -945,6 +981,12 @@ export async function renderSequence({
         ...adjustmentClips.map((c) => c.clip),
         ...textAndSubtitleClips.map((c) => c.clip),
       ]
+
+      // Draw ghost clips first (previous clips held at their last frame during transitionIn)
+      for (const { clip: ghostClip, drawTime } of collectTransitionGhostClips(activeVideoTracks, time, frameInterval)) {
+        const aId = resolveClipAssetId(ghostClip, assets)
+        drawClipToCanvas(ctx, ghostClip, aId ? visualAssets.get(aId) : undefined, drawTime, settings.width, settings.height, sequenceSize)
+      }
 
       for (const clip of orderedClips) {
         const aId = resolveClipAssetId(clip, assets)

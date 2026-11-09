@@ -55,6 +55,30 @@ export type TextAnimation = {
   outDuration: number
 }
 
+// ─── Animaciones de clip (imagen / vídeo) ───────────────────────────────────
+export type ClipAnimationCombo =
+  | 'none'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'ken-burns-in'
+  | 'ken-burns-out'
+  | 'pan-left'
+  | 'pan-right'
+  | 'pan-up'
+  | 'pan-down'
+  | 'ken-burns-mix'
+  | 'pulse'
+  | 'float-up'
+  | 'slow-rotate'
+  | 'drift-right'
+  | 'zoom-pulse'
+
+export type ClipAnimation = {
+  combo: ClipAnimationCombo
+  /** Intensidad / velocidad de la animación. 100 = normal, 50 = sutil, 200 = dramático. */
+  intensity: number
+}
+
 export type FitMode = 'fit' | 'fill' | 'stretch'
 
 export type ClipBlendMode =
@@ -104,6 +128,7 @@ export type Clip = {
   text?: string
   textStyle?: TextStyle
   textAnimation?: TextAnimation
+  clipAnimation?: ClipAnimation
 }
 
 export type Track = {
