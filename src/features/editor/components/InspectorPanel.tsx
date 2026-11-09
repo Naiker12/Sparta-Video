@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Copy, CopyPlus, Film, Maximize2, MoreHorizontal, Plus, RotateCcw, Scissors, Settings, SlidersHorizontal, Snowflake, Trash2, Type, Upload, Volume2 } from 'lucide-react'
 import { IconNleFx } from './StudioIcons'
-import type { Clip, ClipAnimation, EffectInstance, Keyframe, KeyframeEasing, MediaItem, TextAnimation, TextStyle } from '../model'
+import type { Clip, ClipAnimation, ClipMask, ClipMaskType, EffectInstance, Keyframe, KeyframeEasing, MediaItem, TextAnimation, TextStyle } from '../model'
 import { CLIP_ANIM_COMBO, buildAnimationKeyframes, getDefaultClipAnimation } from '../services/clip-animation'
 import { ADJUST_PARAMS, EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
 import { parseCubeLUT } from '../effects/lut-parser'
@@ -131,6 +131,20 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
     if (!clip || readOnly) return
     const currentCrop = clip.crop ?? { l: 0, r: 0, t: 0, b: 0 }
     onUpdateClip(clip.id, { crop: { ...currentCrop, [edge]: Math.max(0, val) } })
+  }
+  const updateMask = (patch: Partial<ClipMask>) => {
+    if (!clip || readOnly) return
+    const currentMask: ClipMask = clip.mask ?? {
+      type: 'none',
+      x: 50,
+      y: 50,
+      width: 50,
+      height: 50,
+      rotation: 0,
+      feather: 0,
+      invert: false,
+    }
+    onUpdateClip(clip.id, { mask: { ...currentMask, ...patch } })
   }
   const setKeyframe = (property: Keyframe['property'], time: number) => {
     if (!clip) return
@@ -623,6 +637,87 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                   />
                 </div>
               </div>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection title={t('Máscara', 'Mask')} defaultOpen={!!clip.mask && clip.mask.type !== 'none'}>
+            <div className="space-y-3 pt-1 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">{t('Forma', 'Shape')}</span>
+                <select
+                  aria-label={t('Tipo de máscara', 'Mask shape')}
+                  className="h-7 rounded-[6px] border border-border/70 bg-input px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary cursor-pointer flex-1 max-w-[150px]"
+                  value={clip.mask?.type ?? 'none'}
+                  disabled={readOnly}
+                  onChange={(e) => updateMask({ type: e.target.value as ClipMaskType })}
+                >
+                  <option value="none">{t('Ninguna', 'None')}</option>
+                  <option value="rectangle">{t('Rectángulo', 'Rectangle')}</option>
+                  <option value="circle">{t('Círculo', 'Circle')}</option>
+                  <option value="ellipse">{t('Elipse', 'Ellipse')}</option>
+                  <option value="linear">{t('Dividido (Lineal)', 'Split (Linear)')}</option>
+                </select>
+              </div>
+
+              {clip.mask && clip.mask.type !== 'none' && (
+                <div className="space-y-2 pt-1 border-t border-border/40">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="w-16 text-muted-foreground">{t('Ancho', 'Width')}</span>
+                    <Slider
+                      min={5}
+                      max={100}
+                      step={1}
+                      value={clip.mask.width}
+                      disabled={readOnly}
+                      onValueChange={(val) => updateMask({ width: val })}
+                      className="flex-1"
+                    />
+                    <span className="w-10 text-right font-mono tabular-nums">{clip.mask.width}%</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="w-16 text-muted-foreground">{t('Alto', 'Height')}</span>
+                    <Slider
+                      min={5}
+                      max={100}
+                      step={1}
+                      value={clip.mask.height}
+                      disabled={readOnly}
+                      onValueChange={(val) => updateMask({ height: val })}
+                      className="flex-1"
+                    />
+                    <span className="w-10 text-right font-mono tabular-nums">{clip.mask.height}%</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="w-16 text-muted-foreground">{t('Posición X', 'Position X')}</span>
+                    <Slider
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={clip.mask.x}
+                      disabled={readOnly}
+                      onValueChange={(val) => updateMask({ x: val })}
+                      className="flex-1"
+                    />
+                    <span className="w-10 text-right font-mono tabular-nums">{clip.mask.x}%</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="w-16 text-muted-foreground">{t('Posición Y', 'Position Y')}</span>
+                    <Slider
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={clip.mask.y}
+                      disabled={readOnly}
+                      onValueChange={(val) => updateMask({ y: val })}
+                      className="flex-1"
+                    />
+                    <span className="w-10 text-right font-mono tabular-nums">{clip.mask.y}%</span>
+                  </div>
+                </div>
+              )}
             </div>
           </AccordionSection>
 

@@ -102,6 +102,19 @@ export type ClipCrop = {
   b: number
 }
 
+export type ClipMaskType = 'none' | 'rectangle' | 'circle' | 'ellipse' | 'linear'
+
+export type ClipMask = {
+  type: ClipMaskType
+  x: number // center x in %, 0-100 (default 50)
+  y: number // center y in %, 0-100 (default 50)
+  width: number // in %, 1-100 (default 50)
+  height: number // in %, 1-100 (default 50)
+  rotation?: number // in degrees
+  feather?: number // feather radius in px
+  invert?: boolean
+}
+
 export type Clip = {
   id: string
   title: string
@@ -117,6 +130,7 @@ export type Clip = {
   blendMode?: ClipBlendMode
   fit?: FitMode
   crop?: ClipCrop
+  mask?: ClipMask
   flipH?: boolean
   flipV?: boolean
   speed?: number

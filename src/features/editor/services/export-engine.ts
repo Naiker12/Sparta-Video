@@ -5,6 +5,7 @@ import { getInterpolatedOpacity, getInterpolatedTransform } from './keyframe-int
 import { drawAnimatedTextClipToCanvas } from './text-presets'
 import { computeFitRect } from './media-fit'
 import { computeTransitionInState } from '../effects/transition-math'
+import { applyMaskToCanvas } from './mask-service'
 import {
   applyChromaKey,
   applyChromaticAberration,
@@ -1160,7 +1161,14 @@ export function drawClipToCanvas(
   if (element && srcW > 0 && srcH > 0) {
     try {
       const fitRect = computeFitRect(srcW, srcH, canvasWidth, canvasHeight, clip.fit ?? 'fit')
-      ctx.drawImage(element, -fitRect.w / 2, -fitRect.h / 2, fitRect.w, fitRect.h)
+      if (clip.mask && clip.mask.type !== 'none') {
+        ctx.save()
+        applyMaskToCanvas(ctx, clip.mask, fitRect)
+        ctx.drawImage(element, -fitRect.w / 2, -fitRect.h / 2, fitRect.w, fitRect.h)
+        ctx.restore()
+      } else {
+        ctx.drawImage(element, -fitRect.w / 2, -fitRect.h / 2, fitRect.w, fitRect.h)
+      }
       rendered = true
     } catch {
       // Image/Video draw failed

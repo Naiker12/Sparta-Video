@@ -75,6 +75,17 @@ export const clipAnimationSchema = z.object({
   intensity: z.number(),
 })
 
+export const clipMaskSchema = z.object({
+  type: z.enum(['none', 'rectangle', 'circle', 'ellipse', 'linear']),
+  x: z.number().default(50),
+  y: z.number().default(50),
+  width: z.number().default(50),
+  height: z.number().default(50),
+  rotation: z.number().optional(),
+  feather: z.number().optional(),
+  invert: z.boolean().optional(),
+})
+
 export const clipSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -90,6 +101,7 @@ export const clipSchema = z.object({
   blendMode: z.enum(['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'soft-light', 'add']).optional(),
   fit: z.enum(['fit', 'fill', 'stretch']).optional(),
   crop: z.object({ l: z.number(), t: z.number(), r: z.number(), b: z.number() }).optional(),
+  mask: clipMaskSchema.optional(),
   flipH: z.boolean().optional(),
   flipV: z.boolean().optional(),
   speed: z.number().optional(),

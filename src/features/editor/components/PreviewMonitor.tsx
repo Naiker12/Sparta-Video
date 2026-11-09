@@ -12,6 +12,7 @@ import { useEditorStore } from '../editor-store'
 import { toast } from '../../../shared/ui/toast-service'
 import { computeTransitionInState } from '../effects/transition-math'
 import { getEffectsCSSFilter } from '../effects/pixel-effects'
+import { computeMaskClipPath } from '../services/mask-service'
 
 type Props = {
   playhead: number
@@ -377,7 +378,7 @@ export function PreviewMonitor({
     objectFit: objectFitStyle,
     mixBlendMode: blendModeStyle as React.CSSProperties['mixBlendMode'],
     filter: effFilter || undefined,
-    clipPath: transState?.clipPath,
+    clipPath: transState?.clipPath ?? computeMaskClipPath(clip?.mask),
   }
 
   const getLayerStyle = (layerClip: PreviewVisualClip, order: number): React.CSSProperties => {
@@ -403,7 +404,7 @@ export function PreviewMonitor({
       mixBlendMode: layerClip.blendMode === 'add' ? 'plus-lighter' : layerClip.blendMode === 'normal' ? undefined : layerClip.blendMode as React.CSSProperties['mixBlendMode'],
       filter: getEffectsCSSFilter(effects) || undefined,
       imageRendering: effects.some((effect) => effect.enabled && effect.effectId === 'fx-pixelate') ? 'pixelated' : undefined,
-      clipPath: layerTransition?.clipPath,
+      clipPath: layerTransition?.clipPath ?? computeMaskClipPath(layerClip.mask),
       zIndex: order,
     }
   }
