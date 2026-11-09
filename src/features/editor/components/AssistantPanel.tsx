@@ -400,9 +400,15 @@ function AssistantPanelSession({ open, onClose, projectName, projectId, activeMo
     </div>
     <div className="chat-content" ref={feedRef} onScroll={updateScrollFollow}>
       {mode === 'audio' ? <AudioGenerationPanel /> : <>
-        {!messages.length && !requesting && <div className="chat-welcome">
-          <h3>{selected ? t('¿En qué trabajamos?', 'What are we working on?') : t('Configura un modelo para empezar', 'Set up a model to get started')}</h3>
-          <p>{selected ? t('Consulta o aplica cambios directos sobre la secuencia actual.', 'Query or apply direct changes to the current sequence.') : t('Agrega un proveedor y carga un modelo con capacidad de texto desde Preferencias → IA y Proveedores.', 'Add a provider and load a text-capable model in Preferences → AI Providers.')}</p>
+        {!messages.length && !requesting && <div className="chat-welcome p-1">
+          <div className="p-3 rounded-xl bg-secondary/30 border border-border/50 mb-3.5">
+            <h3 className="text-[13px] font-semibold text-foreground mb-1">
+              {selected ? t('¿En qué trabajamos?', 'What are we working on?') : t('Configura un modelo para empezar', 'Set up a model to get started')}
+            </h3>
+            <p className="text-[11.5px] text-muted-foreground leading-relaxed m-0">
+              {selected ? t('Consulta o aplica cambios directos sobre la secuencia actual.', 'Query or apply direct changes to the current sequence.') : t('Agrega un proveedor y carga un modelo con capacidad de texto desde Preferencias → IA y Proveedores.', 'Add a provider and load a text-capable model in Preferences → AI Providers.')}
+            </p>
+          </div>
           <div className="assistant-quick-prompts">
             {promptSuggestions.map((item, idx) => {
               const Icon = item.icon

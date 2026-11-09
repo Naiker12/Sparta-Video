@@ -177,9 +177,9 @@ export function AppRoot() {
         <PreferencesSheet
           open={preferencesOpen}
           onOpenChange={setPreferencesOpen}
-          onResetLayout={() => {}}
+          onResetLayout={() => { }}
           snapToFrames={true}
-          onToggleSnap={() => {}}
+          onToggleSnap={() => { }}
           saveStatus="saved"
         />
       )}

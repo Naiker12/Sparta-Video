@@ -193,8 +193,8 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
   }
   return <aside className="inspector-panel flex flex-col h-full bg-card overflow-hidden select-none">
     <span className="sr-only">{t('INSPECTOR', 'INSPECTOR')}</span>
-    <div className="h-9 px-2 flex items-center justify-between border-b border-border bg-card shrink-0 gap-1">
-      <div className="flex items-center gap-1 flex-1 overflow-x-auto no-scrollbar" role="tablist" aria-label={t('Secciones del inspector', 'Inspector sections')}>
+    <div className="h-10 px-2 flex items-center justify-between border-b border-border/60 bg-card/60 shrink-0 gap-1.5 select-none">
+      <div className="grid grid-cols-5 gap-0.5 flex-1 p-0.5 bg-secondary/35 rounded-lg border border-white/5" role="tablist" aria-label={t('Secciones del inspector', 'Inspector sections')}>
         {(['Clip', 'Texto', 'Audio', 'Movimiento', 'Efectos'] as const).map((name) => {
           const label =
             name === 'Movimiento'
@@ -213,10 +213,10 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
               aria-label={label}
               aria-selected={isActive}
               className={cn(
-                'flex-1 py-1 px-2 rounded-[6px] text-xs font-medium transition-all text-center cursor-pointer select-none',
+                'py-1 px-1 rounded-md text-[11px] font-medium transition-all text-center cursor-pointer select-none truncate',
                 isActive
-                  ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                  ? 'bg-secondary text-foreground font-semibold shadow-xs border border-white/10'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
               )}
               onClick={() => setTab(name)}
             >
@@ -227,7 +227,7 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
       </div>
       <ActionMenu
         label={t('Opciones del inspector', 'Inspector options')}
-        triggerClass="w-7 h-7 flex items-center justify-center rounded-[6px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer shrink-0"
+        triggerClass="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors cursor-pointer shrink-0"
         items={[
           { label: t('Restablecer controles del clip', 'Reset clip controls'), icon: RotateCcw, disabled: !clip || readOnly, onSelect: onResetClip },
           { label: t('Copiar nombre del clip', 'Copy clip name'), icon: Copy, disabled: !clip, onSelect: () => { if (clip) onCopyClipName(clip.title) } },
@@ -1784,14 +1784,29 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
           </>
         )}
       </> : (
-        <div className="inspector-empty">
-          <SlidersHorizontal size={20} />
-          <span>{selectedMedia?.title ?? t('Selecciona un clip para editar sus propiedades','Select a clip to edit its properties')}</span>
-          {selectedMedia && (
-            <>
-              <small>{mediaDescription}</small>
-              <button className="keyframe-button primary-pill" onClick={onAddSelected}>{t('＋ Añadir a la línea de tiempo','＋ Add to timeline')}</button>
-            </>
+        <div className="flex-1 min-h-[300px] flex flex-col items-center justify-center p-6 text-center select-none">
+          <div className="w-12 h-12 rounded-2xl bg-secondary/50 border border-border/60 flex items-center justify-center mb-3.5 shadow-inner">
+            <SlidersHorizontal className="w-5 h-5 text-muted-foreground/80" />
+          </div>
+          <h4 className="text-[13px] font-semibold text-foreground/90 mb-1">
+            {selectedMedia?.title ?? t('Sin elemento seleccionado', 'No clip selected')}
+          </h4>
+          <p className="text-[11.5px] text-muted-foreground/70 max-w-[240px] leading-relaxed mb-4">
+            {selectedMedia ? mediaDescription : t('Selecciona un clip para editar sus propiedades', 'Select a clip to edit its properties')}
+          </p>
+          {selectedMedia ? (
+            <button
+              type="button"
+              className="keyframe-button primary-pill px-4 py-1.5 text-xs font-semibold"
+              onClick={onAddSelected}
+            >
+              {t('＋ Añadir a la línea de tiempo', '＋ Add to timeline')}
+            </button>
+          ) : (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-secondary/30 border border-border/40 text-[11px] text-muted-foreground/80">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary/70 animate-pulse" />
+              {t('Línea de tiempo lista', 'Timeline ready')}
+            </div>
           )}
         </div>
       )}

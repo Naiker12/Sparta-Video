@@ -72,3 +72,4 @@ describe('mask-service', () => {
     expect(ctx.clip).toHaveBeenCalled()
   })
 })
+
