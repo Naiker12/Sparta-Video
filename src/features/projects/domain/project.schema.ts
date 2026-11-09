@@ -13,12 +13,16 @@ export const transformSchema = z.object({
   rotation: z.number(),
 })
 
+export const keyframeEasingSchema = z.enum(['linear', 'ease-in', 'ease-out', 'ease-in-out', 'bezier'])
+
 export const keyframeSchema = z.object({
   property: z.enum(['position', 'scale', 'rotation', 'opacity']),
   time: z.number(),
   value: z.number().optional(),
   valueX: z.number().optional(),
   valueY: z.number().optional(),
+  easing: keyframeEasingSchema.optional(),
+  bezierControlPoints: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
 })
 
 export const textStyleSchema = z.object({

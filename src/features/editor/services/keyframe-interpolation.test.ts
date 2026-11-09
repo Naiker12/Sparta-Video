@@ -94,4 +94,70 @@ describe('keyframe interpolation engine', () => {
     // At end
     expect(getInterpolatedOpacity(clipWithFades, 10)).toBe(0)
   })
+
+  it('respects linear easing curve', () => {
+    const clipWithLinear: Clip = {
+      ...baseClip,
+      keyframes: [
+        { property: 'position', time: 0, valueX: 0, valueY: 0, easing: 'linear' },
+        { property: 'position', time: 10, valueX: 100, valueY: 200 },
+      ],
+    }
+
+    const t25 = getInterpolatedTransform(clipWithLinear, 2.5)
+    expect(t25.x).toBe(25)
+    expect(t25.y).toBe(50)
+
+    const t75 = getInterpolatedTransform(clipWithLinear, 7.5)
+    expect(t75.x).toBe(75)
+    expect(t75.y).toBe(150)
+  })
+
+  it('respects ease-in and ease-out curves differing from linear midpoint', () => {
+    const clipEaseIn: Clip = {
+      ...baseClip,
+      keyframes: [
+        { property: 'position', time: 0, valueX: 0, valueY: 0, easing: 'ease-in' },
+        { property: 'position', time: 10, valueX: 100, valueY: 100 },
+      ],
+    }
+
+    const clipEaseOut: Clip = {
+      ...baseClip,
+      keyframes: [
+        { property: 'position', time: 0, valueX: 0, valueY: 0, easing: 'ease-out' },
+        { property: 'position', time: 10, valueX: 100, valueY: 100 },
+      ],
+    }
+
+    // At 30% time (t=3s)
+    const valEaseIn = getInterpolatedTransform(clipEaseIn, 3).x
+    const valEaseOut = getInterpolatedTransform(clipEaseOut, 3).x
+
+    // Ease-in starts slow: value at 30% time is less than linear 30
+    expect(valEaseIn).toBeLessThan(30)
+    // Ease-out starts fast: value at 30% time is greater than linear 30
+    expect(valEaseOut).toBeGreaterThan(30)
+    expect(valEaseOut).toBeGreaterThan(valEaseIn)
+  })
+
+  it('evaluates custom cubic bezier control points', () => {
+    const clipBezier: Clip = {
+      ...baseClip,
+      keyframes: [
+        {
+          property: 'rotation',
+          time: 0,
+          value: 0,
+          easing: 'bezier',
+          bezierControlPoints: [0.1, 0.9, 0.2, 1.0], // very steep ease-out
+        },
+        { property: 'rotation', time: 10, value: 100 },
+      ],
+    }
+
+    // Steep ease-out should already have completed most rotation by halfway
+    const val = getInterpolatedTransform(clipBezier, 5).rotation
+    expect(val).toBeGreaterThan(75)
+  })
 })

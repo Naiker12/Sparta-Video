@@ -9,6 +9,91 @@ function smoothstep(t: number): number {
   return clamped * clamped * (3 - 2 * clamped)
 }
 
+function sampleCurveX(u: number, p1x: number, p2x: number): number {
+  const cx = 3 * p1x
+  const bx = 3 * (p2x - p1x) - cx
+  const ax = 1 - cx - bx
+  return ((ax * u + bx) * u + cx) * u
+}
+
+function sampleCurveY(u: number, p1y: number, p2y: number): number {
+  const cy = 3 * p1y
+  const by = 3 * (p2y - p1y) - cy
+  const ay = 1 - cy - by
+  return ((ay * u + by) * u + cy) * u
+}
+
+function sampleCurveDerivativeX(u: number, p1x: number, p2x: number): number {
+  const cx = 3 * p1x
+  const bx = 3 * (p2x - p1x) - cx
+  const ax = 1 - cx - bx
+  return (3 * ax * u + 2 * bx) * u + cx
+}
+
+export function solveCubicBezier(
+  t: number,
+  p1x: number,
+  p1y: number,
+  p2x: number,
+  p2y: number,
+): number {
+  if (t <= 0) return 0
+  if (t >= 1) return 1
+
+  // Newton-Raphson iteration
+  let u = t
+  for (let i = 0; i < 8; i++) {
+    const currentX = sampleCurveX(u, p1x, p2x) - t
+    if (Math.abs(currentX) < 1e-6) {
+      return sampleCurveY(u, p1y, p2y)
+    }
+    const dX = sampleCurveDerivativeX(u, p1x, p2x)
+    if (Math.abs(dX) < 1e-6) break
+    u -= currentX / dX
+  }
+
+  // Fallback to bisection
+  let lo = 0
+  let hi = 1
+  u = t
+  while (lo < hi) {
+    const currentX = sampleCurveX(u, p1x, p2x)
+    if (Math.abs(currentX - t) < 1e-6) {
+      return sampleCurveY(u, p1y, p2y)
+    }
+    if (t > currentX) {
+      lo = u
+    } else {
+      hi = u
+    }
+    u = (hi + lo) / 2
+    if (hi - lo < 1e-5) break
+  }
+
+  return sampleCurveY(u, p1y, p2y)
+}
+
+export function evaluateKeyframeEasing(k1: Keyframe, t: number): number {
+  const clamped = Math.max(0, Math.min(1, t))
+  const easing = k1.easing ?? 'ease-in-out'
+
+  switch (easing) {
+    case 'linear':
+      return clamped
+    case 'ease-in':
+      return solveCubicBezier(clamped, 0.42, 0.0, 1.0, 1.0)
+    case 'ease-out':
+      return solveCubicBezier(clamped, 0.0, 0.0, 0.58, 1.0)
+    case 'bezier': {
+      const [p1x, p1y, p2x, p2y] = k1.bezierControlPoints ?? [0.42, 0.0, 0.58, 1.0]
+      return solveCubicBezier(clamped, p1x, p1y, p2x, p2y)
+    }
+    case 'ease-in-out':
+    default:
+      return smoothstep(clamped)
+  }
+}
+
 /**
  * Finds bounding keyframes for a given property at the specified time.
  */
@@ -81,7 +166,7 @@ export function getInterpolatedTransform(
       result.x = v1X
       result.y = v1Y
     } else {
-      const t = smoothstep((sequenceTime - k1.time) / (k2.time - k1.time))
+      const t = evaluateKeyframeEasing(k1, (sequenceTime - k1.time) / (k2.time - k1.time))
       result.x = Math.round(lerp(v1X, v2X, t) * 10) / 10
       result.y = Math.round(lerp(v1Y, v2Y, t) * 10) / 10
     }
@@ -101,7 +186,7 @@ export function getInterpolatedTransform(
       result.scaleX = v1X
       result.scaleY = v1Y
     } else {
-      const t = smoothstep((sequenceTime - k1.time) / (k2.time - k1.time))
+      const t = evaluateKeyframeEasing(k1, (sequenceTime - k1.time) / (k2.time - k1.time))
       result.scaleX = Math.round(lerp(v1X, v2X, t) * 10) / 10
       result.scaleY = Math.round(lerp(v1Y, v2Y, t) * 10) / 10
     }
@@ -118,7 +203,7 @@ export function getInterpolatedTransform(
     if (k1.time === k2.time) {
       result.rotation = v1
     } else {
-      const t = smoothstep((sequenceTime - k1.time) / (k2.time - k1.time))
+      const t = evaluateKeyframeEasing(k1, (sequenceTime - k1.time) / (k2.time - k1.time))
       result.rotation = Math.round(lerp(v1, v2, t) * 10) / 10
     }
   }
@@ -142,7 +227,7 @@ export function getInterpolatedOpacity(clip: Clip, sequenceTime: number): number
       if (bounds.k1.time === bounds.k2.time) {
         baseOpacity = v1
       } else {
-        const t = smoothstep((sequenceTime - bounds.k1.time) / (bounds.k2.time - bounds.k1.time))
+        const t = evaluateKeyframeEasing(bounds.k1, (sequenceTime - bounds.k1.time) / (bounds.k2.time - bounds.k1.time))
         baseOpacity = lerp(v1, v2, t)
       }
     }

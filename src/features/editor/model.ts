@@ -3,12 +3,16 @@ export type { EffectDef, EffectInstance, EffectKind, EffectParamDef, TransitionR
 
 export type Transform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number }
 
+export type KeyframeEasing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'bezier'
+
 export type Keyframe = {
   property: 'position' | 'scale' | 'rotation' | 'opacity'
   time: number
   value?: number
   valueX?: number
   valueY?: number
+  easing?: KeyframeEasing
+  bezierControlPoints?: [number, number, number, number]
 }
 
 export type TextAnimationIn =

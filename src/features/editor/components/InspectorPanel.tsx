@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Copy, CopyPlus, Film, Maximize2, MoreHorizontal, Plus, RotateCcw, Scissors, Settings, SlidersHorizontal, Snowflake, Trash2, Type, Upload, Volume2 } from 'lucide-react'
 import { IconNleFx } from './StudioIcons'
-import type { Clip, ClipAnimation, EffectInstance, Keyframe, MediaItem, TextAnimation, TextStyle } from '../model'
+import type { Clip, ClipAnimation, EffectInstance, Keyframe, KeyframeEasing, MediaItem, TextAnimation, TextStyle } from '../model'
 import { CLIP_ANIM_COMBO, buildAnimationKeyframes, getDefaultClipAnimation } from '../services/clip-animation'
 import { ADJUST_PARAMS, EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
 import { parseCubeLUT } from '../effects/lut-parser'
@@ -151,6 +151,17 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
       }
       onUpdateClip(clip.id, { keyframes: [...keyframes, newKeyframe] })
     }
+  }
+
+  const updateKeyframeEasing = (property: Keyframe['property'], time: number, easing: KeyframeEasing) => {
+    if (!clip || readOnly) return
+    const keyframes = (clip.keyframes ?? []).map((kf) => {
+      if (kf.property === property && kf.time === time) {
+        return { ...kf, easing }
+      }
+      return kf
+    })
+    onUpdateClip(clip.id, { keyframes })
   }
   // ─── Clip animation (imagen / vídeo) ─────────────────────────────────────
   const clipAnim: ClipAnimation = clip?.clipAnimation ?? getDefaultClipAnimation()
@@ -1111,9 +1122,22 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
               </div>
               <div className="keyframe-list">
                 {[...(clip.keyframes ?? [])].sort((a, b) => a.time - b.time).map((kf) => (
-                  <div className="keyframe-item" key={`${kf.property}-${kf.time}`}>
-                    <span>◇ {kf.property === 'position' ? t('Posición', 'Position') : kf.property === 'scale' ? t('Escala', 'Scale') : kf.property === 'rotation' ? t('Rotación', 'Rotation') : t('Opacidad', 'Opacity')}</span>
-                    <button type="button" className="keyframe-time-btn" onClick={() => onSeek(kf.time)}>{kf.time.toFixed(2)} s</button>
+                  <div className="keyframe-item flex items-center justify-between gap-1 py-1" key={`${kf.property}-${kf.time}`}>
+                    <span className="text-[12px] truncate">◇ {kf.property === 'position' ? t('Posición', 'Position') : kf.property === 'scale' ? t('Escala', 'Scale') : kf.property === 'rotation' ? t('Rotación', 'Rotation') : t('Opacidad', 'Opacity')}</span>
+                    <button type="button" className="keyframe-time-btn text-[11px] px-1.5 py-0.5 rounded bg-secondary/60 hover:bg-secondary text-foreground" onClick={() => onSeek(kf.time)}>{kf.time.toFixed(2)} s</button>
+                    <select
+                      className="keyframe-easing-select bg-secondary/80 text-[11px] rounded px-1.5 py-0.5 border border-white/10 text-foreground cursor-pointer"
+                      value={kf.easing ?? 'ease-in-out'}
+                      disabled={readOnly}
+                      aria-label={t('Curva de aceleración', 'Easing curve')}
+                      onChange={(e) => updateKeyframeEasing(kf.property, kf.time, e.target.value as KeyframeEasing)}
+                      title={t('Curva de aceleración (easing)', 'Acceleration curve (easing)')}
+                    >
+                      <option value="linear">{t('Lineal', 'Linear')}</option>
+                      <option value="ease-in">{t('Acelerado (In)', 'Ease In')}</option>
+                      <option value="ease-out">{t('Desacelerado (Out)', 'Ease Out')}</option>
+                      <option value="ease-in-out">{t('Suave (In-Out)', 'Ease In-Out')}</option>
+                    </select>
                     <button type="button" className="keyframe-del-btn" aria-label={`Eliminar fotograma clave ${kf.time}`} disabled={readOnly} onClick={() => setKeyframe(kf.property, kf.time)}>×</button>
                   </div>
                 ))}
