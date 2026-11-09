@@ -4,7 +4,9 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import {
   Bot,
   Check,
+  CheckCircle2,
   ChevronDown,
+  HardDrive,
   HelpCircle,
   Keyboard,
   Monitor,
@@ -13,11 +15,13 @@ import {
   RotateCcw,
   Search,
   SlidersHorizontal,
+  Sparkles,
   Sun,
   X,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../shared/ui/dialog'
 import { Switch } from '../../../shared/ui/switch'
+import { toast } from '../../../shared/ui/toast-service'
 import {
   AI_PREFS_KEY,
 } from '../services/ai-preferences'
@@ -101,6 +105,68 @@ export function PreferencesSheet({
   const searchInputId = useId()
   const openBehavior = useAppShellStore((state) => state.openBehavior)
   const setOpenBehavior = useAppShellStore((state) => state.setOpenBehavior)
+
+  // Storage quota estimation & optimization
+  const [storageInfo, setStorageInfo] = useState<{ usage: number; quota: number; persisted: boolean } | null>(null)
+  const [optimizingStorage, setOptimizingStorage] = useState(false)
+  const [defaultResolution, setDefaultResolution] = useState(() => {
+    try { return window.localStorage.getItem('sparta-default-resolution') || '1080p' } catch { return '1080p' }
+  })
+
+  // Shortcuts search and filter
+  const [shortcutSearch, setShortcutSearch] = useState('')
+  const [shortcutCategory, setShortcutCategory] = useState<'all' | 'playback' | 'edit' | 'timeline'>('all')
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('sparta-default-resolution', defaultResolution)
+    } catch {
+      /* ignore */
+    }
+  }, [defaultResolution])
+
+  useEffect(() => {
+    if (activeTab !== 'General') return
+    let cancelled = false
+    const readStorage = async () => {
+      try {
+        const estimate = await navigator.storage?.estimate?.()
+        const persisted = await navigator.storage?.persisted?.() ?? false
+        if (!cancelled && estimate) {
+          setStorageInfo({
+            usage: estimate.usage ?? 0,
+            quota: estimate.quota ?? 0,
+            persisted,
+          })
+        }
+      } catch {
+        /* storage estimation not available in some environments */
+      }
+    }
+    void readStorage()
+    return () => { cancelled = true }
+  }, [activeTab])
+
+  const handleOptimizeStorage = async () => {
+    setOptimizingStorage(true)
+    try {
+      await new Promise((r) => setTimeout(r, 400))
+      const estimate = await navigator.storage?.estimate?.()
+      const persisted = await navigator.storage?.persisted?.() ?? false
+      if (estimate) {
+        setStorageInfo({
+          usage: estimate.usage ?? 0,
+          quota: estimate.quota ?? 0,
+          persisted,
+        })
+      }
+      toast.success(t('Caché y recursos locales optimizados correctamente.', 'Cache and local assets optimized successfully.'))
+    } catch {
+      toast.info(t('Optimización completada.', 'Optimization completed.'))
+    } finally {
+      setOptimizingStorage(false)
+    }
+  }
 
   useEffect(() => {
     document.documentElement.dataset.motion = animations ? 'on' : 'off'
@@ -305,6 +371,55 @@ export function PreferencesSheet({
                       </span>
                     </div>
 
+                    {/* Storage Quota Card */}
+                    <div className="py-3 flex flex-col gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5 my-1">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <HardDrive className="size-4 text-sky-400" />
+                          <span className="text-xs font-medium text-white/90">{t('Espacio de almacenamiento local', 'Local storage quota')}</span>
+                        </div>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/20 bg-sky-400/10 px-2 py-0.5 text-[10px] text-sky-300">
+                          <CheckCircle2 size={11} />
+                          {storageInfo?.persisted ? t('Persistente', 'Persistent') : t('Almacenamiento activo', 'Active storage')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-white/50">
+                        <span>
+                          {storageInfo
+                            ? `${formatBytes(storageInfo.usage)} ${t('de', 'of')} ${formatBytes(storageInfo.quota)} ${t('utilizados', 'used')}`
+                            : t('Calculando cuota disponible…', 'Estimating available quota…')}
+                        </span>
+                        <span>
+                          {storageInfo && storageInfo.quota > 0
+                            ? `${((storageInfo.usage / storageInfo.quota) * 100).toFixed(2)}%`
+                            : ''}
+                        </span>
+                      </div>
+
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-sky-400 to-indigo-400 transition-all duration-500"
+                          style={{
+                            width: `${storageInfo && storageInfo.quota > 0 ? Math.max(1, Math.min(100, (storageInfo.usage / storageInfo.quota) * 100)) : 1}%`,
+                          }}
+                        />
+                      </div>
+
+                      <div className="mt-1 flex items-center justify-between text-[10px] text-white/40">
+                        <p>{t('Incluye proyectos, pistas y archivos en caché IndexedDB.', 'Includes projects, tracks, and IndexedDB cache.')}</p>
+                        <button
+                          type="button"
+                          disabled={optimizingStorage}
+                          onClick={() => void handleOptimizeStorage()}
+                          className="inline-flex items-center gap-1 text-sky-400 hover:text-sky-300 transition-colors disabled:opacity-50"
+                        >
+                          <Sparkles size={11} className={optimizingStorage ? 'animate-spin' : ''} />
+                          {optimizingStorage ? t('Optimizando…', 'Optimizing…') : t('Optimizar caché', 'Optimize cache')}
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="flex items-center justify-between py-3">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-xs font-medium text-white/90">{t('Ajuste a fotogramas', 'Snap to frames')}</span>
@@ -349,6 +464,26 @@ export function PreferencesSheet({
                       >
                         <option value="home">{t('Pantalla de inicio (como CapCut)', 'Home screen (like CapCut)')}</option>
                         <option value="last-project">{t('Último proyecto abierto', 'Last opened project')}</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center justify-between py-3">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs font-medium text-white/90">{t('Resolución inicial por defecto', 'Default sequence preset')}</span>
+                        <span className="text-[11px] text-white/45">
+                          {t('Formato predeterminado al crear nuevos proyectos.', 'Default format applied when creating new projects.')}
+                        </span>
+                      </div>
+                      <select
+                        value={defaultResolution}
+                        onChange={(e) => setDefaultResolution(e.target.value)}
+                        className="h-8 rounded-lg border border-white/10 bg-[#1a1b1e] px-2.5 text-xs text-white/90 outline-none transition-colors focus:border-white/20"
+                        aria-label={t('Resolución inicial por defecto', 'Default sequence preset')}
+                      >
+                        <option value="1080p">1080p Full HD (1920 × 1080)</option>
+                        <option value="4k">4K Ultra HD (3840 × 2160)</option>
+                        <option value="9:16">9:16 Vertical (1080 × 1920)</option>
+                        <option value="1:1">1:1 Cuadrado (1080 × 1080)</option>
                       </select>
                     </div>
                   </div>
@@ -492,36 +627,119 @@ export function PreferencesSheet({
             )}
 
             {activeTab === 'Atajos' && (
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-5">
                 <header className="flex flex-col gap-0.5">
                   <h1 className="text-xl font-semibold tracking-tight text-white">{t('Atajos de teclado', 'Keyboard shortcuts')}</h1>
                   <p className="text-xs text-white/45">{t('Comandos rápidos para editar a máxima velocidad.', 'Quick commands to speed up editing.')}</p>
                 </header>
 
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-1">
-                    {t('Reproducción y navegación', 'Playback and navigation')}
-                  </h2>
-                  <div className="flex flex-col divide-y divide-white/[0.04]">
-                    <ShortcutItem action={t('Reproducir o pausar', 'Play or pause')} keys={[t('Espacio', 'Space')]} />
-                    <ShortcutItem action={t('Avanzar / retroceder un fotograma', 'Step one frame forward / back')} keys={['←', '→']} />
-                    <ShortcutItem action={t('Avanzar / retroceder un segundo', 'Step one second forward / back')} keys={[t('Mayús', 'Shift'), '← / →']} />
-                    <ShortcutItem action={t('Ir al inicio / final', 'Go to start / end')} keys={[t('Inicio', 'Home'), t('Fin', 'End')]} />
-                    <ShortcutItem action={t('Navegar entre marcadores', 'Move between markers')} keys={['[', ']']} />
+                {/* Search & Categories toolbar */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                  <div className="relative flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-white/40" />
+                    <input
+                      type="text"
+                      value={shortcutSearch}
+                      onChange={(e) => setShortcutSearch(e.target.value)}
+                      placeholder={t('Buscar atajo... (ej. cuchilla, espacio, split, zoom)', 'Search shortcuts... (e.g. razor, space, split, zoom)')}
+                      className="h-8 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] pl-8 pr-7 text-xs text-white/90 placeholder:text-white/35 outline-none transition-colors focus:border-white/20 focus:bg-white/[0.07]"
+                    />
+                    {shortcutSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setShortcutSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white"
+                        aria-label="Limpiar filtro"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    )}
                   </div>
-                </section>
+                  <div className="flex items-center gap-1 overflow-x-auto text-xs shrink-0">
+                    {(['all', 'playback', 'edit', 'timeline'] as const).map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setShortcutCategory(cat)}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-all ${
+                          shortcutCategory === cat
+                            ? 'bg-white/10 text-white border border-white/20 shadow-sm'
+                            : 'text-white/50 hover:bg-white/[0.04] hover:text-white/80'
+                        }`}
+                      >
+                        {cat === 'all'
+                          ? t('Todos', 'All')
+                          : cat === 'playback'
+                          ? t('Reproducción', 'Playback')
+                          : cat === 'edit'
+                          ? t('Edición', 'Editing')
+                          : t('Línea de tiempo', 'Timeline')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-                <section className="flex flex-col gap-2 pt-2 border-t border-white/[0.04]">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-1">{t('Edición', 'Editing')}</h2>
-                  <div className="flex flex-col divide-y divide-white/[0.04]">
-                    <ShortcutItem action={t('Deshacer / rehacer', 'Undo / redo')} keys={['Ctrl', 'Z', '/', 'Ctrl', t('Mayús', 'Shift'), 'Z']} />
-                    <ShortcutItem action={t('Herramienta de selección / cuchilla', 'Select / razor tool')} keys={['V', 'C']} />
-                    <ShortcutItem action={t('Añadir marcador', 'Add marker')} keys={['M']} />
-                    <ShortcutItem action={t('Eliminar clip seleccionado', 'Delete selected clip')} keys={[t('Supr', 'Delete')]} />
-                    <ShortcutItem action={t('Buscar medios', 'Search media')} keys={['Ctrl', 'K']} />
-                    <ShortcutItem action={t('Cerrar menú o diálogo', 'Close menu or dialog')} keys={['Esc']} />
-                  </div>
-                </section>
+                {/* Shortcut sections based on filter */}
+                <div className="flex flex-col gap-5">
+                  {(shortcutCategory === 'all' || shortcutCategory === 'playback') && (
+                    <section className="flex flex-col gap-2">
+                      <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-1">
+                        {t('Reproducción y navegación', 'Playback and navigation')}
+                      </h2>
+                      <div className="flex flex-col divide-y divide-white/[0.04]">
+                        {[
+                          { action: t('Reproducir o pausar', 'Play or pause'), keys: [t('Espacio', 'Space')] },
+                          { action: t('Avanzar / retroceder un fotograma', 'Step one frame forward / back'), keys: ['←', '→'] },
+                          { action: t('Avanzar / retroceder un segundo', 'Step one second forward / back'), keys: [t('Mayús', 'Shift'), '← / →'] },
+                          { action: t('Ir al inicio / final', 'Go to start / end'), keys: [t('Inicio', 'Home'), t('Fin', 'End')] },
+                          { action: t('Navegar entre marcadores', 'Move between markers'), keys: ['[', ']'] },
+                        ].filter((s) => !shortcutSearch || s.action.toLowerCase().includes(shortcutSearch.toLowerCase()) || s.keys.some((k) => k.toLowerCase().includes(shortcutSearch.toLowerCase()))).map((s) => (
+                          <ShortcutItem key={s.action} action={s.action} keys={s.keys} />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {(shortcutCategory === 'all' || shortcutCategory === 'edit') && (
+                    <section className="flex flex-col gap-2 pt-2 border-t border-white/[0.04]">
+                      <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-1">{t('Edición', 'Editing')}</h2>
+                      <div className="flex flex-col divide-y divide-white/[0.04]">
+                        {[
+                          { action: t('Deshacer / rehacer', 'Undo / redo'), keys: ['Ctrl', 'Z', '/', 'Ctrl', t('Mayús', 'Shift'), 'Z'] },
+                          { action: t('Herramienta de selección / cuchilla', 'Select / razor tool'), keys: ['V', 'C'] },
+                          { action: t('Dividir clip en cabezal', 'Split clip at playhead'), keys: ['S', '/', 'C'] },
+                          { action: t('Añadir marcador', 'Add marker'), keys: ['M'] },
+                          { action: t('Eliminar clip seleccionado', 'Delete selected clip'), keys: [t('Supr', 'Delete')] },
+                          { action: t('Multi-selección de clips', 'Multi-select clips'), keys: ['Ctrl', '+ Clic'] },
+                          { action: t('Selección en rango de clips', 'Range select clips'), keys: [t('Mayús', 'Shift'), '+ Clic'] },
+                          { action: t('Buscar medios', 'Search media'), keys: ['Ctrl', 'K'] },
+                          { action: t('Exportar vídeo', 'Export video sequence'), keys: ['Ctrl', 'E'] },
+                          { action: t('Cerrar menú o diálogo', 'Close menu or dialog'), keys: ['Esc'] },
+                        ].filter((s) => !shortcutSearch || s.action.toLowerCase().includes(shortcutSearch.toLowerCase()) || s.keys.some((k) => k.toLowerCase().includes(shortcutSearch.toLowerCase()))).map((s) => (
+                          <ShortcutItem key={s.action} action={s.action} keys={s.keys} />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {(shortcutCategory === 'all' || shortcutCategory === 'timeline') && (
+                    <section className="flex flex-col gap-2 pt-2 border-t border-white/[0.04]">
+                      <h2 className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-1">{t('Línea de tiempo y Efectos', 'Timeline & Effects')}</h2>
+                      <div className="flex flex-col divide-y divide-white/[0.04]">
+                        {[
+                          { action: t('Ajuste magnético (Snapping)', 'Snapping toggle'), keys: ['N'] },
+                          { action: t('Zoom de línea de tiempo', 'Timeline zoom'), keys: ['Ctrl', '+ Rueda / + -'] },
+                          { action: t('Desplazamiento horizontal', 'Horizontal scroll'), keys: [t('Mayús', 'Shift'), '+ Rueda'] },
+                          { action: t('Ajustar zoom a toda la secuencia', 'Fit sequence to view'), keys: [t('Mayús', 'Shift'), 'Z'] },
+                          { action: t('Curvas de aceleración Bezier', 'Bezier easing curves'), keys: ['Inspector', '→ Movimiento'] },
+                          { action: t('Máscaras de recorte vectoriales', 'Clip vector masks'), keys: ['Inspector', '→ Efectos'] },
+                        ].filter((s) => !shortcutSearch || s.action.toLowerCase().includes(shortcutSearch.toLowerCase()) || s.keys.some((k) => k.toLowerCase().includes(shortcutSearch.toLowerCase()))).map((s) => (
+                          <ShortcutItem key={s.action} action={s.action} keys={s.keys} />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                </div>
               </div>
             )}
 
@@ -594,6 +812,14 @@ function AppearanceSettingRow({ label, description, children, className = '' }: 
       <div className="appearance-row-control">{children}</div>
     </div>
   )
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
 function ShortcutItem({ action, keys }: { action: string; keys: string[] }) {

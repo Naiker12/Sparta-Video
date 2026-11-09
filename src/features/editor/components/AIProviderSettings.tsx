@@ -224,16 +224,39 @@ export function AIProviderSettings() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div><h2 className="text-sm font-semibold text-white/90">{t('Proveedores conectados', 'Connected providers')}</h2><p className="mt-1 text-[11px] text-white/45">{t('Cada catálogo pertenece únicamente al proveedor que lo entrega.', 'Each catalog belongs only to the provider that returned it.')}</p></div>
-          <button type="button" onClick={startNew} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-blue-500 px-3 text-xs font-semibold text-white hover:bg-blue-400"><Plus size={14} />{t('Agregar', 'Add provider')}</button>
+          <button
+            type="button"
+            onClick={startNew}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-sky-400/30 bg-sky-500/15 px-3 text-xs font-medium text-sky-200 transition-all hover:bg-sky-500/25 hover:border-sky-400/50 active:scale-95 shadow-sm"
+          >
+            <Plus size={14} className="text-sky-300" />
+            {t('Agregar', 'Add provider')}
+          </button>
         </div>
 
         {!registry.profiles.length && (
-          <div className="ai-provider-empty-hub ai-provider-empty-state">
-            <span className="ai-empty-mark"><Bot size={17} /></span>
-            <div className="ai-empty-copy"><strong>{t('Conecta tu primer modelo', 'Connect your first model')}</strong><p>{t('Usa una IA local en tu equipo o añade un proveedor en la nube.', 'Use a local model on your computer or add a cloud provider.')}</p></div>
-            <div className="ai-empty-actions">
-              <button type="button" className="ai-empty-local-button" onClick={() => { startNew(); chooseKind('compatible') }}><span className="ai-local-status-dot" />{t('Conectar IA local', 'Connect local AI')}</button>
-              <button type="button" className="ai-empty-cloud-button" onClick={startNew}>{t('Añadir proveedor', 'Add provider')}</button>
+          <div className="ai-provider-empty-hub ai-provider-empty-state rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 shadow-sm">
+            <span className="ai-empty-mark rounded-xl border border-sky-400/25 bg-sky-500/10 text-sky-400"><Bot size={18} /></span>
+            <div className="ai-empty-copy">
+              <strong className="text-sm font-semibold text-white/95">{t('Conecta tu primer modelo', 'Connect your first model')}</strong>
+              <p className="mt-0.5 text-xs text-white/45">{t('Usa una IA local en tu equipo o añade un proveedor en la nube.', 'Use a local model on your computer or add a cloud provider.')}</p>
+            </div>
+            <div className="ai-empty-actions flex items-center gap-2">
+              <button
+                type="button"
+                className="ai-empty-local-button inline-flex h-8 items-center gap-2 rounded-lg border border-sky-400/30 bg-sky-500/15 px-3.5 text-xs font-medium text-sky-200 transition-all hover:bg-sky-500/25 hover:border-sky-400/50"
+                onClick={() => { startNew(); chooseKind('compatible') }}
+              >
+                <span className="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                {t('Conectar IA local', 'Connect local AI')}
+              </button>
+              <button
+                type="button"
+                className="ai-empty-cloud-button inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 text-xs font-medium text-white/80 transition-all hover:bg-white/[0.08] hover:text-white"
+                onClick={startNew}
+              >
+                {t('Añadir proveedor', 'Add provider')}
+              </button>
             </div>
           </div>
         )}
@@ -269,11 +292,17 @@ export function AIProviderSettings() {
             </select>
           </label>
         })}
-      </section> : <section className="ai-task-assignments-empty"><span><Cpu size={15} /></span><div><strong>{t('Asignaciones por tarea', 'Model assignments')}</strong><p>{t('Conecta un proveedor y carga sus modelos para elegir qué IA usar en cada tarea.', 'Connect a provider and load its models to choose which AI handles each task.')}</p></div></section>}
+      </section> : <section className="ai-task-assignments-empty rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 flex items-center gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-white/60"><Cpu size={16} /></span>
+        <div><strong className="text-xs font-semibold text-white/90">{t('Asignaciones por tarea', 'Model assignments')}</strong><p className="mt-0.5 text-[11px] text-white/45">{t('Conecta un proveedor y carga sus modelos para elegir qué IA usar en cada tarea.', 'Connect a provider and load its models to choose which AI handles each task.')}</p></div>
+      </section>}
 
       {(notice || error) && <div role={error ? 'alert' : 'status'} className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-[11px] ${error ? 'border-amber-400/20 bg-amber-400/[0.06] text-amber-200/85' : 'border-emerald-400/20 bg-emerald-400/[0.05] text-emerald-200/85'}`}>{error ? <CircleAlert size={14} className="mt-0.5 shrink-0" /> : <Check size={14} className="mt-0.5 shrink-0" />}{error || notice}</div>}
 
-      <div className="ai-provider-security-note"><KeyRound size={14} aria-hidden="true" /><p>{isTauri() ? t('Las claves se guardan en el llavero de Windows. Los modelos y asignaciones permanecen en este equipo; al quitar un proveedor también se elimina su credencial.', 'Keys are stored in the Windows Credential Manager. Models and assignments stay on this device; removing a provider also removes its credential.') : t('En la vista web las claves solo duran esta sesión. Usa la versión de escritorio para guardarlas protegidas y conectar servicios locales.', 'In the web preview, keys last only for this session. Use the desktop app to store them securely and connect local services.')}</p></div>
+      <div className="ai-provider-security-note rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-white/50 text-[11px] flex items-start gap-2.5">
+        <KeyRound size={14} className="mt-0.5 shrink-0 text-sky-400" aria-hidden="true" />
+        <p className="leading-relaxed">{isTauri() ? t('Las claves se guardan en el llavero de Windows. Los modelos y asignaciones permanecen en este equipo; al quitar un proveedor también se elimina su credencial.', 'Keys are stored in the Windows Credential Manager. Models and assignments stay on this device; removing a provider also removes its credential.') : t('En la vista web las claves solo duran esta sesión. Usa la versión de escritorio para guardarlas protegidas y conectar servicios locales.', 'In the web preview, keys last only for this session. Use the desktop app to store them securely and connect local services.')}</p>
+      </div>
 
       <Dialog open={editing} onOpenChange={(open) => { if (open) setEditing(true); else cancelEdit() }}>
         <DialogContent hideClose overlayClassName="ai-provider-overlay" className="ai-provider-modal flex max-h-[min(85vh,780px)] w-[min(92vw,680px)] max-w-2xl flex-col bg-[#14161b] p-0 text-white border border-white/10 shadow-2xl">
@@ -328,7 +357,20 @@ export function AIProviderSettings() {
             {error && <p role="alert" className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">{error}</p>}
             {loadedModels.length > 0 && <div className="ai-provider-models"><div className="flex items-center justify-between"><h3>{t('Modelos disponibles', 'Available models')}</h3><span>{loadedModels.length} {t('encontrados', 'found')}</span></div><p>{t('Activa las tareas que puede realizar cada modelo.', 'Select the tasks each model can handle.')}</p><div className="ai-provider-model-list">{loadedModels.slice(0, 100).map((model) => <div key={model.id} className="ai-provider-model-row"><div className="min-w-0"><strong title={model.name}>{model.name}</strong><span title={model.id}>{model.id}</span></div><div className="ai-provider-model-capabilities">{AI_TASKS.map((capability) => <button key={capability} type="button" aria-pressed={model.capabilities.includes(capability)} onClick={() => toggleCapability(model.id, capability)}>{t(...capabilityNames[capability])}</button>)}</div></div>)}</div></div>}
           </div>
-          <footer className="flex justify-end gap-2 border-t border-white/[0.07] bg-[#181b22] px-5 py-3"><button type="button" onClick={cancelEdit} className="h-8 rounded-lg border border-white/10 px-3 text-xs text-white/70 hover:bg-white/[0.06]">{t('Cancelar', 'Cancel')}</button><button type="button" disabled={!loadedModels.length || loading} onClick={() => void saveProvider()} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-500 px-3.5 text-xs font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40"><Save size={13} />{t('Guardar proveedor', 'Save provider')}</button></footer>
+          <footer className="flex justify-end gap-2 border-t border-white/[0.07] bg-[#181b22] px-5 py-3">
+            <button type="button" onClick={cancelEdit} className="h-8 rounded-lg border border-white/10 bg-white/[0.04] px-3.5 text-xs font-medium text-white/70 transition-all hover:bg-white/[0.08] hover:text-white">
+              {t('Cancelar', 'Cancel')}
+            </button>
+            <button
+              type="button"
+              disabled={!loadedModels.length || loading}
+              onClick={() => void saveProvider()}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-sky-400/30 bg-sky-500/20 px-3.5 text-xs font-semibold text-sky-200 transition-all hover:bg-sky-500/30 hover:border-sky-400/50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Save size={13} />
+              {t('Guardar proveedor', 'Save provider')}
+            </button>
+          </footer>
         </DialogContent>
       </Dialog>
     </div>

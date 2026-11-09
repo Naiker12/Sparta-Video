@@ -144,14 +144,16 @@ select:focus-visible {
   z-index: 0;
   inset: 0;
   border-radius: inherit;
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel-raised));
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
   content: "";
   animation: preferences-pill-in 180ms cubic-bezier(.2, .8, .2, 1) both;
 }
-.preferences-nav button[aria-selected="true"],
-.preferences-nav button[aria-selected="true"] svg { color: var(--accent); }
-.preferences-sidebar input:focus-visible { outline: none !important; border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); background: var(--panel-raised); box-shadow: 0 0 0 2px var(--accent-subtle); }
-.preferences-nav button:focus-visible { outline: none !important; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.preferences-nav button[aria-selected="true"] { color: #ffffff !important; }
+.preferences-nav button[aria-selected="true"] svg { color: #38bdf8 !important; }
+.preferences-sidebar input:focus-visible { outline: none !important; border-color: rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.06); box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2); }
+.preferences-nav button:focus-visible { outline: none !important; box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4); }
 .preferences-main button, .preferences-sidebar button, .preferences-window input {
   transition-duration: 160ms;
 }

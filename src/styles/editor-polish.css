@@ -3966,9 +3966,16 @@
 .ai-provider-modal .dialog-field input,
 .ai-provider-modal .dialog-field select { border-color: var(--line) !important; background: var(--background) !important; color: var(--text) !important; }
 .ai-provider-modal button.bg-blue-500,
-.ai-provider-settings button.bg-blue-500 { background: var(--accent) !important; color: var(--accent-foreground) !important; }
+.ai-provider-settings button.bg-blue-500 {
+  background: rgba(14, 165, 233, 0.16) !important;
+  border: 1px solid rgba(56, 189, 248, 0.32) !important;
+  color: #bae6fd !important;
+}
 .ai-provider-modal button.bg-blue-500:hover,
-.ai-provider-settings button.bg-blue-500:hover { background: var(--accent-hover) !important; }
+.ai-provider-settings button.bg-blue-500:hover {
+  background: rgba(14, 165, 233, 0.26) !important;
+  border-color: rgba(56, 189, 248, 0.48) !important;
+}
 .ai-provider-modal .ai-kind-pill.active { background: var(--accent-subtle) !important; color: var(--text) !important; }
 
 .ai-local-connection {
@@ -4004,10 +4011,26 @@
 .ai-empty-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .ai-empty-local-button,
 .ai-empty-cloud-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 8px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text-secondary); font-size: 10.5px; font-weight: 600; cursor: pointer; }
-.ai-empty-local-button { border-color: color-mix(in srgb, var(--accent) 44%, var(--line)); background: var(--accent); color: var(--accent-foreground); }
-.ai-empty-local-button:hover { background: var(--accent-hover); }
+.ai-empty-local-button {
+  border: 1px solid rgba(56, 189, 248, 0.32) !important;
+  background: rgba(14, 165, 233, 0.15) !important;
+  color: #bae6fd !important;
+}
+.ai-empty-local-button:hover {
+  background: rgba(14, 165, 233, 0.25) !important;
+  border-color: rgba(56, 189, 248, 0.5) !important;
+}
 .ai-empty-local-button .ai-local-status-dot { width: 7px; height: 7px; margin: 0; background: currentColor; box-shadow: none; }
-.ai-empty-cloud-button:hover { border-color: var(--accent); color: var(--text); }
+.ai-empty-cloud-button {
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+.ai-empty-cloud-button:hover {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
 .ai-task-assignments-empty { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-raised); }
 .ai-task-assignments-empty > span { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border-radius: 8px; background: var(--accent-subtle); color: var(--accent); }
 
