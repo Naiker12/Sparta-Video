@@ -31,6 +31,8 @@ import {
 import { loadMediaPreview } from '../services/media-storage'
 import { t, useLanguage } from '../services/locale'
 import { formatTimecode } from '../timecode'
+import { defaultProjectService } from '../../projects/application/project-service'
+import { useAppShellStore } from '../../../app/app-shell-store'
 
 type Props = {
   open: boolean
@@ -72,6 +74,7 @@ export function ExportDialog({
   useEffect(() => {
     if (open && !isExporting) {
       const bestPreset: ExportPresetId = sequenceSize.height > sequenceSize.width ? 'social-vertical' : 'web-1080p'
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreset(bestPreset)
       const p = EXPORT_PRESETS[bestPreset]
       setSettings((prev) => ({
@@ -79,7 +82,7 @@ export function ExportDialog({
         fileName: prev.fileName ? prev.fileName.replace(/\.[a-z0-9]+$/i, `.${p.format}`) : `${projectName.trim() || 'Mi_proyecto'}.${p.format}`,
       }))
     }
-  }, [open, sequenceSize.width, sequenceSize.height, projectName])
+  }, [open, sequenceSize.width, sequenceSize.height, projectName, isExporting])
 
   useEffect(() => {
     let cancelled = false
@@ -87,7 +90,7 @@ export function ExportDialog({
     if (active) {
       void loadMediaPreview(active.id).then((url) => {
         if (!cancelled && url) setPreviewThumb(url)
-      }).catch(() => {})
+      }).catch(() => { })
     }
     return () => {
       cancelled = true
@@ -163,7 +166,7 @@ export function ExportDialog({
     }
     return () => {
       if (wakeLockSentinel) {
-        void wakeLockSentinel.release().catch(() => {})
+        void wakeLockSentinel.release().catch(() => { })
       }
     }
   }, [isExporting])
@@ -202,6 +205,19 @@ export function ExportDialog({
 
       // Download file to disk
       downloadRenderResult(result)
+
+      // Automatic snapshot on export
+      try {
+        const activeId = useAppShellStore.getState().currentProjectId
+        if (activeId) {
+          void defaultProjectService.createSnapshot(
+            activeId,
+            `Exportación ${settings.format.toUpperCase()} (${settings.width}×${settings.height})`,
+          ).catch(() => {})
+        }
+      } catch {
+        /* ignore snapshot failures */
+      }
 
       toast.success(t('Vídeo exportado con éxito', 'Video exported successfully'), {
         description: `${result.fileName} · ${formatBytes(result.sizeBytes)}`,
@@ -584,8 +600,8 @@ export function ExportDialog({
                         {progress.stage === 'preparing'
                           ? t('1/3 Preparando', '1/3 Preparing')
                           : progress.stage === 'encoding'
-                          ? t('3/3 Descargando', '3/3 Downloading')
-                          : t('2/3 Renderizando', '2/3 Rendering')}
+                            ? t('3/3 Descargando', '3/3 Downloading')
+                            : t('2/3 Renderizando', '2/3 Rendering')}
                       </span>
                       {typeof progress.fps === 'number' && progress.fps > 0 && progress.stage === 'rendering' && (
                         <span className="export-fps-pill">

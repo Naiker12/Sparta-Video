@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, CircleAlert, KeyRound, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Trash2, X } from 'lucide-react'
+import { Bot, Check, CircleAlert, Cpu, KeyRound, LoaderCircle, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { t } from '../services/locale'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../components/ui/dialog'
 import { toast } from '../../../components/ui/toast-service'
@@ -144,10 +144,10 @@ export function AIProviderSettings() {
       const message = typeof reason === 'string'
         ? reason
         : reason instanceof Error && reason.name === 'TypeError'
-        ? t('No se pudo conectar desde el navegador. Usa Tauri de escritorio para consultar el catálogo sin restricciones CORS.', 'The browser could not connect. Use the Tauri desktop build to load models without CORS restrictions.')
-        : reason instanceof Error && reason.name === 'TimeoutError'
-          ? t('El proveedor tardó demasiado en responder.', 'The provider took too long to respond.')
-          : t('No se pudieron cargar los modelos. Verifica la clave, la URL y los permisos de la cuenta.', 'Could not load models. Check the key, URL, and account permissions.')
+          ? t('No se pudo conectar desde el navegador. Usa Tauri de escritorio para consultar el catálogo sin restricciones CORS.', 'The browser could not connect. Use the Tauri desktop build to load models without CORS restrictions.')
+          : reason instanceof Error && reason.name === 'TimeoutError'
+            ? t('El proveedor tardó demasiado en responder.', 'The provider took too long to respond.')
+            : t('No se pudieron cargar los modelos. Verifica la clave, la URL y los permisos de la cuenta.', 'Could not load models. Check the key, URL, and account permissions.')
       setError(message)
     } finally { setLoading(false) }
   }
@@ -229,7 +229,7 @@ export function AIProviderSettings() {
 
         {!registry.profiles.length && (
           <div className="ai-provider-empty-hub ai-provider-empty-state">
-            <span className="ai-empty-mark"><Sparkles size={17} /></span>
+            <span className="ai-empty-mark"><Bot size={17} /></span>
             <div className="ai-empty-copy"><strong>{t('Conecta tu primer modelo', 'Connect your first model')}</strong><p>{t('Usa una IA local en tu equipo o añade un proveedor en la nube.', 'Use a local model on your computer or add a cloud provider.')}</p></div>
             <div className="ai-empty-actions">
               <button type="button" className="ai-empty-local-button" onClick={() => { startNew(); chooseKind('compatible') }}><span className="ai-local-status-dot" />{t('Conectar IA local', 'Connect local AI')}</button>
@@ -269,7 +269,7 @@ export function AIProviderSettings() {
             </select>
           </label>
         })}
-      </section> : <section className="ai-task-assignments-empty"><span><Sparkles size={15} /></span><div><strong>{t('Asignaciones por tarea', 'Model assignments')}</strong><p>{t('Conecta un proveedor y carga sus modelos para elegir qué IA usar en cada tarea.', 'Connect a provider and load its models to choose which AI handles each task.')}</p></div></section>}
+      </section> : <section className="ai-task-assignments-empty"><span><Cpu size={15} /></span><div><strong>{t('Asignaciones por tarea', 'Model assignments')}</strong><p>{t('Conecta un proveedor y carga sus modelos para elegir qué IA usar en cada tarea.', 'Connect a provider and load its models to choose which AI handles each task.')}</p></div></section>}
 
       {(notice || error) && <div role={error ? 'alert' : 'status'} className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-[11px] ${error ? 'border-amber-400/20 bg-amber-400/[0.06] text-amber-200/85' : 'border-emerald-400/20 bg-emerald-400/[0.05] text-emerald-200/85'}`}>{error ? <CircleAlert size={14} className="mt-0.5 shrink-0" /> : <Check size={14} className="mt-0.5 shrink-0" />}{error || notice}</div>}
 
@@ -294,7 +294,7 @@ export function AIProviderSettings() {
             </label>
             {kind === 'compatible' && (
               <section className="ai-local-connection" aria-label={t('Conexiones locales rápidas', 'Local connection shortcuts')}>
-                <div className="ai-local-connection-heading"><span className="ai-local-mark"><Sparkles size={14} /></span><div><strong>{t('Conecta una IA local', 'Connect a local AI')}</strong><p>{t('Elige tu servidor local o introduce un endpoint compatible.', 'Choose your local server or enter a compatible endpoint.')}</p></div></div>
+                <div className="ai-local-connection-heading"><span className="ai-local-mark"><Cpu size={14} /></span><div><strong>{t('Conecta una IA local', 'Connect a local AI')}</strong><p>{t('Elige tu servidor local o introduce un endpoint compatible.', 'Choose your local server or enter a compatible endpoint.')}</p></div></div>
                 <div className="ai-local-presets">
                   {localProviderPresets.map((preset) => (
                     <button key={preset.name} type="button" className={`ai-local-preset ${name === preset.name && baseUrl === preset.baseUrl ? 'active' : ''}`} onClick={() => { setName(preset.name); setBaseUrl(preset.baseUrl); setApiKey(''); setLoadedModels([]); setError(''); setNotice('') }}>

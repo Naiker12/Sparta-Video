@@ -20,7 +20,8 @@ describe('project-file portable format', () => {
   it('exports current project state into a valid Sparta schema format', () => {
     const data = exportProjectData()
     expect(data.format).toBe(SPARTA_PROJECT_FORMAT)
-    expect(data.version).toBe(1)
+    expect(data.version).toBe(2)
+    expect(data.id).toBeDefined()
     expect(data.project.name).toBe('Test Film')
     expect(data.project.sequence.frameRate).toBe(30)
     expect(data.project.tracks.length).toBeGreaterThan(0)

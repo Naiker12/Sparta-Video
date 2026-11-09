@@ -129,6 +129,7 @@ export type Clip = {
   textStyle?: TextStyle
   textAnimation?: TextAnimation
   clipAnimation?: ClipAnimation
+  slotId?: string
 }
 
 export type Track = {

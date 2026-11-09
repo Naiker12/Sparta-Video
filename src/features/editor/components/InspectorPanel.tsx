@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Copy, CopyPlus, Film, Maximize2, MoreHorizontal, Plus, RotateCcw, Scissors, Settings, SlidersHorizontal, Snowflake, Sparkles, Trash2, Type, Upload, Volume2 } from 'lucide-react'
+import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Copy, CopyPlus, Film, Maximize2, MoreHorizontal, Plus, RotateCcw, Scissors, Settings, SlidersHorizontal, Snowflake, Trash2, Type, Upload, Volume2 } from 'lucide-react'
+import { IconNleFx } from './StudioIcons'
 import type { Clip, ClipAnimation, EffectInstance, Keyframe, MediaItem, TextAnimation, TextStyle } from '../model'
 import { CLIP_ANIM_COMBO, buildAnimationKeyframes, getDefaultClipAnimation } from '../services/clip-animation'
 import { ADJUST_PARAMS, EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
@@ -654,13 +655,13 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
           {clip.kind === 'adjustment' && (
             <div style={{ padding: '10px 12px', background: 'rgba(139, 92, 246, 0.15)', border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '6px', margin: '8px 0' }}>
               <strong style={{ fontSize: '12px', color: '#c4b5fd', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Sparkles size={13} /> {t('Capa de Ajuste (FX)', 'Adjustment Layer (FX)')}
+                <IconNleFx size={13} /> {t('Capa de Ajuste (FX)', 'Adjustment Layer (FX)')}
               </strong>
               <p style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.8)', margin: '4px 0 8px' }}>
                 {t('Los filtros y efectos de esta capa afectan a todos los clips situados por debajo en la línea de tiempo.', 'Filters and effects on this layer affect all clips located below it on the timeline.')}
               </p>
               <button type="button" className="inspector-goto-text-btn" onClick={() => setTab('Efectos')}>
-                <Sparkles size={12} /> {t('Configurar Efectos y Filtros →', 'Configure Effects & Filters →')}
+                <IconNleFx size={12} /> {t('Configurar Efectos y Filtros →', 'Configure Effects & Filters →')}
               </button>
             </div>
           )}
@@ -1561,7 +1562,7 @@ export function InspectorPanel({ clip, selectedMedia, assets, playhead, sequence
                         }}
                       >
                         <strong style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <Sparkles size={10} /> {filter.name}
+                          <IconNleFx size={10} /> {filter.name}
                         </strong>
                         <small style={{ fontSize: '9px', opacity: 0.7 }}>{filter.category}</small>
                       </button>

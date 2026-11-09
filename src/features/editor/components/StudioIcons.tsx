@@ -129,3 +129,14 @@ export function IconNleMontage({ size = 14, ...props }: IconProps) {
     </svg>
   )
 }
+
+export function IconNleFx({ size = 14, ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" {...props}>
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.35" opacity="0.4" />
+      <path d="M4.5 5.5H7.5M4.5 8H6.5M4.5 5.5V11" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 7L12 11M12 7L9 11" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+    </svg>
+  )
+}
+

@@ -6,6 +6,7 @@ import { drawAnimatedTextClipToCanvas } from './text-presets'
 import { computeFitRect } from './media-fit'
 import { computeTransitionInState } from '../effects/transition-math'
 import {
+  applyChromaKey,
   applyChromaticAberration,
   applyFilmGrain,
   applyPixelate,
@@ -1219,13 +1220,24 @@ function applyEffectsToCanvas(
     } else if (fx.effectId === 'fx-pixelate') {
       const size = Math.max(2, Math.round((fx.params.size ?? 16) * factor))
       applyPixelate(ctx, width, height, size)
-    } else if (fx.effectId === 'fx-film-grain' || fx.effectId === 'fx-chromatic-aberration') {
+    } else if (
+      fx.effectId === 'fx-film-grain' ||
+      fx.effectId === 'fx-chromatic-aberration' ||
+      fx.effectId === 'fx-chroma-key'
+    ) {
       try {
         const imgData = ctx.getImageData(0, 0, width, height)
         if (fx.effectId === 'fx-film-grain') {
           applyFilmGrain(imgData, (fx.params.amount ?? 35) * factor, true)
         } else if (fx.effectId === 'fx-chromatic-aberration') {
           applyChromaticAberration(imgData, (fx.params.offset ?? 6) * factor)
+        } else if (fx.effectId === 'fx-chroma-key') {
+          const tol = (fx.params.tolerance ?? 40) * factor
+          const smooth = (fx.params.smoothness ?? 20) * factor
+          const kr = fx.params.keyR ?? 0
+          const kg = fx.params.keyG ?? 255
+          const kb = fx.params.keyB ?? 0
+          applyChromaKey(imgData, [kr, kg, kb], tol, smooth)
         }
         ctx.putImageData(imgData, 0, 0)
       } catch {

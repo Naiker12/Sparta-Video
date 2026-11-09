@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getProjectSaveStatus, useEditorStore } from './editor-store'
+import { getPersistable, useEditorStore } from './editor-store'
 import { demoMedia, demoTracks } from './editor-store.fixtures'
 
 describe('editor project operations', () => {
   afterEach(() => vi.restoreAllMocks())
   beforeEach(() => {
-    localStorage.removeItem('sparta-video-project-v1')
     useEditorStore.setState({ projectName: 'Coastal film', sequence: { width: 1920, height: 1080, frameRate: 24 }, tracks: demoTracks, assets: demoMedia, markers: [], selectedClipId: 'c2', selectedMediaId: null, snapToFrames: true, activeTool: 'select', playhead: 8.8, zoom: 1, playing: false, mutedTracks: [], lockedTracks: [], past: [], future: [] })
   })
 
@@ -56,33 +55,30 @@ describe('editor project operations', () => {
     expect(useEditorStore.getState().tracks[0].clips.find((clip) => clip.id === 'c2')?.opacity).toBe(20)
   })
 
-  it('saves project data in browser storage while keeping playback UI state transient', () => {
+  it('saves project data in persistable format while keeping playback UI state transient', () => {
     useEditorStore.getState().setProjectName('North shore')
     useEditorStore.getState().setPlaying(true)
-    const saved = JSON.parse(localStorage.getItem('sparta-video-project-v1') ?? '{}').state
-    expect(saved.projectName).toBe('North shore')
-    expect(saved.playing).toBeUndefined()
-    expect(getProjectSaveStatus()).toBe('saved')
+    const persistable = getPersistable()
+    expect(persistable.projectName).toBe('North shore')
+    expect((persistable as Record<string, unknown>).playing).toBeUndefined()
+    expect((persistable as Record<string, unknown>).playhead).toBeUndefined()
   })
 
-  it('reports a storage error instead of claiming the project was saved', () => {
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Storage quota exceeded', 'QuotaExceededError') })
-    useEditorStore.getState().setProjectName('Unsaved edit')
-    expect(getProjectSaveStatus()).toBe('error')
+  it('keeps track changes in getPersistable', () => {
+    useEditorStore.getState().updateClip('c2', { opacity: 55 })
+    const persistable = getPersistable()
+    const c2 = persistable.tracks[0].clips.find((c) => c.id === 'c2')
+    expect(c2?.opacity).toBe(55)
   })
 
-  it('does not rewrite local storage for playhead and playback-only updates', () => {
-    const write = vi.spyOn(Storage.prototype, 'setItem')
-    useEditorStore.getState().setProjectName('Temporary name')
-    useEditorStore.getState().setProjectName('Coastal film')
-    write.mockClear()
+  it('does not mutate persistable state on playhead and zoom updates', () => {
+    const before = getPersistable()
     useEditorStore.getState().setPlayhead(3)
     useEditorStore.getState().setPlaying(true)
-    useEditorStore.getState().setZoom(1.2)
-    useEditorStore.getState().setPlayhead(4)
-    expect(write).not.toHaveBeenCalled()
-    useEditorStore.getState().updateClip('c2', { opacity: 55 })
-    expect(write).toHaveBeenCalledTimes(1)
+    useEditorStore.getState().setZoom(1.5)
+    const after = getPersistable()
+    expect(after.projectName).toBe(before.projectName)
+    expect(after.tracks).toEqual(before.tracks)
   })
 
   it('allows seeking past the original demo duration as the sequence grows', () => {

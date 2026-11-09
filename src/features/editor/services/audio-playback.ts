@@ -44,11 +44,25 @@ export class TimelineAudioEngine {
       }
     }
 
+    // Calculate if speech/voice track is active at this playhead
+    const isSpeechActive = activeClips.some(
+      ({ trackId }) =>
+        trackId === 'a1' ||
+        trackId.toLowerCase().includes('voice') ||
+        trackId.toLowerCase().includes('voz'),
+    )
+
     // Play or sync active clips
-    for (const { clip } of activeClips) {
+    for (const { clip, trackId } of activeClips) {
       const assetId = clip.sourceAssetId!
       const targetTime = Math.max(0, playhead - clip.start)
-      const volume = Math.max(0, Math.min(1, (clip.volume ?? 100) / 100))
+      const baseVolume = Math.max(0, Math.min(1, (clip.volume ?? 100) / 100))
+      const isMusicTrack =
+        trackId !== 'a1' &&
+        !trackId.toLowerCase().includes('voice') &&
+        !trackId.toLowerCase().includes('voz')
+      const duckingMultiplier = isSpeechActive && isMusicTrack ? 0.35 : 1.0
+      const volume = baseVolume * duckingMultiplier
 
       const existing = this.audioElements.get(clip.id)
       if (existing) {

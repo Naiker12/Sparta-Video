@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react'
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import {
+  Bot,
   Check,
   ChevronDown,
   HelpCircle,
@@ -13,7 +14,6 @@ import {
   Search,
   SlidersHorizontal,
   Sun,
-  Sparkles,
   X,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../../components/ui/dialog'
@@ -36,6 +36,7 @@ import {
   useAppearancePreferences,
 } from '../services/appearance-preferences'
 import { setLanguage, t, useLanguage } from '../services/locale'
+import { useAppShellStore } from '../../../app/app-shell-store'
 
 type Props = {
   open: boolean
@@ -72,7 +73,7 @@ interface TabDefinition {
 const TABS: TabDefinition[] = [
   { key: 'General', label: 'General', englishLabel: 'General', icon: SlidersHorizontal },
   { key: 'Apariencia', label: 'Apariencia', englishLabel: 'Appearance', icon: Palette },
-  { key: 'IA', label: 'IA y Proveedores', englishLabel: 'AI Providers', icon: Sparkles },
+  { key: 'IA', label: 'IA y Proveedores', englishLabel: 'AI Providers', icon: Bot },
   { key: 'Acerca de', label: 'Acerca de', englishLabel: 'About', icon: HelpCircle },
   { key: 'Atajos', label: 'Atajos', englishLabel: 'Shortcuts', icon: Keyboard },
 ]
@@ -98,6 +99,8 @@ export function PreferencesSheet({
   const language = useLanguage()
   const resolvedAppearanceTheme = getResolvedAppearanceTheme()
   const searchInputId = useId()
+  const openBehavior = useAppShellStore((state) => state.openBehavior)
+  const setOpenBehavior = useAppShellStore((state) => state.setOpenBehavior)
 
   useEffect(() => {
     document.documentElement.dataset.motion = animations ? 'on' : 'off'
@@ -329,6 +332,24 @@ export function PreferencesSheet({
                         <RotateCcw className="size-3" />
                         {t('Restablecer', 'Reset')}
                       </button>
+                    </div>
+
+                    <div className="flex items-center justify-between py-3">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs font-medium text-white/90">{t('Al abrir Sparta Video', 'On startup')}</span>
+                        <span className="text-[11px] text-white/45">
+                          {t('Elige qué pantalla mostrar al iniciar la aplicación.', 'Choose which screen to show when launching the app.')}
+                        </span>
+                      </div>
+                      <select
+                        value={openBehavior}
+                        onChange={(e) => setOpenBehavior(e.target.value as 'home' | 'last-project')}
+                        className="h-8 rounded-lg border border-white/10 bg-[#1a1b1e] px-2.5 text-xs text-white/90 outline-none transition-colors focus:border-white/20"
+                        aria-label={t('Al abrir Sparta Video', 'On startup')}
+                      >
+                        <option value="home">{t('Pantalla de inicio (como CapCut)', 'Home screen (like CapCut)')}</option>
+                        <option value="last-project">{t('Último proyecto abierto', 'Last opened project')}</option>
+                      </select>
                     </div>
                   </div>
                 </section>

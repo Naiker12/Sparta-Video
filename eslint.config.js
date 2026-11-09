@@ -17,4 +17,22 @@ export default tseslint.config(
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
+  {
+    files: ['src/**/domain/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'warn',
+        {
+          paths: [
+            { name: 'react', message: 'Domain modules must not depend on React.' },
+            { name: 'zustand', message: 'Domain modules must not depend on Zustand.' },
+            { name: '@tauri-apps/api', message: 'Domain modules must not depend on Tauri.' },
+          ],
+          patterns: [
+            { group: ['**/infrastructure/**', '**/ui/**'], message: 'Domain modules must not import infrastructure or UI.' },
+          ],
+        },
+      ],
+    },
+  },
 )

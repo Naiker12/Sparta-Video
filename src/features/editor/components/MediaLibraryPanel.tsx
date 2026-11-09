@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { Check, ChevronDown, Layers, Layers2, LayoutGrid, List, LoaderCircle, MoreHorizontal, Palette, Pencil, Plus, Search, Shuffle, SlidersHorizontal, Sparkles, Trash2, Type, Upload, Video, X } from 'lucide-react'
+import { Check, ChevronDown, Layers, Layers2, LayoutGrid, List, LoaderCircle, MoreHorizontal, Palette, Pencil, Plus, Search, Shuffle, SlidersHorizontal, Trash2, Type, Upload, Video, X } from 'lucide-react'
 import { ActionMenu } from './ActionMenu'
-import { IconNleCaptions, IconNleVoiceWave } from './StudioIcons'
+import { IconNleCaptions, IconNleFx, IconNleVoiceWave } from './StudioIcons'
 import type { MediaItem } from '../model'
 import { t } from '../services/locale'
 import { cn } from '../../../lib/utils'
 import { ToggleGroup, ToggleGroupItem } from '../../../components/ui/toggle-group'
-import { formatMediaDuration, loadMediaPreview, parseDurationFromDetail, pruneStoredMedia } from '../services/media-storage'
+import { formatMediaDuration, loadMediaPreview, parseDurationFromDetail } from '../services/media-storage'
 import type { SubtitleLanguage } from '../services/subtitle-generator'
 import { TEXT_STYLE_PRESETS, type TextPresetCategory } from '../services/text-presets'
 import { EFFECT_CATALOG, createEffectInstance, getEffectDef, registerCustomLutFilter } from '../effects/catalog'
@@ -212,7 +212,6 @@ export function MediaLibraryPanel({ assets, selectedMedia, isExtractingSubtitles
   const [deleteTarget, setDeleteTarget] = useState<MediaItem | null>(null)
   const relinkInputRef = useRef<HTMLInputElement>(null)
   const relinkTargetId = useRef<string | null>(null)
-  const initialAssetIds = useRef(assets.map((asset) => asset.id))
   const selectedPreviewAssetId = selectedClip?.sourceAssetId ?? selectedMedia ?? undefined
   const fallbackPreviewAssetId = assets.find((asset) => asset.status === 'ready' && (asset.type === 'video' || asset.type === 'image'))?.id
   const previewAssetId = selectedPreviewAssetId && imagePreviews[selectedPreviewAssetId] ? selectedPreviewAssetId : fallbackPreviewAssetId
@@ -223,7 +222,6 @@ export function MediaLibraryPanel({ assets, selectedMedia, isExtractingSubtitles
     .filter((clip) => clip.kind === 'video' && clip.id !== selectedClip.id && clip.start >= selectedClip.start + selectedClip.duration)
     .sort((a, b) => a.start - b.start)[0] : undefined
   const nextScenePreview = (nextClip?.sourceAssetId ? imagePreviews[nextClip.sourceAssetId] : undefined) ?? (alternatePreviewAssetId ? imagePreviews[alternatePreviewAssetId] : undefined)
-  useEffect(() => { void pruneStoredMedia(initialAssetIds.current).catch(() => {}) }, [])
   useEffect(() => {
     let cancelled = false
     const urls: string[] = []
@@ -343,7 +341,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, isExtractingSubtitles
           )}
           onClick={() => setDockTab('effects')}
         >
-          <Sparkles size={16} strokeWidth={1.5} className={dockTab === 'effects' ? 'text-primary' : 'text-muted-foreground'} />
+          <IconNleFx size={16} className={dockTab === 'effects' ? 'text-primary' : 'text-muted-foreground'} />
           <span className="truncate max-w-full text-center whitespace-nowrap block text-[11px]">{t('Efectos', 'Effects')}</span>
         </button>
         <button
@@ -680,7 +678,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, isExtractingSubtitles
         <div className="text-studio-dock">
           <div className="text-studio-banner" style={{ padding: '10px 12px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
             <strong style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Sparkles size={13} /> {t('Efectos visuales y de shader', 'Visual & shader effects')}
+              <IconNleFx size={13} /> {t('Efectos visuales y de shader', 'Visual & shader effects')}
             </strong>
             <p style={{ fontSize: '11px', color: 'var(--text-dim)', margin: '4px 0 0' }}>
               {t('Elige un efecto para añadirlo como capa independiente en la pista Efectos.', 'Choose an effect to add it as a separate layer on the Effects track.')}
@@ -695,7 +693,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, isExtractingSubtitles
               toast.success(t('Capa de ajuste FX añadida a la línea de tiempo', 'FX Adjustment layer added to timeline'))
             }}
           >
-            <Sparkles size={13} /> {t('＋ Añadir Capa de Ajuste (FX)', '＋ Add Adjustment Layer (FX)')}
+            <IconNleFx size={13} /> {t('＋ Añadir Capa de Ajuste (FX)', '＋ Add Adjustment Layer (FX)')}
           </button>
           <div className="text-presets-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', padding: '8px 0' }}>
             {EFFECT_CATALOG.filter((e) => e.kind === 'effect').map((effect) => (
@@ -723,7 +721,7 @@ export function MediaLibraryPanel({ assets, selectedMedia, isExtractingSubtitles
             ))}
           </div>
           <div className="media-foot">
-            <span><Sparkles size={13} /> {EFFECT_CATALOG.filter((e) => e.kind === 'effect').length} {t('efectos', 'effects')}</span>
+            <span><IconNleFx size={13} /> {EFFECT_CATALOG.filter((e) => e.kind === 'effect').length} {t('efectos', 'effects')}</span>
             <span>{t('Shader FBO Ping-pong', 'FBO Ping-pong Shader')}</span>
           </div>
         </div>

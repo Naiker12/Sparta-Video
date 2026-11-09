@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
+@import "./styles/editor-polish.css";
 
 @theme {
   --color-background: var(--background);

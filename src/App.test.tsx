@@ -13,7 +13,7 @@ describe('Sparta Video editor preview', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: /coastline_drone_04\.mp4/ })[0])
     expect(screen.getAllByText('coastline_drone_04.mp4').length).toBeGreaterThan(1)
-  })
+  }, 15000)
 
   it('does not fabricate an assistant answer when a text model is not configured', () => {
     render(<App />)

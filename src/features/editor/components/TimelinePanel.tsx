@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { AudioLines, Bookmark, CopyPlus, Eye, Film, LockKeyhole, Magnet, MoreHorizontal, MousePointer2, Plus, Scan, Scissors, Search, Snowflake, Sparkles, Trash2, Type, Upload, Video, Volume2, VolumeX } from 'lucide-react'
+import { AudioLines, Bookmark, CopyPlus, Eye, Film, LockKeyhole, Magnet, MoreHorizontal, MousePointer2, Plus, Scan, Scissors, Search, Snowflake, Trash2, Type, Upload, Video, Volume2, VolumeX } from 'lucide-react'
+import { IconNleFx } from './StudioIcons'
 import { Menu } from '@base-ui/react/menu'
 import type { Clip, MediaItem, TimelineMarker, Track, TransitionRef } from '../model'
 import { EFFECT_CATALOG } from '../effects/catalog'
@@ -262,7 +263,7 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
             className="w-7 h-7 rounded-[6px] flex items-center justify-center text-muted-foreground hover:text-[#a99cff] hover:bg-input border-0 transition-colors cursor-pointer"
             title={t('Insertar capa FX', 'Insert FX adjustment layer')}
           >
-            <Sparkles size={14} />
+            <IconNleFx size={14} />
           </button>
         )}
         <button
@@ -341,7 +342,7 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
               ) : track.name.toLowerCase().includes('text') || track.name.toLowerCase().includes('subtítulo') ? (
                 <Type size={14} className="text-[#c0558f] shrink-0" />
               ) : track.name.toLowerCase().includes('fx') || track.name.toLowerCase().includes('efecto') ? (
-                <Sparkles size={14} className="text-[#6c5ce0] shrink-0" />
+                <IconNleFx size={14} className="text-[#6c5ce0] shrink-0" />
               ) : (
                 <Video size={14} className="text-[#3b6fd4] shrink-0" />
               )}
@@ -436,7 +437,7 @@ export function TimelinePanel({ tracks, assets, markers, selected, playhead, zoo
                     {clip.keyframes?.map((keyframe) => <span key={`${keyframe.property}-${keyframe.time}`} className="clip-keyframe" style={{ left: `${Math.max(0, Math.min(100, (keyframe.time - position.start) / Math.max(position.duration, 0.01) * 100))}%` }} title={`${keyframe.property} · ${formatTimecode(keyframe.time, frameRate)}`} />)}
                     {clip.kind === 'adjustment' && clipLabels && pixelWidth >= 48 && (
                       <span className="clip-label adjustment-label">
-                        <Sparkles size={11} />
+                        <IconNleFx size={11} />
                         <span className="fx-badge" style={{ background: '#7c3aed', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 3px', borderRadius: '3px', marginRight: '3px' }}>FX</span>
                         <span>{clip.title}</span>
                         {clip.effects && clip.effects.length > 0 && <span className="effects-count-badge" style={{ background: 'rgba(255,255,255,0.2)', fontSize: '9px', padding: '1px 4px', borderRadius: '10px', marginLeft: '3px' }}>{clip.effects.length}</span>}

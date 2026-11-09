@@ -1,8 +1,107 @@
 # Sparta Video — interfaz, arquitectura y plan del editor con IA
 
-**Actualizado:** 26 de octubre de 2026
-**Alcance:** documento maestro único de la interfaz: inventario real, estructura del código, arquitectura objetivo, investigación de referencias y trabajo pendiente.  
-**Estado actual:** prototipo local de edición estructural. No es todavía un editor audiovisual real.
+**Actualizado:** 9 de noviembre de 2026  
+**Alcance:** documento maestro de la interfaz, arquitectura del editor de vídeo con IA, gestión multi-proyecto estilo CapCut, catálogo de plantillas y motor audiovisual.  
+**Estado actual:** Editor audiovisual funcional con Tauri 2, React 19, Zustand 5, WebCodecs + Mediabunny, Whisper local, IndexedDB multi-proyecto y sistema de plantillas.
+
+---
+
+## 1. Resumen Ejecutivo y Arquitectura 2.0
+
+Sparta Video cuenta con una experiencia de entrada estilo **CapCut**: al abrir la aplicación se presenta la **Pantalla de Inicio (Home)** donde el usuario puede iniciar proyectos nuevos en múltiples formatos (16:9, 9:16, 1:1, 4:5, 21:9), continuar rápidamente el último proyecto editado, explorar la **Galería de Plantillas** o gestionar su lista de proyectos locales.
+
+Dentro del editor, la barra superior permite regresar en cualquier momento a Inicio mediante un botón dedicado (`← Inicio` / `Ctrl+H`), guardando atómicamente todos los cambios pendientes antes de la transición.
+
+### Principios Arquitectónicos
+1. **Feature-First & Clean Architecture:** El código está organizado por funciones (`src/features/projects`, `src/features/templates`, `src/features/editor`, `src/app`).
+2. **Regla de Dependencias:** `domain ← application ← infrastructure / ui`. Las capas de dominio son código TypeScript puro validado con esquemas Zod sin dependencias de React ni Tauri.
+3. **Puertos y Adaptadores:** La persistencia depende de interfaces tipadas (`ProjectRepository`, `TemplateRepository`), implementadas con IndexedDB para almacenamiento masivo en el navegador y extensibles a almacenamiento directo en disco.
+4. **Fuente Única de Verdad de Formato:** Esquemas Zod estrictos (`.sparta v2`) definen el contrato exacto de persistencia, resolviendo cualquier desfase y garantizando fidelidad del 100% en textos, estilos, animaciones, opacidades y keyframes.
+
+---
+
+## 2. Inventario de Módulos y Flujos
+
+### 2.1 Pantalla de Inicio (Home Screen)
+- **Acciones Rápidas:** Botón "Nuevo proyecto" con selector de resolución y FPS; botón "Abrir .sparta"; botón "Desde plantilla"; y botones de formato directo (16:9, 9:16, 1:1, 4:5, 21:9).
+- **Continuar donde lo dejaste:** Banner destacado del proyecto más reciente con portada real, resolución, duración, número de clips y tiempo transcurrido relativo.
+- **Cuadrícula y Lista de Proyectos:** Búsqueda en vivo por nombre, ordenamiento (más reciente, más antiguo, por nombre, por duración), cambio de vista (cuadrícula/lista), menú contextual por tarjeta (Abrir, Renombrar, Duplicar, Exportar .sparta, Eliminar).
+- **Papelera y Borrado Seguro:** Borrado suave con notificación toast de 6 segundos y botón "Deshacer", pestaña dedicada de papelera para restaurar o eliminar definitivamente.
+- **Importación por Arrastre (Drag & Drop):** Soltar un archivo `.sparta` o `.json` en cualquier lugar de la pantalla de inicio lo importa y abre automáticamente.
+
+### 2.2 Sistema de Plantillas (Templates)
+- **Catálogo Integrado de 10 Plantillas:**
+  1. `Historia Stickman Viral (9:16)`: Estructura narrativa probada (Gancho, Conflicto, Clímax, CTA).
+  2. `Stickman Explicativo (16:9)`: Didáctico horizontal con 3 puntos clave y conclusiones.
+  3. `Top 5 Ranking (9:16)`: Cuenta regresiva dinámica con tarjetas del 5 al 1.
+  4. `Estilo Hormozi Karaoke (9:16)`: Subtítulos destacados palabra por palabra de alto contraste.
+  5. `Cortes Rápidos B-Roll (9:16)`: Edición ultra-rítmica de 1 segundo guiada por el tempo.
+  6. `YouTube Intro & Lower Third (16:9)`: Intro de canal con tercio inferior elegante y llamada a suscripción.
+  7. `Anuncio de Producto 15s (9:16)`: Fórmula comercial (Problema, Solución, Oferta).
+  8. `Lección Paso a Paso (16:9)`: Educativo con capítulos y barra de progreso.
+  9. `Podcast Clip Dividido (9:16)`: Split-screen vertical para podcasts con subtítulos centrales.
+  10. `Lienzo Inicial Estándar (16:9)`: Plantilla limpia con pistas preparadas.
+- **Galería Interactiva:** Filtrado por categoría (`stickman`, `social-media`, `youtube`, `business`, `education`, `general`) y por formato, con asistente de personalización de textos iniciales antes de crear.
+- **Guardar como Plantilla:** Opción en el menú de archivo del editor para convertir cualquier proyecto actual en una plantilla reusable guardada en IndexedDB.
+
+### 2.3 Núcleo de Guardado y Gestión de Medios
+- **Autoguardado Continuo:** Debounce de 600 ms en segundo plano con estados visibles (`saved`, `saving`, `unsaved`, `error`), botón de reintento manual y vaciado forzado (`flush`) al cerrar la ventana (`beforeunload`) o volver a Inicio.
+- **Recolección de Basura de Medios (GC):** Análisis de referencias cruzadas entre todos los proyectos registrados; los archivos de medios no utilizados por ningún proyecto se depuran de forma segura sin borrar activos compartidos.
+- **Migración Automática:** Detección de proyectos antiguos en `localStorage` (`sparta-video-project-v1`), migración automática a IndexedDB y copia de seguridad preservada.
+- **Preferencia de Inicio:** Opción en Preferencias para elegir entre "Pantalla de Inicio (como CapCut)" o "Último proyecto abierto".
+
+---
+
+## 3. Estructura del Código
+
+```text
+src/
+├── main.tsx                             # Montaje principal de <AppRoot />
+├── App.tsx                              # Fachada del editor de vídeo
+├── app/
+│   ├── AppRoot.tsx                      # Orquestador del Shell (Home vs Editor)
+│   ├── app-shell-store.ts               # Navegación y preferencias de apertura
+│   └── bootstrap.ts                     # Migración legacy y precarga
+├── features/
+│   ├── projects/                        # Gestión Multi-Proyecto
+│   │   ├── domain/                      # project.schema.ts, project.types.ts, factory, summary
+│   │   ├── application/                 # project-service, autosave, legacy-migration, media-gc
+│   │   ├── infrastructure/              # idb-project-repository (IndexedDB)
+│   │   ├── hooks/                       # use-projects (búsqueda, ordenamiento, papelera)
+│   │   └── ui/                          # HomeScreen, ProjectCard, ProjectGrid, NewProjectDialog
+│   ├── templates/                       # Sistema de Plantillas
+│   │   ├── domain/                      # template.schema.ts, template.types.ts, instantiate-template
+│   │   ├── catalog/                     # builtin-templates.ts (10 plantillas oficiales)
+│   │   ├── application/                 # template-service.ts, template-repository.ts
+│   │   ├── infrastructure/              # idb-template-repository.ts
+│   │   └── ui/                          # TemplateGallery, TemplateCard, SaveAsTemplateDialog
+│   └── editor/                          # Editor Audiovisual
+│       ├── model.ts                     # Modelos de clips, pistas, transformaciones, textos
+│       ├── editor-store.ts              # Store Zustand multipista y getPersistable()
+│       ├── shell/                       # EditorShell, TitleBar, FileMenu, EditorWorkspace
+│       ├── hooks/                       # use-playback-clock, use-editor-shortcuts, use-media-import
+│       ├── render/                      # compositor.ts (Canvas 2D)
+│       └── services/                    # export-engine, audio-playback, subtitle-generator, project-file
+└── shared/
+    ├── i18n/locale.ts                   # Internacionalización es/en reactiva
+    ├── lib/format-time.ts               # Formato de duraciones y fechas relativas
+    └── ui/                              # Diálogos, Switches, Toasts accesibles
+```
+
+---
+
+## 4. Estado de Calidad y Pruebas
+
+- **Pruebas Automatizadas:** 142 pruebas superadas en 25 suites con Vitest (`npm test`).
+  - Pruebas de caracterización y regresión de interfaz.
+  - Pruebas de esquemas Zod y round-trip de `.sparta v2`.
+  - Pruebas de ciclo de vida multi-proyecto, autosave, papelera completa (restaurar y vaciar) y GC de medios.
+  - Pruebas de historial de versiones y puntos de restauración (snapshots automáticos en exportación y manuales).
+  - Pruebas de instanciación e inmutabilidad de plantillas oficiales (10 plantillas).
+  - Pruebas del motor de exportación, audio playback (auto-ducking profesional), subtítulos SRT, guion a vídeo (storyboard) y compositor con croma (pantalla verde).
+- **Compilación TypeScript y Vite:** Exitosa con 0 errores (`npm run build`).
+- **Linters:** 0 errores y 0 advertencias con ESLint (`npm run lint`).
+
 
 > Este documento distingue lo que el repositorio ya implementa de la propuesta para el producto. La captura de referencia orienta el diseño, pero no demuestra que una función esté conectada. La revisión visual en navegador queda pendiente; los límites conocidos se anotan en el seguimiento.
 

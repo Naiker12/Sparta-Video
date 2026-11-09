@@ -1,7 +1,6 @@
 import { create } from 'zustand'
-import { persist, type PersistStorage } from 'zustand/middleware'
 import type { Clip, MediaItem, SequenceSettings, TimelineMarker, Track } from './model'
-import { getMediaTypeFromName, parseDurationFromDetail } from './services/media-storage'
+import { parseDurationFromDetail } from './services/media-storage'
 import { getDefaultTextAnimation, getDefaultTextStyle, getTextPreset, TEXT_STYLE_PRESETS } from './services/text-presets'
 
 export type AddTextClipOptions = {
@@ -79,9 +78,8 @@ const commit = (state: EditorState, updates: Partial<EditorState>, groupKey?: st
   lastHistoryGroupAt = now
   return { ...updates, past: coalesce ? state.past : [...state.past.slice(-49), snapshot(state)], future: [] }
 }
-let lastStoredProject: PersistedProjectState | null = null
 export type ProjectSaveStatus = 'saving' | 'saved' | 'unsaved' | 'error'
-let projectSaveStatus: ProjectSaveStatus = 'unsaved'
+let projectSaveStatus: ProjectSaveStatus = 'saved'
 const PROJECT_SAVE_EVENT = 'sparta-project-save-status'
 const publishSaveStatus = (status: ProjectSaveStatus) => {
   projectSaveStatus = status
@@ -93,107 +91,35 @@ const emptyTracks = (): Track[] => [
   { id: 'v1', name: 'Video 01', kind: 'video', clips: [] },
   { id: 'a1', name: 'Audio 01', kind: 'audio', clips: [] },
 ]
-const cleanSeededProject = (state: PersistedProjectState): PersistedProjectState => {
-  const sampleTitles = ['coastline_drone_04.mp4', 'harbor_sunrise.mov', 'coastal-drift.wav', 'cliffside_walk.mp4']
-  const isUntouchedSeed = state.projectName === 'Coastal film'
-    && state.assets.length === sampleTitles.length
-    && sampleTitles.every((title) => state.assets.some((asset) => asset.title === title))
-    && state.assets.every((asset) => sampleTitles.includes(asset.title))
-    && state.tracks.every((track) => track.clips.every((clip) => sampleTitles.includes(clip.title)))
-  return isUntouchedSeed ? {
-    ...state,
-    projectName: 'Sin título',
-    sequence: { width: 1920, height: 1080, frameRate: 24 },
-    tracks: emptyTracks(), assets: [], markers: [], snapToFrames: true, mutedTracks: [], lockedTracks: [],
-  } : state
-}
-const normalizeLegacyMediaTypes = (state: PersistedProjectState): PersistedProjectState => {
-  let changed = false
-  const assetByTitle = new Map(state.assets.map((asset) => [asset.title, asset]))
-  const assets = state.assets.map((asset) => {
-    const type = getMediaTypeFromName(asset.title)
-    if (!type || type === asset.type) return asset
-    changed = true
-    const details = asset.detail.split('·').slice(1).map((part) => part.trim()).filter(Boolean)
-    return { ...asset, type, thumb: type === 'image' ? 'image-catalog' : type === 'audio' ? 'wave' : 'video-catalog', detail: [type.toUpperCase(), ...details].join(' · ') }
-  })
-  const tracks = state.tracks.map((track) => {
-    let trackChanged = false
-    const clips = track.clips.map((clip) => {
-      if (clip.sourceAssetId) return clip
-      const asset = assetByTitle.get(clip.title)
-      if (!asset) return clip
-      changed = true
-      trackChanged = true
-      return { ...clip, sourceAssetId: asset.id }
-    })
-    return trackChanged ? { ...track, clips } : track
-  })
-  return changed ? { ...state, assets, tracks } : state
-}
+
 export const retryProjectSave = () => {
-  lastStoredProject = null
-  const state = useEditorStore.getState()
-  const persisted: PersistedProjectState = { projectName: state.projectName, sequence: state.sequence, tracks: state.tracks, assets: state.assets, markers: state.markers, snapToFrames: state.snapToFrames, mutedTracks: state.mutedTracks, lockedTracks: state.lockedTracks }
-  projectStorage.setItem('sparta-video-project-v1', { state: persisted, version: 0 })
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('sparta-project-save-retry'))
+  }
 }
+
+export const setProjectSaveStatus = (status: ProjectSaveStatus) => {
+  publishSaveStatus(status)
+}
+
 export const subscribeProjectSaveStatus = (listener: (status: ProjectSaveStatus) => void) => {
   const handle = (event: Event) => listener((event as CustomEvent<ProjectSaveStatus>).detail)
   window.addEventListener(PROJECT_SAVE_EVENT, handle)
   return () => window.removeEventListener(PROJECT_SAVE_EVENT, handle)
 }
-const sameStoredProject = (left: PersistedProjectState, right: PersistedProjectState) => left.projectName === right.projectName && left.sequence === right.sequence && left.tracks === right.tracks && left.assets === right.assets && left.markers === right.markers && left.snapToFrames === right.snapToFrames && left.mutedTracks === right.mutedTracks && left.lockedTracks === right.lockedTracks
-const normalizeLegacyClipTransforms = (state: PersistedProjectState): PersistedProjectState => {
-  const isVertical = state.sequence.height > state.sequence.width && state.sequence.width === 1080
-  if (!isVertical) return state
-  let changed = false
-  const tracks = state.tracks.map((track) => {
-    let trackChanged = false
-    const clips = track.clips.map((clip) => {
-      if (clip.transform && clip.transform.x === 960 && clip.transform.y === 540 && (!clip.keyframes || !clip.keyframes.some((k) => k.property === 'position'))) {
-        trackChanged = true
-        changed = true
-        return {
-          ...clip,
-          transform: {
-            ...clip.transform,
-            x: 540,
-            y: 960,
-          },
-        }
-      }
-      return clip
-    })
-    return trackChanged ? { ...track, clips } : track
-  })
-  return changed ? { ...state, tracks } : state
-}
 
-const projectStorage: PersistStorage<PersistedProjectState> = {
-  getItem(name) {
-    try {
-      const raw = localStorage.getItem(name)
-      if (!raw) { lastStoredProject = null; publishSaveStatus('unsaved'); return null }
-      const value = JSON.parse(raw) as { state: PersistedProjectState; version?: number }
-      const cleaned = normalizeLegacyClipTransforms(normalizeLegacyMediaTypes(cleanSeededProject(value.state)))
-      lastStoredProject = cleaned
-      publishSaveStatus('saved')
-      return { ...value, state: cleaned }
-    } catch { lastStoredProject = null; publishSaveStatus('error'); return null }
-  },
-  setItem(name, value) {
-    if (lastStoredProject && sameStoredProject(lastStoredProject, value.state)) return
-    publishSaveStatus('saving')
-    try {
-      localStorage.setItem(name, JSON.stringify(value))
-      lastStoredProject = value.state
-      publishSaveStatus('saved')
-    } catch { publishSaveStatus('error') }
-  },
-  removeItem(name) { try { localStorage.removeItem(name); lastStoredProject = null; publishSaveStatus('unsaved') } catch { publishSaveStatus('error') } },
-}
+export const getPersistable = (state: EditorState = useEditorStore.getState()): PersistedProjectState => ({
+  projectName: state.projectName,
+  sequence: { ...state.sequence },
+  tracks: copyTracks(state.tracks),
+  assets: state.assets.map((asset) => ({ ...asset })),
+  markers: copyMarkers(state.markers),
+  snapToFrames: state.snapToFrames,
+  mutedTracks: [...state.mutedTracks],
+  lockedTracks: [...state.lockedTracks],
+})
 
-export const useEditorStore = create<EditorState>()(persist((set, get) => ({
+export const useEditorStore = create<EditorState>()((set, get) => ({
   projectName: 'Sin título', sequence: { width: 1920, height: 1080, frameRate: 24 },
   tracks: emptyTracks(), assets: [], markers: [], selectedClipId: '', selectedMediaId: null,
   playhead: 0, zoom: 1, playing: false, snapToFrames: true, activeTool: 'select', mutedTracks: [], lockedTracks: [], past: [], future: [],
@@ -1007,21 +933,5 @@ export const useEditorStore = create<EditorState>()(persist((set, get) => ({
     past: [],
     future: [],
   }),
-}), {
-  name: 'sparta-video-project-v1', storage: projectStorage, version: 5,
-  migrate: (persisted) => normalizeLegacyMediaTypes(cleanSeededProject(persisted as PersistedProjectState)),
-  partialize: (state) => ({ projectName: state.projectName, sequence: state.sequence, tracks: state.tracks, assets: state.assets, markers: state.markers, snapToFrames: state.snapToFrames, mutedTracks: state.mutedTracks, lockedTracks: state.lockedTracks }),
 }))
-
-// Remove the untouched sample workspace from an already-running browser session as well as on migration.
-const loadedState = useEditorStore.getState()
-const cleanedLoadedState = cleanSeededProject(loadedState)
-const normalizedLoadedState = normalizeLegacyMediaTypes(cleanedLoadedState)
-if (normalizedLoadedState !== loadedState) {
-  useEditorStore.setState({
-    ...loadedState,
-    ...normalizedLoadedState,
-    ...(cleanedLoadedState !== loadedState ? { selectedClipId: '', selectedMediaId: null, playhead: 0, past: [], future: [] } : {}),
-  })
-}
 

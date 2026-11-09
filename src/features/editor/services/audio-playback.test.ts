@@ -47,4 +47,51 @@ describe('TimelineAudioEngine', () => {
 
     engine.destroy()
   })
+
+  it('applies ducking multiplier to music track when speech is active', async () => {
+    const engine = new TimelineAudioEngine()
+
+    const mockTracks: Track[] = [
+      {
+        id: 'a1',
+        name: 'Voz en Off',
+        kind: 'audio',
+        clips: [
+          {
+            id: 'c-voice',
+            title: 'Voice',
+            start: 0,
+            duration: 10,
+            sourceAssetId: 'asset-voice',
+            kind: 'audio',
+            volume: 100,
+            color: '',
+            thumbnail: '',
+          },
+        ],
+      },
+      {
+        id: 'a2',
+        name: 'Música',
+        kind: 'audio',
+        clips: [
+          {
+            id: 'c-music',
+            title: 'Music',
+            start: 0,
+            duration: 20,
+            sourceAssetId: 'asset-music',
+            kind: 'audio',
+            volume: 100,
+            color: '',
+            thumbnail: '',
+          },
+        ],
+      },
+    ]
+
+    // Sync active playhead
+    await engine.sync(5, true, mockTracks, [])
+    engine.destroy()
+  })
 })

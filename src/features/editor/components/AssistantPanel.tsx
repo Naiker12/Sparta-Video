@@ -21,12 +21,25 @@ import { toast } from '../../../components/ui/toast-service'
 import { t } from '../services/locale'
 
 export type AssistantMode = 'create' | 'edit' | 'audio'
-type Props = { open: boolean; onClose: () => void; projectName: string; activeMode?: AssistantMode; onModeChange?: (mode: AssistantMode) => void }
+type Props = {
+  open: boolean
+  onClose: () => void
+  projectName: string
+  projectId?: string
+  activeMode?: AssistantMode
+  onModeChange?: (mode: AssistantMode) => void
+}
 type Mode = AssistantMode
 type ChatEntry = ChatMessage & { id: string }
 const HISTORY_LIMIT = 40
-const historyKey = (project: string) => `sparta-ai-chat:${encodeURIComponent(project)}`
-const modelKey = (project: string) => `sparta-ai-chat-model:${encodeURIComponent(project)}`
+const historyKey = (projectId?: string, projectName?: string) => {
+  if (projectId) return `sparta-ai-chat:id:${projectId}`
+  return `sparta-ai-chat:${encodeURIComponent(projectName || 'default')}`
+}
+const modelKey = (projectId?: string, projectName?: string) => {
+  if (projectId) return `sparta-ai-chat-model:id:${projectId}`
+  return `sparta-ai-chat-model:${encodeURIComponent(projectName || 'default')}`
+}
 function getVisibleAssistantText(content: string, proposal: ReturnType<typeof extractAIProposal>) {
   return proposal
     ? content.replace(/```(?:json)?\s*[\s\S]*?\s*```/gi, '').replace(/\n{3,}/g, '\n\n').trim()
@@ -108,9 +121,22 @@ function renderInline(text: string) {
   })
 }
 
-function readHistory(project: string): ChatEntry[] {
+function readHistory(projectId?: string, projectName?: string): ChatEntry[] {
   try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(historyKey(project)) || '[]')
+    const key = historyKey(projectId, projectName)
+    let raw = window.localStorage.getItem(key)
+    if (!raw && projectId && projectName) {
+      const oldKey = historyKey(undefined, projectName)
+      const oldVal = window.localStorage.getItem(oldKey)
+      if (oldVal) {
+        raw = oldVal
+        try {
+          window.localStorage.setItem(key, oldVal)
+          window.localStorage.removeItem(oldKey)
+        } catch { /* ignore */ }
+      }
+    }
+    const value: unknown = JSON.parse(raw || '[]')
     if (!Array.isArray(value)) return []
     return value.filter((item): item is ChatEntry => Boolean(item && typeof item === 'object' && ['user', 'assistant'].includes(item.role) && typeof item.content === 'string' && typeof item.id === 'string')).slice(-HISTORY_LIMIT)
   } catch { return [] }
@@ -124,10 +150,10 @@ function getAssignedModel(registry: ProviderRegistry, key: string) {
 }
 
 export function AssistantPanel(props: Props) {
-  return <AssistantPanelSession key={props.projectName} {...props} />
+  return <AssistantPanelSession key={props.projectId ?? props.projectName} {...props} />
 }
 
-function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeChange }: Props) {
+function AssistantPanelSession({ open, onClose, projectName, projectId, activeMode, onModeChange }: Props) {
   const [internalMode, setInternalMode] = useState<Mode>('edit')
   const mode = activeMode ?? internalMode
   const setMode = (next: Mode) => {
@@ -141,14 +167,14 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
     .map((model) => ({ key: `${profile.id}::${model.id}`, profile, model }))), [registry])
   const assignedKey = registry.assignments.text ?? ''
   const [selectedKey, setSelectedKey] = useState(() => {
-    try { return window.localStorage.getItem(modelKey(projectName)) || '' } catch { return '' }
+    try { return window.localStorage.getItem(modelKey(projectId, projectName)) || '' } catch { return '' }
   })
   const selected = getAssignedModel(registry, selectedKey) ?? getAssignedModel(registry, assignedKey)
   const selectedKeyValue = selected ? `${selected.profile.id}::${selected.model.id}` : ''
   const [depth, setDepth] = useState<AnalysisDepth>(() => {
     try { const saved = window.localStorage.getItem('sparta-ai-analysis-depth'); return saved === 'concise' || saved === 'deep' ? saved : 'balanced' } catch { return 'balanced' }
   })
-  const [messages, setMessages] = useState<ChatEntry[]>(() => readHistory(projectName))
+  const [messages, setMessages] = useState<ChatEntry[]>(() => readHistory(projectId, projectName))
   const [requesting, setRequesting] = useState(false)
   const [error, setError] = useState('')
   const feedRef = useRef<HTMLDivElement>(null)
@@ -236,7 +262,7 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
   const persist = (next: ChatEntry[]) => {
     const bounded = next.slice(-HISTORY_LIMIT)
     setMessages(bounded)
-    try { window.localStorage.setItem(historyKey(projectName), JSON.stringify(bounded)) } catch { setError(t('No se pudo guardar el historial en este equipo.', 'Could not save chat history on this device.')) }
+    try { window.localStorage.setItem(historyKey(projectId, projectName), JSON.stringify(bounded)) } catch { setError(t('No se pudo guardar el historial en este equipo.', 'Could not save chat history on this device.')) }
   }
 
   const send = async () => {
@@ -269,11 +295,14 @@ function AssistantPanelSession({ open, onClose, projectName, activeMode, onModeC
   const clearHistory = () => {
     if (requesting) return
     setMessages([]); setError('')
-    try { window.localStorage.removeItem(historyKey(projectName)) } catch { /* keep the cleared session in memory */ }
+    try { window.localStorage.removeItem(historyKey(projectId, projectName)) } catch { /* keep the cleared session in memory */ }
   }
   const selectModel = (value: string) => {
     setSelectedKey(value)
-    try { window.localStorage.setItem(modelKey(projectName), value) } catch { /* selection remains for this session */ }
+    try {
+      if (value) window.localStorage.setItem(modelKey(projectId, projectName), value)
+      else window.localStorage.removeItem(modelKey(projectId, projectName))
+    } catch { /* ignore */ }
   }
   const selectDepth = (value: AnalysisDepth) => {
     setDepth(value)

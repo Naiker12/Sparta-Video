@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AudioLines, Check, Download, FolderPlus, LoaderCircle, Mic2, Music2, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import { AudioLines, Check, Download, FolderPlus, LoaderCircle, Mic2, Music2, Plus, RefreshCw } from 'lucide-react'
 import { t } from '../services/locale'
 import { readProviderRegistry, type AITask, type ProviderRegistry } from '../services/ai-provider-registry'
 import { generateElevenLabsAudio, listElevenLabsVoices, type ElevenLabsVoice } from '../services/audio-generation'
@@ -148,7 +148,7 @@ export function AudioGenerationPanel() {
 
     <label className="audio-prompt-label" htmlFor="audio-generation-prompt">{mode === 'voice' ? t('Texto de narración', 'Narration text') : t('Describe el sonido', 'Describe the sound')}</label>
     <textarea id="audio-generation-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={10_000} placeholder={mode === 'voice' ? t('Escribe o pega aquí la narración que quieres escuchar…', 'Write or paste the narration you want to hear…') : t('Ej.: olas suaves en una costa con viento ligero y aves a lo lejos…', 'E.g. gentle waves on a coast, light wind, and distant seabirds…')} />
-    <div className="audio-generation-footer"><span>{prompt.length.toLocaleString()} / 10 000 · {mode === 'voice' ? t('El proveedor cobra por caracteres.', 'Provider charges by characters.') : t('El proveedor cobra por generación.', 'Provider charges per generation.')}</span><button type="button" disabled={!isElevenLabs || !prompt.trim() || generating || (mode === 'voice' && !voiceId)} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{generating ? t('Generando…', 'Generating…') : t('Generar audio', 'Generate audio')}</button></div>
+    <div className="audio-generation-footer"><span>{prompt.length.toLocaleString()} / 10 000 · {mode === 'voice' ? t('El proveedor cobra por caracteres.', 'Provider charges by characters.') : t('El proveedor cobra por generación.', 'Provider charges per generation.')}</span><button type="button" disabled={!isElevenLabs || !prompt.trim() || generating || (mode === 'voice' && !voiceId)} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <Music2 size={14} />}{generating ? t('Generando…', 'Generating…') : t('Generar audio', 'Generate audio')}</button></div>
 
     {(error || notice) && <p className={`audio-generation-message ${error ? 'error' : 'success'}`} role={error ? 'alert' : 'status'}>{error || notice}</p>}
     {result && <article className="generated-audio-card">
