@@ -13,6 +13,12 @@ export function instantiateTemplate(
   const targetName = options.projectName?.trim() || `${template.name} - Copia`
   const fills = options.slotFills || {}
 
+  // Map of clipId -> slot for fast lookups
+  const clipToSlotMap = new Map<string, string>()
+  for (const slot of template.slots) {
+    clipToSlotMap.set(slot.targetClipId, slot.id)
+  }
+
   // Deep clone state
   const clonedTracks = template.state.tracks.map((track) => ({
     ...track,
@@ -28,14 +34,25 @@ export function instantiateTemplate(
         keyframes: clip.keyframes ? clip.keyframes.map((k) => ({ ...k })) : undefined,
       }
 
-      // Check slot replacement
-      const slotKey = clonedClip.slotId || clonedClip.id
-      const fill = fills[slotKey]
+      // Check slot replacement by slotId, clipId, or registered targetClipId
+      const slotKey =
+        (clonedClip.slotId && fills[clonedClip.slotId] ? clonedClip.slotId : null) ||
+        (fills[clonedClip.id] ? clonedClip.id : null) ||
+        (clipToSlotMap.has(clonedClip.id) && fills[clipToSlotMap.get(clonedClip.id)!]
+          ? clipToSlotMap.get(clonedClip.id)!
+          : null)
+
+      const fill = slotKey ? fills[slotKey] : undefined
 
       if (fill) {
         if (fill.type === 'text' && typeof fill.text === 'string') {
           clonedClip.text = fill.text
           clonedClip.title = fill.text.slice(0, 30)
+        } else if (fill.type === 'color' && typeof fill.color === 'string') {
+          clonedClip.color = fill.color
+          if (clonedClip.textStyle) {
+            clonedClip.textStyle = { ...clonedClip.textStyle, color: fill.color }
+          }
         } else if (fill.assetId) {
           clonedClip.sourceAssetId = fill.assetId
         }

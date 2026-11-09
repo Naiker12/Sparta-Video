@@ -78,7 +78,7 @@ export const clipSchema = z.object({
   start: z.number(),
   duration: z.number(),
   color: z.string(),
-  thumbnail: z.string(),
+  thumbnail: z.string().optional(),
   kind: z.enum(['video', 'audio', 'adjustment']),
   transform: transformSchema.optional(),
   uniformScale: z.boolean().optional(),

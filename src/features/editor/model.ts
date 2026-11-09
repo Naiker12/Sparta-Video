@@ -104,7 +104,7 @@ export type Clip = {
   start: number
   duration: number
   color: string
-  thumbnail: string
+  thumbnail?: string
   sourceAssetId?: string
   kind: 'video' | 'audio' | 'adjustment'
   transform?: Transform
@@ -154,4 +154,4 @@ export type MediaItem = {
 
 export type SequenceSettings = { width: number; height: number; frameRate: number }
 
-export type TimelineMarker = { id: string; time: number; label: string }
+export type TimelineMarker = { id: string; time: number; label: string; color?: string }

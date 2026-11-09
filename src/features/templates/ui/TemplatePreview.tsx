@@ -106,6 +106,10 @@ export function TemplatePreview({ template, isHovered, scrubProgress = 0 }: Temp
       bgGrad.addColorStop(0, '#132840')
       bgGrad.addColorStop(0.5, '#091624')
       bgGrad.addColorStop(1, '#040b12')
+    } else if (category === 'cinematic') {
+      bgGrad.addColorStop(0, '#2b1b38')
+      bgGrad.addColorStop(0.5, '#150d1c')
+      bgGrad.addColorStop(1, '#08050a')
     } else {
       bgGrad.addColorStop(0, '#202533')
       bgGrad.addColorStop(0.5, '#11141c')

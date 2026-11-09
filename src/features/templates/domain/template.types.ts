@@ -6,18 +6,22 @@ export type TemplateCategory =
   | 'youtube'
   | 'business'
   | 'education'
+  | 'cinematic'
   | 'general'
 
-export type SlotType = 'video' | 'audio' | 'image' | 'text'
+export type SlotType = 'video' | 'audio' | 'image' | 'text' | 'color' | 'number'
 
 export interface TemplateSlot {
   id: string
   label: string
   type: SlotType
   targetClipId: string
+  targetProperty?: 'text' | 'color' | 'fillColor' | 'asset' | 'fontSize'
   description?: string
   defaultText?: string
+  defaultValue?: string | number
   recommendedDuration?: number
+  options?: { label: string; value: string }[]
 }
 
 export interface SlotGroup {
@@ -46,6 +50,8 @@ export interface SlotFillValue {
   type: SlotType
   assetId?: string
   text?: string
+  color?: string
+  numberValue?: number
   sourcePath?: string
 }
 

@@ -57,6 +57,7 @@ export function TemplateGallery({ onOpenProject, onClose }: TemplateGalleryProps
     { id: 'youtube', label: 'YouTube' },
     { id: 'business', label: t('Negocios', 'Business') },
     { id: 'education', label: t('Educación', 'Education') },
+    { id: 'cinematic', label: t('Cinemática', 'Cinematic') },
   ]
 
   const formats: Array<{ id: ProjectPresetFormat | 'all'; label: string }> = [
@@ -64,6 +65,7 @@ export function TemplateGallery({ onOpenProject, onClose }: TemplateGalleryProps
     { id: '9:16', label: '9:16 (Vertical)' },
     { id: '16:9', label: '16:9 (Horizontal)' },
     { id: '1:1', label: '1:1 (Cuadrado)' },
+    { id: '21:9', label: '21:9 (Cine)' },
   ]
 
   const filteredTemplates = useMemo(() => {

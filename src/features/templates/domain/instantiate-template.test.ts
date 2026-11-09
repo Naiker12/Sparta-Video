@@ -4,8 +4,8 @@ import { spartaTemplateSchema } from './template.schema'
 import { BUILTIN_TEMPLATES } from '../catalog/builtin-templates'
 
 describe('Template domain and instantiation (Phase 3)', () => {
-  it('all 10 builtin templates conform to spartaTemplateSchema', () => {
-    expect(BUILTIN_TEMPLATES.length).toBe(10)
+  it('all builtin templates conform to spartaTemplateSchema', () => {
+    expect(BUILTIN_TEMPLATES.length).toBe(24)
     for (const t of BUILTIN_TEMPLATES) {
       const parsed = spartaTemplateSchema.safeParse(t)
       expect(parsed.success, `Template ${t.id} failed validation: ${parsed.error?.message}`).toBe(true)
