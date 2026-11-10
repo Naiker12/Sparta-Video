@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { isZipArchive, exportProjectBundle, importProjectBundle, SPARTA_PACKAGE_EXTENSION } from './project-bundle'
 import * as mediaStorage from './media-storage'
+import type { PersistedProjectState } from '../editor-store'
 
 describe('project-bundle (.spartapack)', () => {
   beforeEach(() => {
@@ -24,7 +25,7 @@ describe('project-bundle (.spartapack)', () => {
       storedFiles[id] = file
     })
 
-    const testState: any = {
+    const testState: PersistedProjectState = {
       projectName: 'Proyecto Prueba',
       sequence: { width: 1920, height: 1080, frameRate: 30 },
       tracks: [{ id: 'track-1', kind: 'video', name: 'Video 1', clips: [] }],
@@ -32,13 +33,16 @@ describe('project-bundle (.spartapack)', () => {
         {
           id: 'asset-123',
           title: 'clip1.mp4',
+          detail: '10s · 1080p',
+          thumb: '',
           type: 'video',
-          duration: 10,
-          url: 'blob:http://localhost/mock',
+          durationSeconds: 10,
         },
       ],
       markers: [],
-      textOverlays: [],
+      snapToFrames: true,
+      mutedTracks: [],
+      lockedTracks: [],
     }
 
     const { blob, filename, mediaCount } = await exportProjectBundle(testState)

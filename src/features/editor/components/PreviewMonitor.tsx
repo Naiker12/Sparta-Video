@@ -326,7 +326,7 @@ export function PreviewMonitor({
   const textUnit = boxHeight > 0 ? boxHeight / refSequenceHeight : 0.42
   const canvasBoxStyle = boxWidth > 0
     ? { width: `${Math.round(boxWidth)}px`, height: `${Math.round(boxHeight)}px` }
-    : { aspectRatio: `${sequenceSize.width}/${sequenceSize.height}` }
+    : { width: 'min(90%, 640px)', aspectRatio: `${sequenceSize.width}/${sequenceSize.height}` }
 
   const isLegacyX = sequenceSize.width === 1080 && Math.abs(transform.x - 960) < 5 && (!clip?.keyframes || !clip.keyframes.some((k) => k.property === 'position'))
   const isLegacyY = sequenceSize.height === 1920 && Math.abs(transform.y - 540) < 5 && (!clip?.keyframes || !clip.keyframes.some((k) => k.property === 'position'))
@@ -682,9 +682,23 @@ export function PreviewMonitor({
         {vignetteOverlay && (sourceUrl || hasVisualLayer) && <div aria-hidden="true" style={vignetteOverlay} />}
         {!sourceUrl && !hasVisualLayer && !hasActiveTextOverlays && (
           <div className="preview-empty-copy">
-            {sourceLoading ? <LoaderCircle size={20} className="spin" aria-hidden="true" /> : <Film size={20} strokeWidth={1.6} aria-hidden="true" />}
-            <strong>{previewTitle ?? t('La vista previa aparecerá aquí', 'Preview will appear here')}</strong>
-            <span>{sourceLoading ? t('Cargando medio…', 'Loading media…') : sourceMissing ? t('Vuelve a vincular el archivo para ver su contenido.', 'Relink the file to preview its contents.') : clip || media ? t('Este tipo de medio todavía no tiene vista previa.', 'This media type does not have preview support yet.') : t('Coloca un clip en la línea de tiempo o selecciona un medio.', 'Place a clip on the timeline or select media.')}</span>
+            <div className="preview-empty-icon-ring" aria-hidden="true">
+              {sourceLoading ? (
+                <LoaderCircle size={22} className="spin text-primary" />
+              ) : (
+                <Film size={22} strokeWidth={1.8} className="text-primary" />
+              )}
+            </div>
+            <strong>{previewTitle ?? t('Lienzo de previsualización', 'Preview Canvas')}</strong>
+            <span>
+              {sourceLoading
+                ? t('Cargando medio…', 'Loading media…')
+                : sourceMissing
+                ? t('Vuelve a vincular el archivo para ver su contenido.', 'Relink the file to preview its contents.')
+                : clip || media
+                ? t('Este tipo de medio todavía no tiene vista previa.', 'This media type does not have preview support yet.')
+                : t('Coloca un clip en la línea de tiempo o selecciona un medio en el panel izquierdo.', 'Place a clip on the timeline or select a media item on the left panel.')}
+            </span>
           </div>
         )}
         {textOverlays.map((textClip) => {

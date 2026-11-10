@@ -108,11 +108,10 @@ export function HomeScreen({ onOpenProject, onOpenTemplates, onOpenPreferences }
       const project = await defaultProjectService.getProject(id)
       if (!project) return
       const { exportProjectBundle, downloadBlobFile } = await import('../../editor/services/project-bundle')
-      const blob = await exportProjectBundle(project.state)
-      const filename = `${project.state.projectName || 'proyecto'}.spartapack`
-      downloadBlobFile(blob, filename)
+      const result = await exportProjectBundle(project.state)
+      downloadBlobFile(result.blob, result.filename)
       toast.success(t('Paquete de proyecto exportado', 'Project bundle exported'), {
-        description: filename,
+        description: result.filename,
       })
     } catch {
       toast.error(t('Error al exportar paquete .spartapack', 'Error exporting .spartapack bundle'))

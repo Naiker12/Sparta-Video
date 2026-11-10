@@ -59,7 +59,7 @@ export const spartaProjectFileSchema = z.union([spartaProjectFileV2Schema, spart
 export type SpartaProjectFileV1 = z.infer<typeof spartaProjectFileV1Schema>
 export type SpartaProjectFile = z.infer<typeof spartaProjectFileV2Schema>
 
-export function exportProjectData(state?: EditorState): SpartaProjectFile {
+export function exportProjectData(state?: EditorState | PersistedProjectState): SpartaProjectFile {
   const current = state ?? useEditorStore.getState()
   return {
     format: SPARTA_PROJECT_FORMAT,

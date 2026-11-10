@@ -21,11 +21,11 @@ export function TemplateCard({ template, onSelect }: TemplateCardProps) {
     const progress = Math.min(Math.max(x / rect.width, 0), 1)
     setScrubProgress(progress)
 
-    // When mouse stops moving for 500ms, seamlessly resume live 60fps auto-play
+    // When mouse stops moving for 1200ms, seamlessly resume live 60fps auto-play
     if (scrubTimerRef.current) clearTimeout(scrubTimerRef.current)
     scrubTimerRef.current = setTimeout(() => {
       setScrubProgress(0)
-    }, 500)
+    }, 1200)
   }
 
   const handleMouseLeave = () => {
@@ -51,13 +51,13 @@ export function TemplateCard({ template, onSelect }: TemplateCardProps) {
         setScrubProgress(0)
       }}
       onMouseLeave={handleMouseLeave}
-      className="group relative flex flex-col justify-between rounded-2xl border border-[#232733] bg-[#14161f] p-3.5 transition-all duration-300 hover:-translate-y-1.5 hover:border-primary/80 hover:bg-[#181b26] hover:shadow-[0_10px_30px_rgba(59,130,246,0.15)] cursor-pointer select-none"
+      className="group relative flex flex-col justify-between rounded-2xl border border-[#232733] bg-[#14161f] p-3.5 transition-all duration-300 hover:-translate-y-1.5 hover:border-primary/80 hover:bg-[#181b26] hover:shadow-[0_10px_30px_rgba(59,130,246,0.18)] cursor-pointer select-none"
     >
       <div>
         {/* Dynamic Aspect Ratio Interactive Preview Box with 60fps Live Playback & Hover Scrub */}
         <div
           onMouseMove={handleMouseMove}
-          className="relative mb-3 flex items-center justify-center rounded-xl bg-[#0c0d12] overflow-hidden aspect-video border border-white/8 group-hover:border-primary/50 transition-colors shadow-inner"
+          className="relative mb-3 flex items-center justify-center rounded-xl bg-[#0a0b10] overflow-hidden aspect-video border border-white/8 group-hover:border-primary/60 transition-colors shadow-inner"
         >
           {/* 60fps dynamic scene preview & kinetic animation */}
           <TemplatePreview
@@ -68,36 +68,54 @@ export function TemplateCard({ template, onSelect }: TemplateCardProps) {
 
           {/* Hover Play Button Overlay (Smoothly dissolves on hover) */}
           <div
-            className={`absolute inset-0 bg-black/25 flex items-center justify-center pointer-events-none transition-all duration-300 ${
+            className={`absolute inset-0 bg-black/30 flex items-center justify-center pointer-events-none transition-all duration-300 ${
               isHovered ? 'opacity-0 scale-75' : 'opacity-100 scale-100'
             }`}
           >
-            <div className="w-10 h-10 rounded-full bg-primary/95 text-primary-foreground flex items-center justify-center shadow-xl shadow-primary/30 border border-white/20 transform group-hover:scale-110 transition-transform">
+            <div className="w-11 h-11 rounded-full bg-primary/95 text-primary-foreground flex items-center justify-center shadow-xl shadow-primary/30 border border-white/20 transform group-hover:scale-110 transition-transform">
               <Play size={16} fill="currentColor" className="ml-0.5" />
             </div>
           </div>
 
+          {/* Live Preview Indicator on Hover */}
+          {isHovered && (
+            <div className="absolute top-2 right-2 flex items-center gap-1.5 rounded-full bg-black/70 border border-primary/40 px-2 py-0.5 text-[9px] font-semibold text-primary backdrop-blur-md shadow-xs animate-pulse pointer-events-none">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+              <span>{t('EN VIVO', 'LIVE')}</span>
+            </div>
+          )}
+
           {/* Duration Badge */}
-          {template.durationSeconds > 0 && !isHovered && (
-            <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md bg-black/80 px-1.5 py-0.5 text-[10px] font-mono font-medium text-white/90 backdrop-blur-xs border border-white/10">
+          {template.durationSeconds > 0 && (
+            <div
+              className={`absolute bottom-2 right-2 flex items-center gap-1 rounded-md bg-black/75 px-1.5 py-0.5 text-[10px] font-mono font-medium text-white/90 backdrop-blur-md border border-white/10 transition-opacity duration-200 ${
+                isHovered ? 'opacity-85' : 'opacity-100'
+              }`}
+            >
               <Clock size={10} />
               <span>{formatTime(template.durationSeconds)}</span>
             </div>
           )}
 
           {/* Built-in / Official badge */}
-          {template.isBuiltIn && !isHovered && (
-            <div className="absolute top-2 left-2 rounded-full bg-primary/25 border border-primary/40 px-2 py-0.5 text-[9px] font-semibold text-primary uppercase tracking-wider backdrop-blur-xs">
+          {template.isBuiltIn && (
+            <div
+              className={`absolute top-2 left-2 rounded-full bg-primary/20 border border-primary/30 px-2 py-0.5 text-[9px] font-semibold text-primary uppercase tracking-wider backdrop-blur-md transition-opacity duration-200 ${
+                isHovered ? 'opacity-70' : 'opacity-100'
+              }`}
+            >
               {t('Oficial', 'Official')}
             </div>
           )}
 
           {/* Format Badge Pill */}
-          {!isHovered && (
-            <div className="absolute bottom-2 left-2 rounded bg-black/80 border border-white/10 px-1.5 py-0.5 text-[9px] font-mono font-semibold text-white/80 uppercase backdrop-blur-xs">
-              {template.format}
-            </div>
-          )}
+          <div
+            className={`absolute bottom-2 left-2 rounded bg-black/75 border border-white/10 px-1.5 py-0.5 text-[9px] font-mono font-semibold text-white/80 uppercase backdrop-blur-md transition-opacity duration-200 ${
+              isHovered ? 'opacity-85' : 'opacity-100'
+            }`}
+          >
+            {template.format}
+          </div>
         </div>
 
         {/* Category & Format metadata */}

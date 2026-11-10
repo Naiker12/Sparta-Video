@@ -1,7 +1,7 @@
 import { zip, unzip, strToU8, strFromU8, type AsyncZippable } from 'fflate'
 import { exportProjectData, parseProjectFile, type SpartaProjectFile } from './project-file'
 import { loadMediaBlob, storeMediaFile, getMediaMimeTypeFromName } from './media-storage'
-import { useEditorStore, type EditorState } from '../editor-store'
+import { useEditorStore, type EditorState, type PersistedProjectState } from '../editor-store'
 
 export const SPARTA_PACKAGE_EXTENSION = '.spartapack'
 
@@ -32,7 +32,7 @@ export async function isZipArchive(file: Blob): Promise<boolean> {
  * Packs the active project along with all referenced video/audio/image binary media into a .spartapack archive.
  */
 export async function exportProjectBundle(
-  state?: EditorState,
+  state?: EditorState | PersistedProjectState,
   onProgress?: (progress: { step: string; percent: number }) => void,
 ): Promise<ExportBundleResult> {
   const current = state ?? useEditorStore.getState()
@@ -128,9 +128,7 @@ export async function importProjectBundle(
   for (let i = 0; i < totalMedia; i++) {
     const [path, fileBytes] = mediaEntries[i]
     const filenameWithExt = path.replace(/^media\//, '')
-    const parts = filenameWithExt.split('.')
-    const assetId = parts[0]
-    const ext = parts.slice(1).join('.').toLowerCase()
+    const assetId = filenameWithExt.split('.')[0]
 
     if (assetId) {
       const matchingAsset = project.project.assets?.find((a) => a.id === assetId)
