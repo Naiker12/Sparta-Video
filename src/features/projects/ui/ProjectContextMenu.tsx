@@ -1,4 +1,4 @@
-import { CopyPlus, Download, FolderOpen, History, MoreVertical, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { Archive, CopyPlus, Download, FolderOpen, History, MoreVertical, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import type { ProjectSummary } from '../domain/project.types'
 import { ActionMenu, type MenuEntry } from '../../editor/components/ActionMenu'
 import { t } from '../../../shared/i18n/locale'
@@ -9,6 +9,7 @@ interface ProjectContextMenuProps {
   onRename: () => void
   onDuplicate: () => void
   onExport: () => void
+  onExportBundle?: () => void
   onDelete: () => void
   onRestore?: () => void
   onHistory?: () => void
@@ -20,6 +21,7 @@ export function ProjectContextMenu({
   onRename,
   onDuplicate,
   onExport,
+  onExportBundle,
   onDelete,
   onRestore,
   onHistory,
@@ -38,6 +40,7 @@ export function ProjectContextMenu({
         { label: t('Cambiar nombre', 'Rename'), icon: Pencil, onSelect: onRename },
         { label: t('Duplicar', 'Duplicate'), icon: CopyPlus, onSelect: onDuplicate },
         { label: t('Exportar .sparta…', 'Export .sparta…'), icon: Download, onSelect: onExport },
+        ...(onExportBundle ? [{ label: t('Exportar paquete con medios (.spartapack)…', 'Export bundle with media (.spartapack)…'), icon: Archive, onSelect: onExportBundle }] : []),
         { separator: true },
         { label: t('Mover a la papelera', 'Move to trash'), icon: Trash2, onSelect: onDelete },
       ]

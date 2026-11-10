@@ -103,11 +103,45 @@ export function HomeScreen({ onOpenProject, onOpenTemplates, onOpenPreferences }
     }
   }
 
+  const handleExportBundle = async (id: string) => {
+    try {
+      const project = await defaultProjectService.getProject(id)
+      if (!project) return
+      const { exportProjectBundle, downloadBlobFile } = await import('../../editor/services/project-bundle')
+      const blob = await exportProjectBundle(project.state)
+      const filename = `${project.state.projectName || 'proyecto'}.spartapack`
+      downloadBlobFile(blob, filename)
+      toast.success(t('Paquete de proyecto exportado', 'Project bundle exported'), {
+        description: filename,
+      })
+    } catch {
+      toast.error(t('Error al exportar paquete .spartapack', 'Error exporting .spartapack bundle'))
+    }
+  }
+
   const handleImportSparta = useCallback(
     async (files: FileList | null) => {
       const file = files?.[0]
       if (!file) return
       try {
+        const isBundle =
+          file.name.endsWith('.spartapack') ||
+          file.name.endsWith('.zip') ||
+          (await import('../../editor/services/project-bundle').then((m) => m.isZipArchive(file)))
+
+        if (isBundle) {
+          const { importProjectBundle } = await import('../../editor/services/project-bundle')
+          const result = await importProjectBundle(file)
+          const record = await defaultProjectService.importProjectFromData(result.project)
+          await refresh()
+          const name = record.state.projectName
+          toast.success(t('Paquete importado con éxito', 'Package imported successfully'), {
+            description: `${name} (${result.mediaCount} ${t('medios restaurados', 'media files restored')})`,
+          })
+          onOpenProject(record.id)
+          return
+        }
+
         const text = await file.text()
         const json = JSON.parse(text)
         const record = await defaultProjectService.importProjectFromData(json)
@@ -136,7 +170,7 @@ export function HomeScreen({ onOpenProject, onOpenTemplates, onOpenPreferences }
       e.preventDefault()
       if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
         const file = e.dataTransfer.files[0]
-        if (file.name.endsWith('.sparta') || file.name.endsWith('.json')) {
+        if (file.name.endsWith('.sparta') || file.name.endsWith('.spartapack') || file.name.endsWith('.zip') || file.name.endsWith('.json')) {
           void handleImportSparta(e.dataTransfer.files)
         }
       }
@@ -438,6 +472,7 @@ export function HomeScreen({ onOpenProject, onOpenTemplates, onOpenPreferences }
               }}
               onDuplicateProject={duplicateProject}
               onExportProject={handleExportSparta}
+              onExportProjectBundle={handleExportBundle}
               onDeleteProject={(id) => void deleteProject(id, showTrash)}
               onRestoreProject={restoreProject}
               onHistoryProject={(id) => {
@@ -458,7 +493,7 @@ export function HomeScreen({ onOpenProject, onOpenTemplates, onOpenPreferences }
       <input
         ref={fileInputRef}
         type="file"
-        accept=".sparta,.json"
+        accept=".sparta,.spartapack,.zip,.json"
         className="hidden"
         onChange={(e) => {
           void handleImportSparta(e.target.files)

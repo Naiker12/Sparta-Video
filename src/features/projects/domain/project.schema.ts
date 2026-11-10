@@ -145,8 +145,8 @@ export const trackSchema = z.object({
 export const mediaItemSchema = z.object({
   id: z.string(),
   title: z.string(),
-  detail: z.string(),
-  thumb: z.string(),
+  detail: z.string().default(''),
+  thumb: z.string().default(''),
   type: z.enum(['video', 'audio', 'image']),
   durationSeconds: z.number().optional(),
   sourcePath: z.string().optional(),

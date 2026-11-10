@@ -18,6 +18,7 @@ interface ProjectGridProps {
   onRenameProject: (id: string) => void
   onDuplicateProject: (id: string) => void
   onExportProject: (id: string) => void
+  onExportProjectBundle?: (id: string) => void
   onDeleteProject: (id: string) => void
   onRestoreProject?: (id: string) => void
   onHistoryProject?: (id: string) => void
@@ -38,6 +39,7 @@ export function ProjectGrid({
   onRenameProject,
   onDuplicateProject,
   onExportProject,
+  onExportProjectBundle,
   onDeleteProject,
   onRestoreProject,
   onHistoryProject,
@@ -129,6 +131,7 @@ export function ProjectGrid({
               onRename={onRenameProject}
               onDuplicate={onDuplicateProject}
               onExport={onExportProject}
+              onExportBundle={onExportProjectBundle ? () => onExportProjectBundle(project.id) : undefined}
               onDelete={onDeleteProject}
               onRestore={onRestoreProject}
               onHistory={onHistoryProject}
@@ -146,6 +149,7 @@ export function ProjectGrid({
               onRename={onRenameProject}
               onDuplicate={onDuplicateProject}
               onExport={onExportProject}
+              onExportBundle={onExportProjectBundle ? () => onExportProjectBundle(project.id) : undefined}
               onDelete={onDeleteProject}
               onRestore={onRestoreProject}
               onHistory={onHistoryProject}

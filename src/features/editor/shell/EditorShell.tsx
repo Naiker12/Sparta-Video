@@ -447,7 +447,7 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
         className="visually-hidden hidden"
         style={{ display: 'none' }}
         type="file"
-        accept=".sparta,.json"
+        accept=".sparta,.spartapack,.zip,.json"
         tabIndex={-1}
         aria-hidden="true"
         onChange={(event) => {

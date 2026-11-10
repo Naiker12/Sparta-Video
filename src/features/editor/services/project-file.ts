@@ -153,6 +153,26 @@ export function loadProjectFromFile(fileData: SpartaProjectFile) {
 
 export async function openProjectFromFile(file: File): Promise<boolean> {
   try {
+    // Check if it's a .spartapack or zip archive (by name or magic header)
+    const isBundle =
+      file.name.endsWith('.spartapack') ||
+      file.name.endsWith('.zip') ||
+      (await import('./project-bundle').then((m) => m.isZipArchive(file)))
+
+    if (isBundle) {
+      const { importProjectBundle } = await import('./project-bundle')
+      const result = await importProjectBundle(file)
+      loadProjectFromFile(result.project)
+      const name = result.project.project.name || result.project.project.projectName || 'Proyecto'
+      toast.success(t('Paquete de proyecto importado', 'Project bundle imported'), {
+        description: t(
+          `${name} (${result.mediaCount} medios restaurados)`,
+          `${name} (${result.mediaCount} media files restored)`,
+        ),
+      })
+      return true
+    }
+
     const text = await file.text()
     const parsed = parseProjectFile(text)
     loadProjectFromFile(parsed)

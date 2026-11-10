@@ -1,4 +1,4 @@
-import { BookmarkPlus, Clapperboard, CopyPlus, FileDown, FileText, FileUp, Film, History, Maximize2, PlusCircle, Redo2, Scissors, Trash2, Undo2, Video } from 'lucide-react'
+import { Archive, BookmarkPlus, Clapperboard, CopyPlus, FileDown, FileText, FileUp, Film, History, Maximize2, PlusCircle, Redo2, Scissors, Trash2, Undo2, Video } from 'lucide-react'
 import { ActionMenu } from '../components/ActionMenu'
 import { t } from '../../../shared/i18n/locale'
 import { toast } from '../../../shared/ui/toast-service'
@@ -78,6 +78,24 @@ export function FileMenu({
                 toast.success(t('Archivo de proyecto guardado', 'Project file saved'), {
                   description: fileData.project.name + '.sparta',
                 })
+              })
+            },
+          },
+          {
+            label: t('Exportar paquete con medios (.spartapack)…', 'Export bundle with media (.spartapack)…'),
+            icon: Archive,
+            onSelect: () => {
+              toast.info(t('Empaquetando medios...', 'Packaging media...'))
+              void import('../services/project-bundle').then(async ({ exportProjectBundle, downloadBlobFile }) => {
+                try {
+                  const result = await exportProjectBundle()
+                  downloadBlobFile(result.blob, result.filename)
+                  toast.success(t('Paquete de proyecto guardado', 'Project bundle saved'), {
+                    description: `${result.filename} (${result.mediaCount} medios incluidos)`,
+                  })
+                } catch {
+                  toast.error(t('Error al empaquetar proyecto', 'Error bundling project'))
+                }
               })
             },
           },

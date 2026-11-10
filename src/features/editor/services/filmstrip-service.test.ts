@@ -72,3 +72,4 @@ describe('filmstrip-service', () => {
     expect(frames[0]).toBe('frame-5.jpg')
   })
 })
+

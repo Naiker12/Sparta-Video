@@ -15,6 +15,7 @@ interface ProjectCardProps {
   onRename: (id: string) => void
   onDuplicate: (id: string) => void
   onExport: (id: string) => void
+  onExportBundle?: (id: string) => void
   onDelete: (id: string) => void
   onRestore?: (id: string) => void
   onHistory?: (id: string) => void
@@ -27,6 +28,7 @@ export function ProjectCard({
   onRename,
   onDuplicate,
   onExport,
+  onExportBundle,
   onDelete,
   onRestore,
   onHistory,
@@ -154,6 +156,7 @@ export function ProjectCard({
             onRename={() => onRename(project.id)}
             onDuplicate={() => onDuplicate(project.id)}
             onExport={() => onExport(project.id)}
+            onExportBundle={onExportBundle ? () => onExportBundle(project.id) : undefined}
             onDelete={() => onDelete(project.id)}
             onRestore={() => onRestore?.(project.id)}
             onHistory={() => onHistory?.(project.id)}
@@ -239,6 +242,7 @@ export function ProjectCard({
             onRename={() => onRename(project.id)}
             onDuplicate={() => onDuplicate(project.id)}
             onExport={() => onExport(project.id)}
+            onExportBundle={onExportBundle ? () => onExportBundle(project.id) : undefined}
             onDelete={() => onDelete(project.id)}
             onRestore={() => onRestore?.(project.id)}
             onHistory={() => onHistory?.(project.id)}
