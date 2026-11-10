@@ -2,21 +2,21 @@
    Shadcn / Sonner Style Global Toast Notifications
    ========================================================================== */
 .toaster {
-  position: fixed;
-  z-index: 99999;
-  right: 20px;
-  bottom: 24px;
-  pointer-events: none;
+  position: fixed !important;
+  z-index: 99999 !important;
+  right: 24px !important;
+  bottom: 24px !important;
+  pointer-events: none !important;
 }
 
 .toast-list {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  list-style: none !important;
 }
 
 .toast {
