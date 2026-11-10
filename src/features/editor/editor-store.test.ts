@@ -402,5 +402,19 @@ describe('editor project operations', () => {
     store.undo()
     const stateAfterUndo = useEditorStore.getState()
     expect(stateAfterUndo.tracks.flatMap((t) => t.clips).filter((c) => [c1, c2, c3].includes(c.id))).toHaveLength(3)
+
+    // selectMultipleClips (marquee drag selection)
+    store.selectMultipleClips([c1, c2])
+    expect(useEditorStore.getState().selectedClipIds).toEqual([c1, c2])
+    expect(useEditorStore.getState().selectedClipId).toBe(c1)
+
+    // selectMultipleClips with append
+    store.selectMultipleClips([c3], { append: true })
+    expect(useEditorStore.getState().selectedClipIds).toEqual([c1, c2, c3])
+
+    // selectMultipleClips with empty array clears selection
+    store.selectMultipleClips([])
+    expect(useEditorStore.getState().selectedClipIds).toHaveLength(0)
+    expect(useEditorStore.getState().selectedClipId).toBe('')
   })
 })

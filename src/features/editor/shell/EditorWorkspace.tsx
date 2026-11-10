@@ -54,6 +54,7 @@ interface EditorWorkspaceProps {
   setAssistantMode: (mode: AssistantMode) => void
   toggleAssistant: () => void
   selectClip: (id: string, options?: { toggle?: boolean; append?: boolean }) => void
+  selectMultipleClips?: (ids: string[], options?: { toggle?: boolean; append?: boolean }) => void
   clearClipSelection?: () => void
   deleteSelectedClips?: () => void
   selectAllClips?: () => void
@@ -138,6 +139,7 @@ export function EditorWorkspace({
   setAssistantMode,
   toggleAssistant,
   selectClip,
+  selectMultipleClips,
   clearClipSelection,
   deleteSelectedClips,
   selectAllClips,
@@ -395,6 +397,7 @@ export function EditorWorkspace({
               onMuteTrack={toggleMute}
               onLockTrack={toggleLock}
               onSelect={selectClip}
+              onSelectMultipleClips={selectMultipleClips}
               onClearSelection={clearClipSelection}
               onDeleteSelectedClips={deleteSelectedClips}
               onSelectAll={selectAllClips}

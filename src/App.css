@@ -1794,13 +1794,49 @@
 .video-filmstrip-strip {
   position: absolute;
   inset: 0;
-  opacity: 0.78;
+  opacity: 0.85;
   background-color: rgba(7, 12, 20, .3);
+  overflow: hidden;
+  border-top: 1.5px dashed rgba(255, 255, 255, 0.28);
+  border-bottom: 1.5px dashed rgba(255, 255, 255, 0.28);
+  pointer-events: none;
+  border-radius: 4px;
+}
+
+.filmstrip-frames-grid {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+.filmstrip-frame-cell {
+  flex: 1 1 0;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  border-right: 1px solid rgba(255, 255, 255, 0.18);
+  position: relative;
+}
+
+.filmstrip-frame-cell:last-child {
+  border-right: none;
+}
+
+.filmstrip-single-preview {
+  width: 100%;
+  height: 100%;
   background-size: auto 100%;
   background-position: center;
   background-repeat: repeat-x;
-  border-top: 2px dashed rgba(255, 255, 255, 0.25);
-  border-bottom: 2px dashed rgba(255, 255, 255, 0.25);
+}
+
+.timeline-marquee-selection {
+  position: absolute;
+  z-index: 50;
+  border: 1px solid rgba(56, 189, 248, 0.85);
+  background: rgba(56, 189, 248, 0.16);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+  border-radius: 4px;
   pointer-events: none;
 }
 

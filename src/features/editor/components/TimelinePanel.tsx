@@ -6,13 +6,15 @@ import type { Clip, MediaItem, TimelineMarker, Track, TransitionRef } from '../m
 import { EFFECT_CATALOG } from '../effects/catalog'
 import { formatRulerTime, formatTimecode } from '../timecode'
 import { t } from '../../../shared/i18n/locale'
-import { loadAudioWaveform, loadMediaPreview } from '../services/media-storage'
+import { loadAudioWaveform, loadMediaBlob, loadMediaPreview } from '../services/media-storage'
+import { extractVideoFilmstrip, getFilmstripFramesForClip, type FilmstripData } from '../services/filmstrip-service'
 import { cn } from '../../../shared/lib/utils'
 
 type Props = {
   tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]; selected: string; playhead: number; zoom: number; frameRate: number; snap: boolean; expanded: boolean; tool: 'select' | 'razor'
   selectedIds?: string[]
   onSelect: (id: string, options?: { toggle?: boolean; append?: boolean }) => void
+  onSelectMultipleClips?: (ids: string[], options?: { toggle?: boolean; append?: boolean }) => void
   onClearSelection?: () => void
   onDeleteSelectedClips?: () => void
   onSelectAll?: () => void
@@ -32,7 +34,7 @@ type Gesture = { id: string; startX: number; originalStart: number; originalDura
 type GestureFeedback = { id: string; mode: Gesture['mode']; start: number; duration: number; originalStart: number; originalDuration: number }
 type SnapFeedback = { time: number; target: string }
 
-export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onClearSelection, onDeleteSelectedClips, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onFreezeFrame, onAddTextClip, onAddAdjustmentLayer, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool, onImportFiles, onApplyTransition }: Props) {
+export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, playhead, zoom, frameRate, snap, expanded, tool, mutedTracks, lockedTracks, onSelect, onSelectMultipleClips, onClearSelection, onDeleteSelectedClips, onSeek, onZoom, onMuteTrack, onLockTrack, onAddTrack, onAddMedia, onMoveClip, onMoveClipToNewTrack, onSplitClip, onDeleteClip, onDuplicateClip, onFreezeFrame, onAddTextClip, onAddAdjustmentLayer, onAutoSubtitles, onClearSubtitles, onPackClips, onAutoMarkers, onAutoAudio, onAddMarker, onRemoveMarker, onToggleSnap, onToggleExpanded, onSetTool, onImportFiles, onApplyTransition }: Props) {
   const scale = 31 * zoom
   const sequenceDuration = Math.max(0, ...tracks.flatMap((track) => track.clips.map((clip) => clip.start + clip.duration)), ...markers.map((marker) => marker.time))
   const rulerDuration = Math.max(10, sequenceDuration + 2)
@@ -54,6 +56,7 @@ export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, 
   const [waveforms, setWaveforms] = useState<Record<string, number[] | null>>({})
   const [videoPreviews, setVideoPreviews] = useState<Record<string, string>>({})
   const videoPreviewUrls = useRef<string[]>([])
+  const [filmstrips, setFilmstrips] = useState<Record<string, FilmstripData>>({})
   const [clipLabels] = useState(true)
   const [preview, setPreview] = useState<Record<string, { start: number; duration: number }>>({})
   const [gestureFeedback, setGestureFeedback] = useState<GestureFeedback | null>(null)
@@ -61,6 +64,8 @@ export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, 
   const [razorTime, setRazorTime] = useState<number | null>(null)
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null)
   const [transitionMenuClipId, setTransitionMenuClipId] = useState<string | null>(null)
+  const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null)
+  const marqueeRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null)
   const transitionPresets = EFFECT_CATALOG.filter((effect) => effect.kind === 'transition')
   useEffect(() => {
     let cancelled = false
@@ -99,6 +104,32 @@ export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, 
     return () => { cancelled = true }
   }, [tracks, assets, videoPreviews])
   useEffect(() => () => { videoPreviewUrls.current.forEach(URL.revokeObjectURL) }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const videoAssets = new Set<string>()
+    tracks.forEach((track) => track.clips.forEach((clip) => {
+      if (clip.kind !== 'video' || clip.text !== undefined || clip.thumbnail === 'text-overlay') return
+      const assetId = clip.sourceAssetId ?? assets.find((asset) => asset.title === clip.title)?.id
+      if (assetId && !(assetId in filmstrips)) videoAssets.add(assetId)
+    }))
+    if (!videoAssets.size) return
+
+    videoAssets.forEach(async (assetId) => {
+      try {
+        const blob = await loadMediaBlob(assetId)
+        if (!blob || cancelled) return
+        const data = await extractVideoFilmstrip(assetId, blob, 8)
+        if (data && !cancelled) {
+          setFilmstrips((prev) => ({ ...prev, [assetId]: data }))
+        }
+      } catch {
+        /* fallback to preview */
+      }
+    })
+
+    return () => { cancelled = true }
+  }, [tracks, assets, filmstrips])
   const visibleTracks = tracks.filter((track) => {
     const isFxTrack = track.name.toLowerCase().includes('fx') || track.name.toLowerCase().includes('efecto') || track.name.toLowerCase().includes('ajuste')
     if (isFxTrack) {
@@ -204,6 +235,133 @@ export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, 
     window.addEventListener('pointercancel', end)
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end) }
   })
+  const findIntersectingClips = (box: { left: number; top: number; right: number; bottom: number }): string[] => {
+    const rulerHeight = 24
+    let currentTrackTop = rulerHeight
+    const hitIds: string[] = []
+
+    for (const track of visibleTracks) {
+      const layout = laneLayouts.get(track.id)
+      const trackHeight = layout?.height ?? 48
+      const rowHeight = layout?.rowHeight ?? 42
+
+      if (!lockedTracks.includes(track.id)) {
+        for (const clip of track.clips) {
+          const pos = preview[clip.id] ?? clip
+          const clipLeft = pos.start * scale
+          const clipRight = clipLeft + pos.duration * scale
+          const row = layout?.rows.get(clip.id) ?? 0
+          const clipTop = currentTrackTop + 5 + row * rowHeight
+          const clipBottom = clipTop + rowHeight - 2
+
+          const intersects = (
+            clipLeft < box.right &&
+            clipRight > box.left &&
+            clipTop < box.bottom &&
+            clipBottom > box.top
+          )
+
+          if (intersects) {
+            hitIds.push(clip.id)
+          }
+        }
+      }
+
+      currentTrackTop += trackHeight
+    }
+
+    return hitIds
+  }
+
+  const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || tool !== 'select') return
+    const target = event.target as HTMLElement
+    if (
+      target.closest('.timeline-clip') ||
+      target.closest('.timeline-marker') ||
+      target.closest('.marker-popover') ||
+      target.closest('.ruler') ||
+      target.closest('.playhead') ||
+      target.closest('.timeline-transition-control') ||
+      target.closest('.overlap-move-button')
+    ) {
+      return
+    }
+
+    const canvasElement = event.currentTarget
+    const canvasRect = canvasElement.getBoundingClientRect()
+    const startX = event.clientX - canvasRect.left
+    const startY = event.clientY - canvasRect.top
+
+    const initialMarquee = { startX, startY, currentX: startX, currentY: startY }
+    marqueeRef.current = initialMarquee
+    setMarquee(initialMarquee)
+
+    const move = (moveEvent: PointerEvent) => {
+      if (!marqueeRef.current) return
+      const curX = moveEvent.clientX - canvasRect.left
+      const curY = moveEvent.clientY - canvasRect.top
+      const nextMarquee = { ...marqueeRef.current, currentX: curX, currentY: curY }
+      marqueeRef.current = nextMarquee
+      setMarquee(nextMarquee)
+
+      const box = {
+        left: Math.min(nextMarquee.startX, nextMarquee.currentX),
+        top: Math.min(nextMarquee.startY, nextMarquee.currentY),
+        right: Math.max(nextMarquee.startX, nextMarquee.currentX),
+        bottom: Math.max(nextMarquee.startY, nextMarquee.currentY),
+      }
+
+      if (box.right - box.left > 4 || box.bottom - box.top > 4) {
+        const intersectingIds = findIntersectingClips(box)
+        if (intersectingIds.length > 0) {
+          if (onSelectMultipleClips) {
+            onSelectMultipleClips(intersectingIds, { append: moveEvent.shiftKey || moveEvent.ctrlKey })
+          } else {
+            onSelect(intersectingIds[0])
+          }
+        }
+      }
+    }
+
+    const end = (upEvent: PointerEvent) => {
+      const active = marqueeRef.current
+      if (active) {
+        const width = Math.abs(active.currentX - active.startX)
+        const height = Math.abs(active.currentY - active.startY)
+        if (width <= 4 && height <= 4) {
+          onClearSelection?.()
+        } else {
+          const box = {
+            left: Math.min(active.startX, active.currentX),
+            top: Math.min(active.startY, active.currentY),
+            right: Math.max(active.startX, active.currentX),
+            bottom: Math.max(active.startY, active.currentY),
+          }
+          const intersectingIds = findIntersectingClips(box)
+          if (intersectingIds.length > 0) {
+            if (onSelectMultipleClips) {
+              onSelectMultipleClips(intersectingIds, { append: upEvent.shiftKey || upEvent.ctrlKey })
+            } else {
+              onSelect(intersectingIds[0])
+            }
+          } else if (!upEvent.shiftKey && !upEvent.ctrlKey) {
+            onClearSelection?.()
+          }
+        }
+      }
+      marqueeRef.current = null
+      setMarquee(null)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end, { once: true })
+    window.addEventListener('pointercancel', end, { once: true })
+  }
+
   return <section className={`timeline-panel ${expanded ? 'timeline-expanded' : ''} flex flex-col h-full bg-card overflow-hidden select-none`}>
     <div className="flex items-center justify-between px-3 h-9 bg-card border-b border-border select-none shrink-0">
       <div className="flex items-center gap-2 h-full">
@@ -415,6 +573,7 @@ export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, 
         <div
           className="timeline-canvas"
           style={{ width: `${Math.max(880, scale * rulerTickCount)}px`, backgroundSize: `${scale}px 100%` }}
+          onPointerDown={handleCanvasPointerDown}
           onDragOver={(event) => {
             event.preventDefault()
             event.dataTransfer.dropEffect = 'copy'
@@ -461,7 +620,35 @@ export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, 
                 return (
                   <button key={clip.id} disabled={isLocked} className={`timeline-clip ${density} ${overlapIds.has(clip.id) ? 'overlap-warning' : ''} ${clip.color} ${isSelected ? 'clip-selected ring-2 ring-primary/80 shadow-md shadow-primary/25' : ''} ${clip.kind === 'audio' ? 'audio-clip clip-kind-audio' : ''} ${clip.kind === 'adjustment' ? 'adjustment-clip clip-kind-fx' : ''} ${(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-text' : ''} ${clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') ? 'clip-kind-video' : ''} ${tool === 'razor' ? 'razor-cursor' : ''}`} style={{ left: `${position.start * scale}px`, width: `${pixelWidth}px`, top: `${5 + (laneLayouts.get(track.id)?.rows.get(clip.id) ?? 0) * (laneLayouts.get(track.id)?.rowHeight ?? 42)}px`, zIndex: isSelected ? 3 : 1 }} onPointerMove={(event) => { if (tool === 'razor') { const rect = event.currentTarget.getBoundingClientRect(); setRazorTime(position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale))) } }} onPointerLeave={() => setRazorTime(null)} onPointerDown={(event) => { if (tool === 'razor') { event.preventDefault(); event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const cutTime = position.start + Math.max(0, Math.min(position.duration, (event.clientX - rect.left) / scale)); onSplitClip(clip.id, cutTime); setRazorTime(null); return } beginGesture(event, clip, 'move') }} onClick={(event) => { if (tool === 'select') { if (event.shiftKey || event.ctrlKey || event.metaKey) { onSelect(clip.id, { toggle: true }) } else { onSelect(clip.id) } } }} title={tool === 'razor' ? `${fullClipTitle} · corte en ${formatTimecode(razorTime ?? position.start, frameRate)} · haz clic en el punto de corte` : `${fullClipTitle} · inicio ${formatTimecode(position.start, frameRate)} · duración ${formatTimecode(position.duration, frameRate)} · arrastra para mover`} aria-label={`${fullClipTitle}, inicio ${formatTimecode(position.start, frameRate)}, duración ${formatTimecode(position.duration, frameRate)}. Flechas para mover; Alt más flechas recorta el borde derecho; Ctrl más Alt recorta el izquierdo`}>
                     <span className={`clip-art ${clip.thumbnail}`} />
-                    {clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') && <div className="video-filmstrip-strip" style={videoPreviews[clip.sourceAssetId ?? assets.find((asset) => asset.title === clip.title)?.id ?? ''] ? { backgroundImage: `linear-gradient(rgba(8, 11, 17, .3), rgba(8, 11, 17, .3)), url("${videoPreviews[clip.sourceAssetId ?? assets.find((asset) => asset.title === clip.title)?.id ?? '']}")` } : undefined} />}
+                    {clip.kind === 'video' && !(clip.text !== undefined || clip.thumbnail === 'text-overlay') && (() => {
+                      const assetId = clip.sourceAssetId ?? assets.find((asset) => asset.title === clip.title)?.id ?? ''
+                      const filmstripData = filmstrips[assetId]
+                      const previewUrl = videoPreviews[assetId]
+                      const slotWidth = 64
+                      const slotCount = Math.max(1, Math.floor(pixelWidth / slotWidth))
+                      const clipFrames = getFilmstripFramesForClip(filmstripData, clip.offset ?? 0, position.duration, slotCount, previewUrl)
+
+                      return (
+                        <div className="video-filmstrip-strip" aria-hidden="true">
+                          {clipFrames.length > 0 ? (
+                            <div className="filmstrip-frames-grid">
+                              {clipFrames.map((frameUrl, idx) => (
+                                <div
+                                  key={idx}
+                                  className="filmstrip-frame-cell"
+                                  style={{ backgroundImage: `url("${frameUrl}")` }}
+                                />
+                              ))}
+                            </div>
+                          ) : previewUrl ? (
+                            <div
+                              className="filmstrip-single-preview"
+                              style={{ backgroundImage: `linear-gradient(rgba(8, 11, 17, .25), rgba(8, 11, 17, .25)), url("${previewUrl}")` }}
+                            />
+                          ) : null}
+                        </div>
+                      )
+                    })()}
                     {clip.transitionIn && <div className="timeline-transition-badge" title={`Transición: ${clip.transitionIn.effectId}`}>◪</div>}
                     {clip.kind === 'audio' && waveform?.length && <span className="waveform" aria-label={t('Forma de onda del audio', 'Audio waveform')} title={t('Forma de onda del audio importado', 'Waveform from imported audio')}>{waveform.map((peak, index) => <i key={index} style={{ height: `${Math.max(5, peak * 100)}%` }} />)}</span>}
                     {clip.fadeIn ? <span className="clip-fade-in" style={{ width: `${Math.min(50, clip.fadeIn / Math.max(position.duration, 0.1) * 100)}%` }} /> : null}
@@ -527,6 +714,17 @@ export function TimelinePanel({ tracks, assets, markers, selected, selectedIds, 
           {snapFeedback && <div className="snap-guide" style={{ left: `${snapFeedback.time * scale}px` }} aria-hidden="true"><span>{snapFeedback.target} · {formatTimecode(snapFeedback.time, frameRate)}</span></div>}
           {gestureFeedback && <div className="gesture-feedback" style={{ left: `${(gestureFeedback.mode === 'trim-right' ? gestureFeedback.start + gestureFeedback.duration : gestureFeedback.start) * scale}px` }} role="status" aria-live="polite"><strong>{gestureFeedback.mode === 'move' ? t('Mover clip', 'Move clip') : t('Recortar clip', 'Trim clip')}</strong><span>{t('Inicio', 'Start')} {formatTimecode(gestureFeedback.start, frameRate)} · {t('duración', 'duration')} {formatTimecode(gestureFeedback.duration, frameRate)}</span><small>Δ {gestureFeedback.mode === 'move' ? (gestureFeedback.start >= gestureFeedback.originalStart ? '+' : '−') : (gestureFeedback.duration >= gestureFeedback.originalDuration ? '+' : '−')}{formatTimecode(Math.abs(gestureFeedback.mode === 'move' ? gestureFeedback.start - gestureFeedback.originalStart : gestureFeedback.duration - gestureFeedback.originalDuration), frameRate)}</small></div>}
           {tool === 'razor' && razorTime !== null && <div className="razor-guide" style={{ left: `${razorTime * scale}px` }}><span>{formatTimecode(razorTime, frameRate)}</span></div>}
+          {marquee && (Math.abs(marquee.currentX - marquee.startX) > 3 || Math.abs(marquee.currentY - marquee.startY) > 3) && (
+            <div
+              className="timeline-marquee-selection"
+              style={{
+                left: `${Math.min(marquee.startX, marquee.currentX)}px`,
+                top: `${Math.min(marquee.startY, marquee.currentY)}px`,
+                width: `${Math.abs(marquee.currentX - marquee.startX)}px`,
+                height: `${Math.abs(marquee.currentY - marquee.startY)}px`,
+              }}
+            />
+          )}
           <div className="playhead" style={{ left: `${playhead * scale}px` }}><i /><span className="playhead-line" /><b className={`playhead-time ${playhead * scale < 72 ? 'playhead-time-start' : ''}`}>{formatTimecode(playhead, frameRate)}</b></div>
         </div>
       </div>

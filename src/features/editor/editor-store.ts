@@ -27,6 +27,7 @@ export type EditorState = {
   setProjectName: (name: string) => void; setSequence: (sequence: SequenceSettings) => void
   setActiveTool: (tool: 'select' | 'razor') => void
   selectClip: (id: string, options?: { toggle?: boolean; append?: boolean }) => void
+  selectMultipleClips: (ids: string[], options?: { toggle?: boolean; append?: boolean }) => void
   selectAllClips: () => void
   clearClipSelection: () => void
   deleteSelectedClips: () => void
@@ -193,6 +194,22 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     return {
       selectedClipId: id,
       selectedClipIds: [id],
+      selectedMediaId: null,
+    }
+  }),
+  selectMultipleClips: (ids, options) => set((state) => {
+    if (!ids || ids.length === 0) return { selectedClipId: '', selectedClipIds: [], selectedMediaId: null }
+    if (options?.append) {
+      const merged = Array.from(new Set([...state.selectedClipIds, ...ids]))
+      return {
+        selectedClipIds: merged,
+        selectedClipId: merged[merged.length - 1] ?? '',
+        selectedMediaId: null,
+      }
+    }
+    return {
+      selectedClipIds: ids,
+      selectedClipId: ids[0] ?? '',
       selectedMediaId: null,
     }
   }),

@@ -98,6 +98,7 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
   const clearClipSelection = useEditorStore((state) => state.clearClipSelection)
   const deleteSelectedClips = useEditorStore((state) => state.deleteSelectedClips)
   const selectAllClips = useEditorStore((state) => state.selectAllClips)
+  const selectMultipleClips = useEditorStore((state) => state.selectMultipleClips)
 
   const selectedClip = tracks.flatMap((t) => t.clips).find((c) => c.id === selectedClipId)
   const selectedClipTrack = tracks.find((t) => t.clips.some((c) => c.id === selectedClipId))
@@ -507,6 +508,7 @@ export function EditorShell({ onGoHome, onNewProjectRequest }: EditorShellProps 
         setAssistantMode={setAssistantMode}
         toggleAssistant={toggleAssistant}
         selectClip={selectClip}
+        selectMultipleClips={selectMultipleClips}
         clearClipSelection={clearClipSelection}
         deleteSelectedClips={deleteSelectedClips}
         selectAllClips={selectAllClips}

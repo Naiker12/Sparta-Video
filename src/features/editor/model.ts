@@ -120,6 +120,7 @@ export type Clip = {
   title: string
   start: number
   duration: number
+  offset?: number
   color: string
   thumbnail?: string
   sourceAssetId?: string
