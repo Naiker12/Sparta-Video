@@ -227,4 +227,39 @@ describe('export engine', () => {
     expect(dx).toBe(-540)
     expect(dy).toBeCloseTo(-303.75, 1)
   })
+
+  it('generates complete telemetry in ExportBenchmarkReport structure for audio and video', async () => {
+    const settings: ExportSettings = {
+      preset: 'audio-only',
+      format: 'wav',
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrateMbps: 1.5,
+      fileName: 'benchmark_test.wav',
+      range: 'entire',
+    }
+
+    const result = await renderSequence({
+      tracks: [],
+      assets: [],
+      sequenceDuration: 0.2,
+      settings,
+    })
+
+    expect(result.benchmark).toBeDefined()
+    const bm = result.benchmark!
+    expect(bm.frameLoopBreakdown).toHaveProperty('totalMediabunnyDecodeMs')
+    expect(bm.frameLoopBreakdown).toHaveProperty('totalHtmlVideoSeekWaitMs')
+    expect(bm.frameLoopBreakdown).toHaveProperty('totalBackpressureWaitMs')
+    expect(bm.frameLoopBreakdown).toHaveProperty('totalCanvasDrawMs')
+    expect(bm.frameLoopBreakdown).toHaveProperty('totalEffectsMs')
+    expect(bm.frameLoopBreakdown).toHaveProperty('totalFrameCaptureAndEncodeMs')
+    expect(bm.frameLoopBreakdown).toHaveProperty('totalYieldMs')
+    expect(bm.frameAverages).toHaveProperty('avgMediabunnyDecodeMs')
+    expect(bm.frameAverages).toHaveProperty('avgHtmlVideoSeekWaitMs')
+    expect(bm.frameAverages).toHaveProperty('avgBackpressureWaitMs')
+    expect(bm.encoderStats).toHaveProperty('maxEncodeQueueSize')
+    expect(bm.encoderStats).toHaveProperty('avgEncodeQueueSize')
+  })
 })

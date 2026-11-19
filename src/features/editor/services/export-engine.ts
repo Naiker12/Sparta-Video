@@ -1,6 +1,6 @@
 import type { Clip, MediaItem, Track } from '../model'
-import type { ExportPresetId, ExportSettings, RenderProgress, RenderResult } from './contracts'
-import { loadMediaSource } from './media-storage'
+import type { ExportBenchmarkReport, ExportPresetId, ExportSettings, RenderProgress, RenderResult } from './contracts'
+import { loadMediaBlob, loadMediaSource } from './media-storage'
 import { getInterpolatedOpacity, getInterpolatedTransform } from './keyframe-interpolation'
 import { drawAnimatedTextClipToCanvas } from './text-presets'
 import { computeFitRect } from './media-fit'
@@ -15,6 +15,7 @@ import {
 } from '../effects/pixel-effects'
 import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4ArrayBufferTarget } from 'mp4-muxer'
 import { Muxer as WebmMuxer, ArrayBufferTarget as WebmArrayBufferTarget } from 'webm-muxer'
+import { ALL_FORMATS, BlobSource, Input, VideoSample, VideoSampleSink } from 'mediabunny'
 
 export const EXPORT_PRESETS: Record<ExportPresetId, {
   label: string
@@ -270,10 +271,270 @@ function collectTransitionGhostClips(
   return result
 }
 
+/**
+ * Diagnoses hardware acceleration capabilities via WebCodecs isConfigSupported.
+ * Probes prefer-hardware, prefer-software, and no-preference modes.
+ */
+export async function probeWebCodecsAcceleration(
+  codec: string,
+  width: number,
+  height: number,
+  bitrateMbps: number,
+  frameRate: number,
+): Promise<{
+  preferHardwareSupported: boolean
+  preferSoftwareSupported: boolean
+  noPreferenceSupported: boolean
+  supportedConfig?: VideoEncoderConfig
+}> {
+  if (typeof VideoEncoder === 'undefined' || typeof VideoEncoder.isConfigSupported !== 'function') {
+    return {
+      preferHardwareSupported: false,
+      preferSoftwareSupported: false,
+      noPreferenceSupported: false,
+    }
+  }
+
+  const baseConfig: VideoEncoderConfig = {
+    codec,
+    width,
+    height,
+    bitrate: bitrateMbps * 1_000_000,
+    framerate: frameRate,
+  }
+
+  const [hwRes, swRes, noPrefRes] = await Promise.all([
+    VideoEncoder.isConfigSupported({ ...baseConfig, hardwareAcceleration: 'prefer-hardware' }).catch(() => null),
+    VideoEncoder.isConfigSupported({ ...baseConfig, hardwareAcceleration: 'prefer-software' }).catch(() => null),
+    VideoEncoder.isConfigSupported({ ...baseConfig, hardwareAcceleration: 'no-preference' }).catch(() => null),
+  ])
+
+  return {
+    preferHardwareSupported: Boolean(hwRes?.supported),
+    preferSoftwareSupported: Boolean(swRes?.supported),
+    noPreferenceSupported: Boolean(noPrefRes?.supported),
+    supportedConfig: hwRes?.config || noPrefRes?.config || swRes?.config,
+  }
+}
+
+/**
+ * Formats and logs the export benchmark report into the browser/Tauri console
+ * and assigns it to window.__LAST_SPARTA_EXPORT_BENCHMARK__.
+ */
+export function logBenchmarkReport(report: ExportBenchmarkReport): void {
+  const wallSec = (report.wallClockTimeMs / 1000).toFixed(2)
+  const fps = report.effectiveFps.toFixed(1)
+  const frames = report.totalFrames
+
+  console.group(`[SPARTA EXPORT BENCHMARK] Total: ${wallSec}s · ${fps} fps · ${frames} frames (${report.engine.toUpperCase()})`)
+
+  const stagesData = [
+    { 'Macro Etapa': '1. Audio Mixdown', 'Tiempo (ms)': Math.round(report.stages.audioMixdownMs), '% Pared': ((report.stages.audioMixdownMs / Math.max(1, report.wallClockTimeMs)) * 100).toFixed(1) + '%' },
+    { 'Macro Etapa': '2. Asset Preload (DOM/WebCodecs)', 'Tiempo (ms)': Math.round(report.stages.assetPreloadMs), '% Pared': ((report.stages.assetPreloadMs / Math.max(1, report.wallClockTimeMs)) * 100).toFixed(1) + '%' },
+    { 'Macro Etapa': '3. Audio Encoding', 'Tiempo (ms)': Math.round(report.stages.audioEncodeMs), '% Pared': ((report.stages.audioEncodeMs / Math.max(1, report.wallClockTimeMs)) * 100).toFixed(1) + '%' },
+    { 'Macro Etapa': '4. Video Frame Loop', 'Tiempo (ms)': Math.round(report.stages.frameLoopMs), '% Pared': ((report.stages.frameLoopMs / Math.max(1, report.wallClockTimeMs)) * 100).toFixed(1) + '%' },
+    { 'Macro Etapa': '5. Video Flush & Close', 'Tiempo (ms)': Math.round(report.stages.videoFlushMs), '% Pared': ((report.stages.videoFlushMs / Math.max(1, report.wallClockTimeMs)) * 100).toFixed(1) + '%' },
+    { 'Macro Etapa': '6. Muxing & Blob Creation', 'Tiempo (ms)': Math.round(report.stages.muxingAndBlobMs), '% Pared': ((report.stages.muxingAndBlobMs / Math.max(1, report.wallClockTimeMs)) * 100).toFixed(1) + '%' },
+  ]
+  console.table(stagesData)
+
+  const loopTotal = Math.max(1, report.stages.frameLoopMs)
+  const breakdownData = [
+    { 'Operación en Bucle': 'A. Decodificación Mediabunny (WebCodecs)', 'Total (ms)': Math.round(report.frameLoopBreakdown.totalMediabunnyDecodeMs), 'Prom/Frame (ms)': report.frameAverages.avgMediabunnyDecodeMs.toFixed(2), '% Bucle': ((report.frameLoopBreakdown.totalMediabunnyDecodeMs / loopTotal) * 100).toFixed(1) + '%' },
+    { 'Operación en Bucle': 'B. Espera seeked en <video> (Fallback DOM)', 'Total (ms)': Math.round(report.frameLoopBreakdown.totalHtmlVideoSeekWaitMs), 'Prom/Frame (ms)': report.frameAverages.avgHtmlVideoSeekWaitMs.toFixed(2), '% Bucle': ((report.frameLoopBreakdown.totalHtmlVideoSeekWaitMs / loopTotal) * 100).toFixed(1) + '%' },
+    { 'Operación en Bucle': 'C. Contrapresión VideoEncoder (Espera ondequeue)', 'Total (ms)': Math.round(report.frameLoopBreakdown.totalBackpressureWaitMs), 'Prom/Frame (ms)': report.frameAverages.avgBackpressureWaitMs.toFixed(2), '% Bucle': ((report.frameLoopBreakdown.totalBackpressureWaitMs / loopTotal) * 100).toFixed(1) + '%' },
+    { 'Operación en Bucle': 'D. Dibujo Canvas 2D (Base/Texto)', 'Total (ms)': Math.round(report.frameLoopBreakdown.totalCanvasDrawMs), 'Prom/Frame (ms)': report.frameAverages.avgCanvasDrawMs.toFixed(2), '% Bucle': ((report.frameLoopBreakdown.totalCanvasDrawMs / loopTotal) * 100).toFixed(1) + '%' },
+    { 'Operación en Bucle': 'E. Efectos (CPU/ImageData/Canvas)', 'Total (ms)': Math.round(report.frameLoopBreakdown.totalEffectsMs), 'Prom/Frame (ms)': report.frameAverages.avgEffectsMs.toFixed(2), '% Bucle': ((report.frameLoopBreakdown.totalEffectsMs / loopTotal) * 100).toFixed(1) + '%' },
+    { 'Operación en Bucle': 'F. Captura VideoFrame y encode', 'Total (ms)': Math.round(report.frameLoopBreakdown.totalFrameCaptureAndEncodeMs), 'Prom/Frame (ms)': report.frameAverages.avgFrameCaptureAndEncodeMs.toFixed(2), '% Bucle': ((report.frameLoopBreakdown.totalFrameCaptureAndEncodeMs / loopTotal) * 100).toFixed(1) + '%' },
+    { 'Operación en Bucle': 'G. Yield UI Event Loop (setTimeout)', 'Total (ms)': Math.round(report.frameLoopBreakdown.totalYieldMs), 'Prom/Frame (ms)': (report.frameLoopBreakdown.totalYieldMs / Math.max(1, frames)).toFixed(2), '% Bucle': ((report.frameLoopBreakdown.totalYieldMs / loopTotal) * 100).toFixed(1) + '%' },
+    { 'Operación en Bucle': 'H. Overhead bucle/timestamps', 'Total (ms)': Math.round(report.frameLoopBreakdown.otherLoopOverheadMs), 'Prom/Frame (ms)': (report.frameLoopBreakdown.otherLoopOverheadMs / Math.max(1, frames)).toFixed(2), '% Bucle': ((report.frameLoopBreakdown.otherLoopOverheadMs / loopTotal) * 100).toFixed(1) + '%' },
+  ]
+  console.table(breakdownData)
+
+  const wcAssets = report.encoderStats.webcodecsDecodedAssetsCount ?? 0
+  const fbAssets = report.encoderStats.fallbackHtmlAssetsCount ?? 0
+  console.info(`[Encoder Telemetry] Códec: ${report.encoderStats.codec} | HW Solicitado: ${report.encoderStats.requestedHardwareAcceleration} | Max Queue: ${report.encoderStats.maxEncodeQueueSize} | Avg Queue: ${report.encoderStats.avgEncodeQueueSize.toFixed(2)} | Assets WebCodecs: ${wcAssets} | Assets Fallback: ${fbAssets}`)
+  if (report.encoderStats.supportProbe) {
+    console.info(`[HW Acceleration Probe] prefer-hardware soportado: ${report.encoderStats.supportProbe.preferHardwareSupported} | prefer-software soportado: ${report.encoderStats.supportProbe.preferSoftwareSupported} | no-preference soportado: ${report.encoderStats.supportProbe.noPreferenceSupported}`)
+  }
+  console.info('El objeto completo con todas las métricas está disponible en: window.__LAST_SPARTA_EXPORT_BENCHMARK__')
+  console.groupEnd()
+
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __LAST_SPARTA_EXPORT_BENCHMARK__?: ExportBenchmarkReport }).__LAST_SPARTA_EXPORT_BENCHMARK__ = report
+  }
+}
+
+/**
+ * Single-reader sequential decoder for an asset with Mediabunny.
+ * Maintains at most one active decoder iterator and at most one decoded sample in memory.
+ * Completely eliminates the massive RAM leak caused by per-frame decoder recreation.
+ */
+class MediabunnyAssetReader {
+  readonly assetId: string
+  private sink: VideoSampleSink
+  private iterator: AsyncIterator<VideoSample> | null = null
+  private currentSample: VideoSample | null = null
+  private isDisposed = false
+
+  constructor(assetId: string, sink: VideoSampleSink) {
+    this.assetId = assetId
+    this.sink = sink
+  }
+
+  /**
+   * Retrieves the VideoSample for the given timestamp.
+   * - If current sample covers targetTime (freeze frame, slow-mo, or identical timestamp), returns it immediately.
+   * - If targetTime advances forward, advances the sequential iterator without recreating the decoder.
+   * - If targetTime is backward or has a large gap (>2s), closes previous iterator and starts a new sequential stream.
+   */
+  async getSample(targetTime: number): Promise<VideoSample | null> {
+    if (this.isDisposed) return null
+
+    // 1. Frame reuse check (freeze frame, zero velocity, or identical source timestamp)
+    if (this.currentSample) {
+      const start = this.currentSample.timestamp
+      const duration = this.currentSample.duration > 0 ? this.currentSample.duration : 0.033
+      const end = start + duration
+      if (targetTime >= start - 0.001 && targetTime < end - 0.001) {
+        return this.currentSample
+      }
+    }
+
+    // 2. Check if we need to restart the sequential iterator (seek backwards or jump forward > 2.0s)
+    const needsRestart =
+      !this.iterator ||
+      !this.currentSample ||
+      targetTime < this.currentSample.timestamp - 0.001 ||
+      targetTime - (this.currentSample.timestamp + (this.currentSample.duration || 0.033)) > 2.0
+
+    if (needsRestart) {
+      await this.closeIterator()
+      try {
+        this.iterator = this.sink.samples(targetTime)[Symbol.asyncIterator]()
+      } catch (err) {
+        console.warn(`[Mediabunny] Falló al abrir flujo secuencial en ${targetTime}s para el asset ${this.assetId}:`, err)
+        return null
+      }
+    }
+
+    // 3. Advance iterator sequentially
+    while (this.iterator && !this.isDisposed) {
+      let nextResult: IteratorResult<VideoSample>
+      try {
+        nextResult = await this.iterator.next()
+      } catch (err) {
+        console.warn(`[Mediabunny] Error al leer muestra secuencial para el asset ${this.assetId}:`, err)
+        break
+      }
+
+      if (nextResult.done || !nextResult.value) {
+        // End of stream reached; keep last known sample
+        break
+      }
+
+      // Close previous sample immediately to release GPU/VRAM texture
+      if (this.currentSample) {
+        try { this.currentSample.close() } catch { /* ignore */ }
+      }
+      this.currentSample = nextResult.value
+
+      const start = this.currentSample.timestamp
+      const duration = this.currentSample.duration > 0 ? this.currentSample.duration : 0.033
+      const end = start + duration
+
+      if (targetTime < end + 0.001) {
+        return this.currentSample
+      }
+    }
+
+    return this.currentSample
+  }
+
+  async closeIterator(): Promise<void> {
+    if (this.iterator) {
+      const it = this.iterator
+      this.iterator = null
+      try {
+        if (typeof it.return === 'function') {
+          await it.return()
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async dispose(): Promise<void> {
+    this.isDisposed = true
+    await this.closeIterator()
+    if (this.currentSample) {
+      try { this.currentSample.close() } catch { /* ignore */ }
+      this.currentSample = null
+    }
+  }
+}
+
+/**
+ * Asynchronously waits for VideoEncoder to drain its encodeQueueSize below maxQueueSize.
+ * Uses WebCodecs ondequeue callback with AbortSignal check and a safety timeout.
+ */
+function waitForEncoderQueue(
+  encoder: VideoEncoder,
+  maxQueueSize: number,
+  signal?: AbortSignal,
+  timeoutMs = 5000,
+): Promise<void> {
+  if (encoder.encodeQueueSize < maxQueueSize) return Promise.resolve()
+  if (signal?.aborted) return Promise.reject(new Error('Exportación cancelada.'))
+
+  return new Promise<void>((resolve, reject) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const cleanup = () => {
+      settled = true
+      if (timer) clearTimeout(timer)
+      encoder.ondequeue = null
+      signal?.removeEventListener('abort', onAbort)
+    }
+
+    const onAbort = () => {
+      cleanup()
+      reject(new Error('Exportación cancelada.'))
+    }
+
+    const onCheck = () => {
+      if (settled) return
+      if (encoder.state === 'closed') {
+        cleanup()
+        reject(new Error('El codificador de vídeo se cerró inesperadamente.'))
+        return
+      }
+      if (encoder.encodeQueueSize < maxQueueSize) {
+        cleanup()
+        resolve()
+      }
+    }
+
+    encoder.ondequeue = onCheck
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    timer = setTimeout(() => {
+      if (settled) return
+      cleanup()
+      resolve() // Safety fallback: resume if timeout expires to avoid permanent hang
+    }, timeoutMs)
+
+    onCheck()
+  })
+}
+
 async function renderWithWebCodecs({
   canvas,
   ctx,
   visualAssets,
+  videoSampleSinks,
   audioBuffer,
   tracks,
   assets,
@@ -284,10 +545,14 @@ async function renderWithWebCodecs({
   mutedTracks,
   onProgress,
   signal,
+  overallStartTime,
+  audioMixdownMs,
+  assetPreloadMs,
 }: {
   canvas: HTMLCanvasElement
   ctx: CanvasRenderingContext2D
   visualAssets: Map<string, HTMLImageElement | HTMLVideoElement>
+  videoSampleSinks?: Map<string, VideoSampleSink>
   audioBuffer: AudioBuffer | null
   tracks: Track[]
   assets: MediaItem[]
@@ -298,6 +563,9 @@ async function renderWithWebCodecs({
   mutedTracks: string[]
   onProgress?: (progress: RenderProgress) => void
   signal?: AbortSignal
+  overallStartTime?: number
+  audioMixdownMs?: number
+  assetPreloadMs?: number
 }): Promise<RenderResult> {
   const isMp4 = settings.format === 'mp4'
 
@@ -334,6 +602,15 @@ async function renderWithWebCodecs({
     }
   }
 
+  // Sondeo diagnóstico de aceleración por hardware WebCodecs
+  const supportProbe = await probeWebCodecsAcceleration(
+    videoCodec,
+    settings.width,
+    settings.height,
+    settings.bitrateMbps,
+    settings.frameRate,
+  ).catch(() => undefined)
+
   // Verificar soporte de códec de audio
   let canEncodeAudio = false
   let audioCodec = isMp4 ? 'mp4a.40.2' : 'opus'
@@ -362,7 +639,10 @@ async function renderWithWebCodecs({
   const mp4Target = isMp4 ? new Mp4ArrayBufferTarget() : null
   const webmTarget = !isMp4 ? new WebmArrayBufferTarget() : null
 
-  const muxer = isMp4
+  // fastStart: false garantiza escritura incremental directa al ArrayBufferTarget y liberación
+  // inmediata del array de datos del fotograma codificado (sample.data = null), previniendo la retención
+  // duplicada de megabytes en memoria durante toda la exportación.
+  const mp4Muxer = isMp4
     ? new Mp4Muxer({
       target: mp4Target!,
       video: {
@@ -377,9 +657,12 @@ async function renderWithWebCodecs({
           sampleRate: audioBuffer.sampleRate,
         }
         : undefined,
-      fastStart: 'in-memory',
+      fastStart: false,
     })
-    : new WebmMuxer({
+    : null
+
+  const webmMuxer = !isMp4
+    ? new WebmMuxer({
       target: webmTarget!,
       video: {
         codec: videoCodec.startsWith('vp09') ? 'V_VP9' : 'V_VP8',
@@ -395,10 +678,35 @@ async function renderWithWebCodecs({
         }
         : undefined,
     })
+    : null
+
+  let encodingError: Error | null = null
 
   const videoEncoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-    error: (err) => console.error('WebCodecs VideoEncoder Error:', err),
+    output: (chunk, meta) => {
+      try {
+        if (mp4Muxer) {
+          const data = new Uint8Array(chunk.byteLength)
+          chunk.copyTo(data)
+          let duration = chunk.duration
+          if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
+            const frameIndex = Math.round((chunk.timestamp * settings.frameRate) / 1_000_000)
+            const nextTimestamp = Math.round(((frameIndex + 1) * 1_000_000) / settings.frameRate)
+            duration = Math.max(1, nextTimestamp - chunk.timestamp)
+          }
+          mp4Muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, duration, meta)
+        } else if (webmMuxer) {
+          webmMuxer.addVideoChunk(chunk, meta)
+        }
+      } catch (err) {
+        console.error('Error al empaquetar fragmento de vídeo:', err)
+        encodingError = err instanceof Error ? err : new Error(String(err))
+      }
+    },
+    error: (err) => {
+      console.error('WebCodecs VideoEncoder Error:', err)
+      encodingError = err instanceof Error ? err : new Error(String(err))
+    },
   })
 
   videoEncoder.configure({
@@ -410,219 +718,450 @@ async function renderWithWebCodecs({
     hardwareAcceleration: 'prefer-hardware',
   })
 
-  // Codificación ultrarrápida del audio mixdown en memoria
-  if (canEncodeAudio && audioBuffer) {
-    onProgress?.({
-      stage: 'preparing',
-      percent: 12,
-      currentFrame: 0,
-      totalFrames,
-      fps: 0,
-      message: 'Codificando mezcla de audio estéreo...',
-    })
+  // Gestión de lectores secuenciales por clip con ciclo de vida estricto
+  const clipReaders = new Map<string, MediabunnyAssetReader>()
+  const usedWebCodecsAssets = new Set<string>()
+  const usedFallbackAssets = new Set<string>()
 
-    const audioEncoder = new AudioEncoder({
-      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
-      error: (err) => console.error('WebCodecs AudioEncoder Error:', err),
-    })
-    audioEncoder.configure({
-      codec: audioCodec,
-      sampleRate: audioBuffer.sampleRate,
-      numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
-      bitrate: 192_000,
-    })
+  try {
+    // Codificación de audio mixdown con liberación garantizada
+    let audioEncodeMs = 0
+    if (canEncodeAudio && audioBuffer) {
+      onProgress?.({
+        stage: 'preparing',
+        percent: 12,
+        currentFrame: 0,
+        totalFrames,
+        fps: 0,
+        message: 'Codificando mezcla de audio estéreo...',
+      })
 
-    const sampleRate = audioBuffer.sampleRate
-    const numChannels = Math.min(2, audioBuffer.numberOfChannels)
-    const totalSamples = audioBuffer.length
-    const chunkSize = 2048
-    const planar = new Float32Array(chunkSize * numChannels)
+      const tAudioEncStart = performance.now()
+      let audioEncodingError: Error | null = null
+      let audioEncoder: AudioEncoder | null = null
 
-    for (let offset = 0; offset < totalSamples; offset += chunkSize) {
-      const curSize = Math.min(chunkSize, totalSamples - offset)
-      for (let ch = 0; ch < numChannels; ch++) {
-        const chData = audioBuffer.getChannelData(ch)
-        const chOffset = ch * curSize
-        for (let i = 0; i < curSize; i++) {
-          planar[chOffset + i] = chData[offset + i]
+      try {
+        audioEncoder = new AudioEncoder({
+          output: (chunk, meta) => {
+            try {
+              if (mp4Muxer) {
+                const data = new Uint8Array(chunk.byteLength)
+                chunk.copyTo(data)
+                let duration = chunk.duration
+                if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
+                  duration = Math.round((1024 / audioBuffer.sampleRate) * 1_000_000)
+                }
+                mp4Muxer.addAudioChunkRaw(data, chunk.type, chunk.timestamp, duration, meta)
+              } else if (webmMuxer) {
+                webmMuxer.addAudioChunk(chunk, meta)
+              }
+            } catch (err) {
+              console.error('Error al empaquetar fragmento de audio:', err)
+              audioEncodingError = err instanceof Error ? err : new Error(String(err))
+            }
+          },
+          error: (err) => {
+            console.error('WebCodecs AudioEncoder Error:', err)
+            audioEncodingError = err instanceof Error ? err : new Error(String(err))
+          },
+        })
+
+        audioEncoder.configure({
+          codec: audioCodec,
+          sampleRate: audioBuffer.sampleRate,
+          numberOfChannels: Math.min(2, audioBuffer.numberOfChannels),
+          bitrate: 192_000,
+        })
+
+        const sampleRate = audioBuffer.sampleRate
+        const numChannels = Math.min(2, audioBuffer.numberOfChannels)
+        const totalSamples = audioBuffer.length
+        const chunkSize = 2048
+        const planar = new Float32Array(chunkSize * numChannels)
+
+        for (let offset = 0; offset < totalSamples; offset += chunkSize) {
+          if (signal?.aborted) throw new Error('Exportación cancelada.')
+          if (audioEncodingError) throw audioEncodingError
+
+          const curSize = Math.min(chunkSize, totalSamples - offset)
+          for (let ch = 0; ch < numChannels; ch++) {
+            const chData = audioBuffer.getChannelData(ch)
+            const chOffset = ch * curSize
+            for (let i = 0; i < curSize; i++) {
+              planar[chOffset + i] = chData[offset + i]
+            }
+          }
+
+          let audioData: AudioData | null = null
+          try {
+            audioData = new AudioData({
+              format: 'f32-planar',
+              sampleRate,
+              numberOfChannels: numChannels,
+              numberOfFrames: curSize,
+              timestamp: Math.round((offset / sampleRate) * 1_000_000),
+              data: planar.subarray(0, curSize * numChannels),
+            })
+            audioEncoder.encode(audioData)
+          } finally {
+            if (audioData) {
+              try { audioData.close() } catch { /* ignore */ }
+            }
+          }
+        }
+
+        await audioEncoder.flush()
+        if (audioEncodingError) throw audioEncodingError
+      } finally {
+        if (audioEncoder && audioEncoder.state !== 'closed') {
+          try { audioEncoder.close() } catch { /* ignore */ }
         }
       }
-      const audioData = new AudioData({
-        format: 'f32-planar',
-        sampleRate,
-        numberOfChannels: numChannels,
-        numberOfFrames: curSize,
-        timestamp: Math.round((offset / sampleRate) * 1_000_000),
-        data: planar.subarray(0, curSize * numChannels),
-      })
-      audioEncoder.encode(audioData)
-      audioData.close()
+      audioEncodeMs = performance.now() - tAudioEncStart
     }
 
-    await audioEncoder.flush()
-    audioEncoder.close()
-  }
+    const activeVideoTracks = tracks.filter((t) => t.kind === 'video' && !mutedTracks.includes(t.id))
+    const frameInterval = 1 / settings.frameRate
+    const renderStartTime = performance.now()
+    let lastFpsSampleTime = renderStartTime
+    let framesSinceLastSample = 0
+    let measuredFps = settings.frameRate
+    let lastYieldTime = renderStartTime
 
-  const activeVideoTracks = tracks.filter((t) => t.kind === 'video' && !mutedTracks.includes(t.id))
-  const frameInterval = 1 / settings.frameRate
-  const renderStartTime = performance.now()
-  let lastFpsSampleTime = renderStartTime
-  let framesSinceLastSample = 0
-  let measuredFps = settings.frameRate
-  let lastYieldTime = renderStartTime
+    // Métricas separadas de rendimiento por fotograma
+    let totalMediabunnyDecodeMs = 0
+    let totalHtmlVideoSeekWaitMs = 0
+    let totalCanvasDrawMs = 0
+    let totalEffectsMs = 0
+    let totalBackpressureWaitMs = 0
+    let totalFrameCaptureAndEncodeMs = 0
+    let totalYieldMs = 0
+    let maxEncodeQueueSize = 0
+    let sumEncodeQueueSize = 0
+    let queueSamplesCount = 0
 
-  for (let frame = 0; frame < totalFrames; frame++) {
-    if (signal?.aborted) {
-      try { videoEncoder.close() } catch { /* ignore */ }
-      throw new Error('Exportación cancelada.')
-    }
+    // Límite de contrapresión conservador: máximo 4 fotogramas en cola de codificación
+    // (~33 MB en 1080p, evita saturar memoria sin desaprovechar la paralelización de GPU)
+    const MAX_ENCODE_QUEUE_SIZE = 4
 
-    const time = frame * frameInterval
+    const tFrameLoopStart = performance.now()
 
-    // Sincronizar vídeo clips para el cuadro exacto con precisión milimétrica (sin cuadros congelados ni desfasados)
-    const activeClips = activeVideoTracks.flatMap((track) =>
-      track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
-    )
-    const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
+    for (let frame = 0; frame < totalFrames; frame++) {
+      if (signal?.aborted) throw new Error('Exportación cancelada.')
+      if (encodingError) throw encodingError
 
-    for (const [assetId, element] of visualAssets) {
-      if (element instanceof HTMLVideoElement) {
-        const activeClip = mediaClips.find((c) => resolveClipAssetId(c, assets) === assetId)
-        if (activeClip) {
-          const expectedSourceTime = activeClip.freezeTime !== undefined
-            ? activeClip.freezeTime
-            : Math.max(0, (time - activeClip.start) * (activeClip.speed ?? 1.0))
-          if (Math.abs(element.currentTime - expectedSourceTime) >= 0.002) {
-            await new Promise<void>((r) => {
-              let settled = false
-              const onDone = () => {
-                if (settled) return
-                settled = true
-                element.removeEventListener('seeked', onDone)
-                r()
-              }
-              element.addEventListener('seeked', onDone, { once: true })
-              setTimeout(onDone, 400)
-              try {
-                element.currentTime = expectedSourceTime
-              } catch {
-                onDone()
-              }
-            })
+      const time = frame * frameInterval
+
+      const activeClips = activeVideoTracks.flatMap((track) =>
+        track.clips.filter((clip) => time >= clip.start && time < clip.start + clip.duration),
+      )
+      const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
+
+      // 1. Limpieza de lectores secuenciales de clips que ya terminaron su rango temporal
+      for (const [clipId, reader] of clipReaders) {
+        const isStillActive = activeClips.some((c) => c.id === clipId)
+        if (!isStillActive) {
+          void reader.dispose()
+          clipReaders.delete(clipId)
+        }
+      }
+
+      // 2. Sincronización para assets que utilizan fallback por HTMLVideoElement (seek selectivo)
+      const tSeekStart = performance.now()
+      for (const [assetId, element] of visualAssets) {
+        if (element instanceof HTMLVideoElement) {
+          // Si el asset dispone de VideoSampleSink de Mediabunny, se decodifica por WebCodecs
+          if (videoSampleSinks?.has(assetId)) continue
+
+          const activeClip = mediaClips.find((c) => resolveClipAssetId(c, assets) === assetId)
+          if (activeClip) {
+            usedFallbackAssets.add(assetId)
+            const expectedSourceTime = activeClip.freezeTime !== undefined
+              ? activeClip.freezeTime
+              : Math.max(0, (time - activeClip.start) * (activeClip.speed ?? 1.0))
+
+            const diff = Math.abs(element.currentTime - expectedSourceTime)
+            const threshold = activeClip.freezeTime !== undefined ? 0.005 : (0.5 / settings.frameRate)
+            if (diff >= threshold) {
+              await new Promise<void>((r) => {
+                let settled = false
+                const onDone = () => {
+                  if (settled) return
+                  settled = true
+                  element.removeEventListener('seeked', onDone)
+                  r()
+                }
+                element.addEventListener('seeked', onDone, { once: true })
+                setTimeout(onDone, 300)
+                try {
+                  element.currentTime = expectedSourceTime
+                } catch {
+                  onDone()
+                }
+              })
+            }
           }
         }
       }
-    }
+      totalHtmlVideoSeekWaitMs += performance.now() - tSeekStart
 
-    ctx.fillStyle = '#000000'
-    ctx.fillRect(0, 0, settings.width, settings.height)
-
-    // Pipeline estándar NLE (estilo CapCut / Premiere):
-    // 1. Clips visuales de fondo (vídeos e imágenes) ordenados de pista inferior a superior
-    // 2. Capas de ajuste y efectos de corrección global
-    // 3. Títulos y subtítulos dinámicos en la capa superior (NUNCA tapados por el vídeo)
-    const activeClipsWithTrack = activeVideoTracks.flatMap((track) =>
-      track.clips
-        .filter((clip) => time >= clip.start && time < clip.start + clip.duration)
-        .map((clip) => ({ clip, track })),
-    )
-
-    const baseVisualClips = activeClipsWithTrack.filter(
-      ({ clip }) => clip.kind !== 'adjustment' && clip.text === undefined && clip.thumbnail !== 'text-overlay',
-    )
-    const adjustmentClips = activeClipsWithTrack.filter(
-      ({ clip }) => clip.kind === 'adjustment',
-    )
-    const textAndSubtitleClips = activeClipsWithTrack.filter(
-      ({ clip }) => clip.text !== undefined || clip.thumbnail === 'text-overlay',
-    )
-
-    const orderedClips = [
-      ...baseVisualClips.map((c) => c.clip),
-      ...adjustmentClips.map((c) => c.clip),
-      ...textAndSubtitleClips.map((c) => c.clip),
-    ]
-
-    // Draw ghost clips first (previous clips held at their last frame during transitionIn)
-    for (const { clip: ghostClip, drawTime } of collectTransitionGhostClips(activeVideoTracks, time, frameInterval)) {
-      const aId = resolveClipAssetId(ghostClip, assets)
-      drawClipToCanvas(ctx, ghostClip, aId ? visualAssets.get(aId) : undefined, drawTime, settings.width, settings.height, sequenceSize)
-    }
-
-    for (const clip of orderedClips) {
-      const aId = resolveClipAssetId(clip, assets)
-      drawClipToCanvas(
-        ctx,
-        clip,
-        aId ? visualAssets.get(aId) : undefined,
-        time,
-        settings.width,
-        settings.height,
-        sequenceSize,
+      // 3. Preparación y ordenamiento de clips (Capas visuales base -> Ajuste -> Subtítulos y texto)
+      const activeClipsWithTrack = activeVideoTracks.flatMap((track) =>
+        track.clips
+          .filter((clip) => time >= clip.start && time < clip.start + clip.duration)
+          .map((clip) => ({ clip, track })),
       )
+
+      const baseVisualClips = activeClipsWithTrack.filter(
+        ({ clip }) => clip.kind !== 'adjustment' && clip.text === undefined && clip.thumbnail !== 'text-overlay',
+      )
+      const adjustmentClips = activeClipsWithTrack.filter(
+        ({ clip }) => clip.kind === 'adjustment',
+      )
+      const textAndSubtitleClips = activeClipsWithTrack.filter(
+        ({ clip }) => clip.text !== undefined || clip.thumbnail === 'text-overlay',
+      )
+
+      const orderedClips = [
+        ...baseVisualClips.map((c) => c.clip),
+        ...adjustmentClips.map((c) => c.clip),
+        ...textAndSubtitleClips.map((c) => c.clip),
+      ]
+
+      // 4. Obtención de fotogramas decodificados vía MediabunnyAssetReader con medición exacta y reutilización
+      const getDrawableForClip = async (
+        clip: Clip,
+        clipTime: number,
+      ): Promise<CanvasImageSource | HTMLImageElement | HTMLVideoElement | undefined> => {
+        const aId = resolveClipAssetId(clip, assets)
+        if (!aId) return undefined
+
+        const sink = videoSampleSinks?.get(aId)
+        if (sink) {
+          let reader = clipReaders.get(clip.id)
+          if (!reader) {
+            reader = new MediabunnyAssetReader(aId, sink)
+            clipReaders.set(clip.id, reader)
+          }
+
+          const tDecStart = performance.now()
+          try {
+            const expectedSourceTime = clip.freezeTime !== undefined
+              ? clip.freezeTime
+              : Math.max(0, (clipTime - clip.start) * (clip.speed ?? 1.0))
+            const sample = await reader.getSample(expectedSourceTime)
+            totalMediabunnyDecodeMs += performance.now() - tDecStart
+            if (sample) {
+              usedWebCodecsAssets.add(aId)
+              return sample.toCanvasImageSource()
+            }
+          } catch (e) {
+            totalMediabunnyDecodeMs += performance.now() - tDecStart
+            console.warn(`[WebCodecs] Falló decodificación de muestra para clip ${clip.id} en ${clipTime}s:`, e)
+          }
+        }
+
+        usedFallbackAssets.add(aId)
+        return visualAssets.get(aId)
+      }
+
+      // 5. Dibujo en Canvas 2D
+      const tDrawStart = performance.now()
+      const drawMetrics = { effectsTimeMs: 0 }
+
+      ctx.fillStyle = '#000000'
+      ctx.fillRect(0, 0, settings.width, settings.height)
+
+      // Dibujar ghost clips de transiciones (retenidos en su último fotograma durante transitionIn)
+      for (const { clip: ghostClip, drawTime } of collectTransitionGhostClips(activeVideoTracks, time, frameInterval)) {
+        const drawable = await getDrawableForClip(ghostClip, drawTime)
+        drawClipToCanvas(ctx, ghostClip, drawable, drawTime, settings.width, settings.height, sequenceSize, drawMetrics)
+      }
+
+      for (const clip of orderedClips) {
+        const drawable = await getDrawableForClip(clip, time)
+        drawClipToCanvas(ctx, clip, drawable, time, settings.width, settings.height, sequenceSize, drawMetrics)
+      }
+
+      const drawDuration = performance.now() - tDrawStart
+      totalEffectsMs += drawMetrics.effectsTimeMs
+      totalCanvasDrawMs += Math.max(0, drawDuration - drawMetrics.effectsTimeMs)
+
+      // 6. Contrapresión en VideoEncoder: si la cola alcanza el límite, pausar hasta que ondequeue la reduzca
+      if (videoEncoder.encodeQueueSize >= MAX_ENCODE_QUEUE_SIZE) {
+        const tWaitStart = performance.now()
+        await waitForEncoderQueue(videoEncoder, MAX_ENCODE_QUEUE_SIZE, signal)
+        totalBackpressureWaitMs += performance.now() - tWaitStart
+      }
+
+      // 7. Captura de Canvas a VideoFrame y codificación con cierre garantizado
+      const tCaptureStart = performance.now()
+      const timestampMicros = Math.round((frame * 1_000_000) / settings.frameRate)
+      const nextTimestampMicros = Math.round(((frame + 1) * 1_000_000) / settings.frameRate)
+      const frameDurationMicros = Math.max(1, nextTimestampMicros - timestampMicros)
+
+      let videoFrame: VideoFrame | null = null
+      try {
+        videoFrame = new VideoFrame(canvas, {
+          timestamp: timestampMicros,
+          duration: frameDurationMicros,
+        })
+        const isKeyFrame = frame % (settings.frameRate * 2) === 0
+        videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame })
+      } finally {
+        if (videoFrame) {
+          try { videoFrame.close() } catch { /* ignore */ }
+        }
+      }
+      totalFrameCaptureAndEncodeMs += performance.now() - tCaptureStart
+
+      const qSize = videoEncoder.encodeQueueSize
+      if (qSize > maxEncodeQueueSize) maxEncodeQueueSize = qSize
+      sumEncodeQueueSize += qSize
+      queueSamplesCount++
+
+      framesSinceLastSample++
+      const now = performance.now()
+      if (now - lastFpsSampleTime >= 400 && framesSinceLastSample > 0) {
+        measuredFps = Math.round((framesSinceLastSample / ((now - lastFpsSampleTime) / 1000)) * 10) / 10
+        lastFpsSampleTime = now
+        framesSinceLastSample = 0
+      }
+
+      if (now - lastYieldTime >= 100 || frame === totalFrames - 1) {
+        lastYieldTime = now
+        const percent = Math.min(98, Math.round((frame / totalFrames) * 85) + 12)
+        onProgress?.({
+          stage: 'rendering',
+          percent,
+          currentFrame: frame + 1,
+          totalFrames,
+          fps: measuredFps,
+          message: `Renderizado acelerado (${measuredFps} fps) · Cuadro ${frame + 1} de ${totalFrames}`,
+        })
+        const tYieldStart = performance.now()
+        await new Promise((r) => setTimeout(r, 0))
+        totalYieldMs += performance.now() - tYieldStart
+      }
     }
 
-    const timestampMicros = Math.round(time * 1_000_000)
-    const videoFrame = new VideoFrame(canvas, { timestamp: timestampMicros })
-    const isKeyFrame = frame % (settings.frameRate * 2) === 0
-    videoEncoder.encode(videoFrame, { keyFrame: isKeyFrame })
-    videoFrame.close()
+    const frameLoopMs = performance.now() - tFrameLoopStart
+    const totalAccountedMs =
+      totalMediabunnyDecodeMs +
+      totalHtmlVideoSeekWaitMs +
+      totalCanvasDrawMs +
+      totalEffectsMs +
+      totalBackpressureWaitMs +
+      totalFrameCaptureAndEncodeMs +
+      totalYieldMs
+    const otherLoopOverheadMs = Math.max(0, frameLoopMs - totalAccountedMs)
 
-    framesSinceLastSample++
-    const now = performance.now()
-    if (now - lastFpsSampleTime >= 400 && framesSinceLastSample > 0) {
-      measuredFps = Math.round((framesSinceLastSample / ((now - lastFpsSampleTime) / 1000)) * 10) / 10
-      lastFpsSampleTime = now
-      framesSinceLastSample = 0
+    onProgress?.({
+      stage: 'encoding',
+      percent: 99,
+      currentFrame: totalFrames,
+      totalFrames,
+      fps: measuredFps,
+      message: 'Finalizando empaquetado de vídeo acelerado...',
+    })
+
+    if (encodingError) throw encodingError
+
+    const tFlushStart = performance.now()
+    await videoEncoder.flush()
+    if (encodingError) throw encodingError
+    const videoFlushMs = performance.now() - tFlushStart
+
+    const tMuxStart = performance.now()
+    if (mp4Muxer) {
+      mp4Muxer.finalize()
+    } else if (webmMuxer) {
+      webmMuxer.finalize()
     }
 
-    if (now - lastYieldTime > 60 || frame === totalFrames - 1) {
-      lastYieldTime = now
-      const percent = Math.min(98, Math.round((frame / totalFrames) * 85) + 12)
-      onProgress?.({
-        stage: 'rendering',
-        percent,
-        currentFrame: frame + 1,
-        totalFrames,
-        fps: measuredFps,
-        message: `Renderizado acelerado (${measuredFps} fps) · Cuadro ${frame + 1} de ${totalFrames}`,
-      })
-      await new Promise((r) => setTimeout(r, 0))
+    const rawBuffer = isMp4 ? mp4Target!.buffer : webmTarget!.buffer
+    const finalBlob = new Blob([rawBuffer], {
+      type: isMp4 ? 'video/mp4' : 'video/webm',
+    })
+    const muxingAndBlobMs = performance.now() - tMuxStart
+
+    const totalWallClockMs = performance.now() - (overallStartTime ?? (renderStartTime - (audioMixdownMs ?? 0) - (assetPreloadMs ?? 0)))
+    const effectiveFps = totalWallClockMs > 0 ? (totalFrames / (totalWallClockMs / 1000)) : 0
+
+    const benchmark: ExportBenchmarkReport = {
+      wallClockTimeMs: totalWallClockMs,
+      totalFrames,
+      effectiveFps,
+      engine: 'webcodecs',
+      stages: {
+        audioMixdownMs: audioMixdownMs ?? 0,
+        audioEncodeMs,
+        assetPreloadMs: assetPreloadMs ?? 0,
+        frameLoopMs,
+        videoFlushMs,
+        muxingAndBlobMs,
+      },
+      frameLoopBreakdown: {
+        totalMediabunnyDecodeMs,
+        totalHtmlVideoSeekWaitMs,
+        totalCanvasDrawMs,
+        totalEffectsMs,
+        totalBackpressureWaitMs,
+        totalFrameCaptureAndEncodeMs,
+        totalYieldMs,
+        otherLoopOverheadMs,
+        totalSeekWaitMs: totalHtmlVideoSeekWaitMs,
+      },
+      frameAverages: {
+        avgFrameTotalMs: totalFrames > 0 ? frameLoopMs / totalFrames : 0,
+        avgMediabunnyDecodeMs: totalFrames > 0 ? totalMediabunnyDecodeMs / totalFrames : 0,
+        avgHtmlVideoSeekWaitMs: totalFrames > 0 ? totalHtmlVideoSeekWaitMs / totalFrames : 0,
+        avgCanvasDrawMs: totalFrames > 0 ? totalCanvasDrawMs / totalFrames : 0,
+        avgEffectsMs: totalFrames > 0 ? totalEffectsMs / totalFrames : 0,
+        avgBackpressureWaitMs: totalFrames > 0 ? totalBackpressureWaitMs / totalFrames : 0,
+        avgFrameCaptureAndEncodeMs: totalFrames > 0 ? totalFrameCaptureAndEncodeMs / totalFrames : 0,
+        avgSeekWaitMs: totalFrames > 0 ? totalHtmlVideoSeekWaitMs / totalFrames : 0,
+      },
+      encoderStats: {
+        maxEncodeQueueSize,
+        avgEncodeQueueSize: queueSamplesCount > 0 ? sumEncodeQueueSize / queueSamplesCount : 0,
+        samplesCount: queueSamplesCount,
+        codec: videoCodec,
+        requestedHardwareAcceleration: 'prefer-hardware',
+        webcodecsDecodedAssetsCount: usedWebCodecsAssets.size,
+        fallbackHtmlAssetsCount: usedFallbackAssets.size,
+        supportProbe,
+      },
     }
-  }
 
-  onProgress?.({
-    stage: 'encoding',
-    percent: 99,
-    currentFrame: totalFrames,
-    totalFrames,
-    fps: measuredFps,
-    message: 'Finalizando empaquetado de vídeo acelerado...',
-  })
+    logBenchmarkReport(benchmark)
 
-  await videoEncoder.flush()
-  videoEncoder.close()
-  muxer.finalize()
+    onProgress?.({
+      stage: 'completed',
+      percent: 100,
+      currentFrame: totalFrames,
+      totalFrames,
+      fps: measuredFps,
+      message: 'Exportación completada a máxima velocidad.',
+    })
 
-  const rawBuffer = isMp4 ? mp4Target!.buffer : webmTarget!.buffer
-  const finalBlob = new Blob([rawBuffer], {
-    type: isMp4 ? 'video/mp4' : 'video/webm',
-  })
+    return {
+      blob: finalBlob,
+      fileName: settings.fileName,
+      durationSeconds: duration,
+      sizeBytes: finalBlob.size,
+      benchmark,
+    }
+  } finally {
+    // Liberación estricta de todos los lectores secuenciales y decodificadores activos
+    for (const reader of clipReaders.values()) {
+      try { await reader.dispose() } catch { /* ignore */ }
+    }
+    clipReaders.clear()
 
-  onProgress?.({
-    stage: 'completed',
-    percent: 100,
-    currentFrame: totalFrames,
-    totalFrames,
-    fps: measuredFps,
-    message: 'Exportación completada a máxima velocidad.',
-  })
-
-  return {
-    blob: finalBlob,
-    fileName: settings.fileName,
-    durationSeconds: duration,
-    sizeBytes: finalBlob.size,
+    if (videoEncoder.state !== 'closed') {
+      try { videoEncoder.close() } catch { /* ignore */ }
+    }
   }
 }
 
@@ -639,6 +1178,7 @@ export async function renderSequence({
   onProgress,
   signal,
 }: RenderSequenceParams): Promise<RenderResult> {
+  const overallStartTime = performance.now()
   const duration = Math.max(0.1, sequenceDuration)
   const totalFrames = Math.max(1, Math.ceil(duration * settings.frameRate))
 
@@ -674,12 +1214,58 @@ export async function renderSequence({
       }
     }
 
+    const totalWallClockMs = performance.now() - overallStartTime
+    const benchmark: ExportBenchmarkReport = {
+      wallClockTimeMs: totalWallClockMs,
+      totalFrames: 0,
+      effectiveFps: 0,
+      engine: 'audio-only',
+      stages: {
+        audioMixdownMs: totalWallClockMs,
+        audioEncodeMs: 0,
+        assetPreloadMs: 0,
+        frameLoopMs: 0,
+        videoFlushMs: 0,
+        muxingAndBlobMs: 0,
+      },
+      frameLoopBreakdown: {
+        totalMediabunnyDecodeMs: 0,
+        totalHtmlVideoSeekWaitMs: 0,
+        totalCanvasDrawMs: 0,
+        totalEffectsMs: 0,
+        totalBackpressureWaitMs: 0,
+        totalFrameCaptureAndEncodeMs: 0,
+        totalYieldMs: 0,
+        otherLoopOverheadMs: 0,
+        totalSeekWaitMs: 0,
+      },
+      frameAverages: {
+        avgFrameTotalMs: 0,
+        avgMediabunnyDecodeMs: 0,
+        avgHtmlVideoSeekWaitMs: 0,
+        avgCanvasDrawMs: 0,
+        avgEffectsMs: 0,
+        avgBackpressureWaitMs: 0,
+        avgFrameCaptureAndEncodeMs: 0,
+        avgSeekWaitMs: 0,
+      },
+      encoderStats: {
+        maxEncodeQueueSize: 0,
+        avgEncodeQueueSize: 0,
+        samplesCount: 0,
+        codec: 'pcm-16bit-wav',
+        requestedHardwareAcceleration: 'none',
+      },
+    }
+    logBenchmarkReport(benchmark)
+
     onProgress?.({ stage: 'completed', percent: 100, currentFrame: totalFrames, totalFrames, message: 'Mezcla completada con éxito.' })
     return {
       blob,
       fileName: settings.fileName.endsWith('.wav') ? settings.fileName : `${settings.fileName}.wav`,
       durationSeconds: duration,
       sizeBytes: blob.size,
+      benchmark,
     }
   }
 
@@ -692,11 +1278,14 @@ export async function renderSequence({
 
   // Pre-render audio track if present
   onProgress?.({ stage: 'preparing', percent: 5, currentFrame: 0, totalFrames, message: 'Procesando mezcla de audio del proyecto...' })
+  const tAudioMixStart = performance.now()
   const audioBuffer = await renderAudioMixdown(tracks, assets, duration, mutedTracks)
+  const audioMixdownMs = performance.now() - tAudioMixStart
   if (signal?.aborted) throw new Error('Exportación cancelada.')
 
   // Pre-load visual assets into DOM-attached elements for reliable hardware decoding
   onProgress?.({ stage: 'preparing', percent: 10, currentFrame: 0, totalFrames, message: 'Preparando medios de vídeo e imagen...' })
+  const tPreloadStart = performance.now()
   const hiddenContainer = typeof document !== 'undefined' ? document.createElement('div') : null
   if (hiddenContainer) {
     hiddenContainer.setAttribute('aria-hidden', 'true')
@@ -707,16 +1296,21 @@ export async function renderSequence({
   }
 
   const visualAssets = new Map<string, HTMLImageElement | HTMLVideoElement>()
-  const videoClips = tracks.filter((t) => t.kind === 'video').flatMap((t) => t.clips)
+  const videoSampleSinks = new Map<string, VideoSampleSink>()
+  const videoInputs: Input[] = []
+  let audioCtx: AudioContext | undefined
+
+  try {
+    const videoClips = tracks.filter((t) => t.kind === 'video').flatMap((t) => t.clips)
   for (const clip of videoClips) {
     if (clip.text !== undefined || clip.thumbnail === 'text-overlay') continue
     const assetId = resolveClipAssetId(clip, assets)
-    if (!assetId || visualAssets.has(assetId)) continue
+    if (!assetId || visualAssets.has(assetId) || videoSampleSinks.has(assetId)) continue
     const asset = assets.find((a) => a.id === assetId)
-    const url = await loadMediaSource(assetId)
-    if (!url) continue
 
     if (asset?.type === 'image' || clip.thumbnail === 'image-catalog') {
+      const url = await loadMediaSource(assetId)
+      if (!url) continue
       const img = new Image()
       img.src = url
       await new Promise<void>((res) => {
@@ -727,39 +1321,67 @@ export async function renderSequence({
       })
       visualAssets.set(assetId, img)
     } else {
-      const vid = document.createElement('video')
-      vid.preload = 'auto'
-      vid.muted = true
-      vid.playsInline = true
-      vid.style.cssText = 'width:100%;height:100%;object-fit:contain;'
-      vid.src = url
-      if (hiddenContainer) hiddenContainer.appendChild(vid)
-      await new Promise<void>((res) => {
-        if (vid.readyState >= 2) { res(); return }
-        const done = () => {
-          vid.removeEventListener('loadeddata', done)
-          vid.removeEventListener('canplay', done)
-          vid.removeEventListener('error', done)
-          res()
+      // 1. Intentar decodificación acelerada por hardware con WebCodecs vía mediabunny
+      let webCodecsReady = false
+      if (typeof VideoDecoder !== 'undefined') {
+        try {
+          const blob = await loadMediaBlob(assetId)
+          if (blob) {
+            const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS })
+            if (await input.canRead()) {
+              const track = await input.getPrimaryVideoTrack()
+              if (track && (await track.canDecode())) {
+                const sink = new VideoSampleSink(track, { hardwareAcceleration: 'prefer-hardware' })
+                videoSampleSinks.set(assetId, sink)
+                videoInputs.push(input)
+                webCodecsReady = true
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`[WebCodecs Preload] Fallback a HTMLVideoElement para el asset ${assetId}:`, e)
         }
-        vid.addEventListener('loadeddata', done, { once: true })
-        vid.addEventListener('canplay', done, { once: true })
-        vid.addEventListener('error', done, { once: true })
-        setTimeout(done, 3000)
-        try { vid.load() } catch { /* ignore */ }
-      })
-      await new Promise<void>((res) => {
-        const onSeeked = () => {
-          vid.removeEventListener('seeked', onSeeked)
-          res()
-        }
-        vid.addEventListener('seeked', onSeeked, { once: true })
-        setTimeout(onSeeked, 300)
-        try { vid.currentTime = 0 } catch { res() }
-      })
-      visualAssets.set(assetId, vid)
+      }
+
+      // 2. Si no es compatible o falló, crear HTMLVideoElement como fallback seguro
+      if (!webCodecsReady) {
+        const url = await loadMediaSource(assetId)
+        if (!url) continue
+        const vid = document.createElement('video')
+        vid.preload = 'auto'
+        vid.muted = true
+        vid.playsInline = true
+        vid.style.cssText = 'width:100%;height:100%;object-fit:contain;'
+        vid.src = url
+        if (hiddenContainer) hiddenContainer.appendChild(vid)
+        await new Promise<void>((res) => {
+          if (vid.readyState >= 2) { res(); return }
+          const done = () => {
+            vid.removeEventListener('loadeddata', done)
+            vid.removeEventListener('canplay', done)
+            vid.removeEventListener('error', done)
+            res()
+          }
+          vid.addEventListener('loadeddata', done, { once: true })
+          vid.addEventListener('canplay', done, { once: true })
+          vid.addEventListener('error', done, { once: true })
+          setTimeout(done, 3000)
+          try { vid.load() } catch { /* ignore */ }
+        })
+        await new Promise<void>((res) => {
+          const onSeeked = () => {
+            vid.removeEventListener('seeked', onSeeked)
+            res()
+          }
+          vid.addEventListener('seeked', onSeeked, { once: true })
+          setTimeout(onSeeked, 300)
+          try { vid.currentTime = 0 } catch { res() }
+        })
+        visualAssets.set(assetId, vid)
+      }
     }
   }
+  const assetPreloadMs = performance.now() - tPreloadStart
 
   // 1. Intentar renderizado acelerado por hardware con WebCodecs (ultrarrápido)
   const canUseWebCodecs =
@@ -774,6 +1396,7 @@ export async function renderSequence({
         canvas,
         ctx,
         visualAssets,
+        videoSampleSinks,
         audioBuffer,
         tracks,
         assets,
@@ -784,10 +1407,32 @@ export async function renderSequence({
         mutedTracks,
         onProgress,
         signal,
+        overallStartTime,
+        audioMixdownMs,
+        assetPreloadMs,
       })
     } catch (err) {
-      if (signal?.aborted) throw err
+      const isCancellation =
+        signal?.aborted ||
+        (err instanceof Error && /cancelada|aborted/i.test(err.message))
+      if (isCancellation) throw err
       console.warn('WebCodecs rendering failed, falling back to MediaRecorder:', err)
+      // Asegurar que visualAssets contenga elementos HTMLVideoElement para el fallback de MediaRecorder
+      for (const clip of videoClips) {
+        const assetId = resolveClipAssetId(clip, assets)
+        if (assetId && !visualAssets.has(assetId)) {
+          const url = await loadMediaSource(assetId)
+          if (url) {
+            const vid = document.createElement('video')
+            vid.preload = 'auto'
+            vid.muted = true
+            vid.playsInline = true
+            vid.src = url
+            if (hiddenContainer) hiddenContainer.appendChild(vid)
+            visualAssets.set(assetId, vid)
+          }
+        }
+      }
     }
   }
 
@@ -839,7 +1484,6 @@ export async function renderSequence({
   const canvasStream = canvas.captureStream(settings.frameRate)
   let combinedStream = canvasStream
 
-  let audioCtx: AudioContext | undefined
   let sourceNode: AudioBufferSourceNode | undefined
 
   // Add audio track to stream if available
@@ -896,10 +1540,15 @@ export async function renderSequence({
   let framesSinceLastSample = 0
   let measuredFps = settings.frameRate
 
+  // Telemetría acumulada para MediaRecorder
+  let totalSeekWaitMs = 0
+  let totalCanvasDrawMs = 0
+  let totalEffectsMs = 0
+  let totalYieldMs = 0
+
   const canvasTrack = canvasStream.getVideoTracks()[0] as unknown as { requestFrame?: () => void }
 
-  try {
-    for (let frame = 0; frame < totalFrames; frame++) {
+  for (let frame = 0; frame < totalFrames; frame++) {
       if (signal?.aborted) {
         try { recorder.stop() } catch { /* ignore */ }
         throw new Error('Exportación cancelada.')
@@ -918,6 +1567,7 @@ export async function renderSequence({
       const mediaClips = activeClips.filter((clip) => clip.text === undefined && clip.thumbnail !== 'text-overlay')
 
       // Synchronize video element playback/position for media clips
+      const tSeekStart = performance.now()
       for (const [assetId, element] of visualAssets) {
         if (element instanceof HTMLVideoElement) {
           const activeClip = mediaClips.find((c) => resolveClipAssetId(c, assets) === assetId)
@@ -959,6 +1609,7 @@ export async function renderSequence({
           }
         }
       }
+      totalSeekWaitMs += performance.now() - tSeekStart
 
       // Pipeline estándar NLE: Base visual -> Capas de ajuste -> Subtítulos y texto en la capa superior
       const activeClipsWithTrack = activeVideoTracks.flatMap((track) =>
@@ -983,10 +1634,13 @@ export async function renderSequence({
         ...textAndSubtitleClips.map((c) => c.clip),
       ]
 
+      const tDrawStart = performance.now()
+      const drawMetrics = { effectsTimeMs: 0 }
+
       // Draw ghost clips first (previous clips held at their last frame during transitionIn)
       for (const { clip: ghostClip, drawTime } of collectTransitionGhostClips(activeVideoTracks, time, frameInterval)) {
         const aId = resolveClipAssetId(ghostClip, assets)
-        drawClipToCanvas(ctx, ghostClip, aId ? visualAssets.get(aId) : undefined, drawTime, settings.width, settings.height, sequenceSize)
+        drawClipToCanvas(ctx, ghostClip, aId ? visualAssets.get(aId) : undefined, drawTime, settings.width, settings.height, sequenceSize, drawMetrics)
       }
 
       for (const clip of orderedClips) {
@@ -999,8 +1653,13 @@ export async function renderSequence({
           settings.width,
           settings.height,
           sequenceSize,
+          drawMetrics,
         )
       }
+
+      const drawTimeTotal = performance.now() - tDrawStart
+      totalEffectsMs += drawMetrics.effectsTimeMs
+      totalCanvasDrawMs += Math.max(0, drawTimeTotal - drawMetrics.effectsTimeMs)
 
       // Force canvas capture frame if API is available
       if (typeof canvasTrack?.requestFrame === 'function') {
@@ -1031,6 +1690,7 @@ export async function renderSequence({
       })
 
       // Drift-free real-time pacing synchronized with wall clock, video playback and audio stream
+      const tYieldStart = performance.now()
       if (!audioBuffer) {
         await new Promise((r) => setTimeout(r, 0))
       } else {
@@ -1042,6 +1702,7 @@ export async function renderSequence({
           await new Promise((r) => setTimeout(r, 0))
         }
       }
+      totalYieldMs += performance.now() - tYieldStart
     }
 
     onProgress?.({ stage: 'encoding', percent: 99, currentFrame: totalFrames, totalFrames, message: 'Finalizando codificación de vídeo...' })
@@ -1052,11 +1713,62 @@ export async function renderSequence({
     const finalBlob = await completionPromise
     onProgress?.({ stage: 'completed', percent: 100, currentFrame: totalFrames, totalFrames, message: 'Exportación completada con éxito.' })
 
+    const totalWallClockMs = performance.now() - overallStartTime
+    const effectiveFps = totalWallClockMs > 0 ? totalFrames / (totalWallClockMs / 1000) : 0
+    const frameLoopMs = performance.now() - renderStartTime
+
+    const benchmark: ExportBenchmarkReport = {
+      wallClockTimeMs: totalWallClockMs,
+      totalFrames,
+      effectiveFps,
+      engine: 'mediarecorder',
+      stages: {
+        audioMixdownMs,
+        audioEncodeMs: 0,
+        assetPreloadMs,
+        frameLoopMs,
+        videoFlushMs: 0,
+        muxingAndBlobMs: 0,
+      },
+      frameLoopBreakdown: {
+        totalMediabunnyDecodeMs: 0,
+        totalHtmlVideoSeekWaitMs: totalSeekWaitMs,
+        totalCanvasDrawMs,
+        totalEffectsMs,
+        totalBackpressureWaitMs: 0,
+        totalFrameCaptureAndEncodeMs: 0,
+        totalYieldMs,
+        otherLoopOverheadMs: Math.max(0, frameLoopMs - (totalSeekWaitMs + totalCanvasDrawMs + totalEffectsMs + totalYieldMs)),
+        totalSeekWaitMs,
+      },
+      frameAverages: {
+        avgFrameTotalMs: totalFrames > 0 ? frameLoopMs / totalFrames : 0,
+        avgMediabunnyDecodeMs: 0,
+        avgHtmlVideoSeekWaitMs: totalFrames > 0 ? totalSeekWaitMs / totalFrames : 0,
+        avgCanvasDrawMs: totalFrames > 0 ? totalCanvasDrawMs / totalFrames : 0,
+        avgEffectsMs: totalFrames > 0 ? totalEffectsMs / totalFrames : 0,
+        avgBackpressureWaitMs: 0,
+        avgFrameCaptureAndEncodeMs: 0,
+        avgSeekWaitMs: totalFrames > 0 ? totalSeekWaitMs / totalFrames : 0,
+      },
+      encoderStats: {
+        maxEncodeQueueSize: 0,
+        avgEncodeQueueSize: 0,
+        samplesCount: 0,
+        codec: mimeType || 'mediarecorder-default',
+        requestedHardwareAcceleration: 'browser-controlled',
+        webcodecsDecodedAssetsCount: 0,
+        fallbackHtmlAssetsCount: visualAssets.size,
+      },
+    }
+    logBenchmarkReport(benchmark)
+
     return {
       blob: finalBlob,
       fileName: settings.fileName,
       durationSeconds: duration,
       sizeBytes: finalBlob.size,
+      benchmark,
     }
   } finally {
     try {
@@ -1068,6 +1780,9 @@ export async function renderSequence({
         }
       }
       if (hiddenContainer) hiddenContainer.remove()
+      for (const input of videoInputs) {
+        try { input.dispose() } catch { /* ignore */ }
+      }
       if (audioCtx && audioCtx.state !== 'closed') {
         void audioCtx.close().catch(() => { })
       }
@@ -1078,11 +1793,12 @@ export async function renderSequence({
 export function drawClipToCanvas(
   ctx: CanvasRenderingContext2D,
   clip: Clip,
-  element: HTMLImageElement | HTMLVideoElement | undefined,
+  element: HTMLImageElement | HTMLVideoElement | CanvasImageSource | undefined,
   time: number,
   canvasWidth: number,
   canvasHeight: number,
   sequenceSize?: { width: number; height: number } | number,
+  metrics?: { effectsTimeMs: number },
 ) {
   const resolvedSeqW =
     typeof sequenceSize === 'number'
@@ -1101,7 +1817,11 @@ export function drawClipToCanvas(
   }
 
   if (clip.kind === 'adjustment') {
+    const tFxStart = performance.now()
     applyEffectsToCanvas(ctx, canvasWidth, canvasHeight, clip.effects)
+    if (metrics) {
+      metrics.effectsTimeMs += performance.now() - tFxStart
+    }
     return
   }
 
@@ -1155,6 +1875,15 @@ export function drawClipToCanvas(
   } else if (element instanceof HTMLVideoElement && element.readyState >= 1 && element.videoWidth > 0) {
     srcW = element.videoWidth
     srcH = element.videoHeight
+  } else if (typeof VideoFrame !== 'undefined' && element instanceof VideoFrame) {
+    srcW = element.displayWidth
+    srcH = element.displayHeight
+  } else if (typeof ImageBitmap !== 'undefined' && element instanceof ImageBitmap) {
+    srcW = element.width
+    srcH = element.height
+  } else if (typeof OffscreenCanvas !== 'undefined' && element instanceof OffscreenCanvas) {
+    srcW = element.width
+    srcH = element.height
   }
 
   if (element && srcW > 0 && srcH > 0) {

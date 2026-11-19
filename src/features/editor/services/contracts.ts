@@ -43,11 +43,64 @@ export interface RenderProgress {
   message?: string
 }
 
+export interface ExportBenchmarkReport {
+  wallClockTimeMs: number
+  totalFrames: number
+  effectiveFps: number
+  engine: 'webcodecs' | 'mediarecorder' | 'audio-only'
+  stages: {
+    audioMixdownMs: number
+    audioEncodeMs: number
+    assetPreloadMs: number
+    frameLoopMs: number
+    videoFlushMs: number
+    muxingAndBlobMs: number
+  }
+  frameLoopBreakdown: {
+    totalMediabunnyDecodeMs: number
+    totalHtmlVideoSeekWaitMs: number
+    totalCanvasDrawMs: number
+    totalEffectsMs: number
+    totalBackpressureWaitMs: number
+    totalFrameCaptureAndEncodeMs: number
+    totalYieldMs: number
+    otherLoopOverheadMs: number
+    /** @deprecated Compatibility alias */
+    totalSeekWaitMs?: number
+  }
+  frameAverages: {
+    avgFrameTotalMs: number
+    avgMediabunnyDecodeMs: number
+    avgHtmlVideoSeekWaitMs: number
+    avgCanvasDrawMs: number
+    avgEffectsMs: number
+    avgBackpressureWaitMs: number
+    avgFrameCaptureAndEncodeMs: number
+    /** @deprecated Compatibility alias */
+    avgSeekWaitMs?: number
+  }
+  encoderStats: {
+    maxEncodeQueueSize: number
+    avgEncodeQueueSize: number
+    samplesCount: number
+    codec: string
+    requestedHardwareAcceleration: string
+    webcodecsDecodedAssetsCount?: number
+    fallbackHtmlAssetsCount?: number
+    supportProbe?: {
+      preferHardwareSupported: boolean
+      preferSoftwareSupported: boolean
+      noPreferenceSupported: boolean
+    }
+  }
+}
+
 export interface RenderResult {
   blob: Blob
   fileName: string
   durationSeconds: number
   sizeBytes: number
+  benchmark?: ExportBenchmarkReport
 }
 
 export type PlaybackStatus = 'unavailable' | 'idle' | 'playing' | 'buffering' | 'ended'
