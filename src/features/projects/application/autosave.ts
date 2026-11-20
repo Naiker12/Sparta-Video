@@ -84,6 +84,13 @@ export class ProjectAutosave {
 
     if (this.isDestroyed) return
 
+    if (this.pendingPromise) {
+      const pending = this.pendingPromise
+      await pending
+      if (this.pendingPromise === pending) this.pendingPromise = null
+      if (this.isDestroyed) return
+    }
+
     const currentState = this.getState()
     const currentJson = JSON.stringify(currentState)
 
@@ -126,16 +133,21 @@ export class ProjectAutosave {
   }
 
   async flush(): Promise<void> {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer)
-      this.debounceTimer = null
+    while (true) {
+      if (this.debounceTimer) {
+        clearTimeout(this.debounceTimer)
+        this.debounceTimer = null
+      }
+
+      if (this.pendingPromise) await this.pendingPromise
+      if (this.status === 'saved') return
+
       await this.performSave()
-    } else if (this.pendingPromise) {
-      await this.pendingPromise
     }
   }
 
   async stop(): Promise<void> {
+    await this.flush()
     this.isDestroyed = true
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer)

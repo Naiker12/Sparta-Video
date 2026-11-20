@@ -1,4 +1,4 @@
-import type { MediaItem, SequenceSettings, TimelineMarker, Track } from '../../editor/model'
+import type { MediaItem, SequenceSettings, SilenceSuggestion, TimelineMarker, Track, TranscriptCue } from '../../editor/model'
 import type { ProjectPresetFormat } from './project-factory'
 
 export type { ProjectPresetFormat }
@@ -17,6 +17,8 @@ export type PersistedProjectState = {
   snapToFrames: boolean
   mutedTracks: string[]
   lockedTracks: string[]
+  transcript?: TranscriptCue[]
+  silenceSuggestions?: SilenceSuggestion[]
 }
 
 export type ProjectWorkspace = {

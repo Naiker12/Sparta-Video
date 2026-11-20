@@ -25,6 +25,30 @@ describe('editor project operations', () => {
     expect(useEditorStore.getState().selectedClipId).toBe(rightId)
   })
 
+  it('ripple removes a reviewed silence range and undo restores the full timeline', () => {
+    const before = useEditorStore.getState().tracks[0].clips.find((clip) => clip.id === 'c1')!
+    const removed = useEditorStore.getState().splitClipRange('c1', 2, 3)
+    const after = useEditorStore.getState().tracks[0].clips
+    expect(removed).toBe(1)
+    expect(after.find((clip) => clip.id === 'c1')?.duration).toBeCloseTo(2)
+    expect(after.find((clip) => clip.id !== 'c1' && clip.start === 2)?.duration).toBeCloseTo(before.duration - 3)
+    useEditorStore.getState().undo()
+    expect(useEditorStore.getState().tracks[0].clips.find((clip) => clip.id === 'c1')?.duration).toBe(before.duration)
+  })
+
+  it('ripple shifts transcript cues and preserves cues before the removed range', () => {
+    useEditorStore.setState({ transcript: [
+      { id: 'before', clipId: 'c1', start: 1, duration: 0.5, text: 'antes' },
+      { id: 'after', clipId: 'c1', start: 5, duration: 0.5, text: 'después' },
+    ] })
+    useEditorStore.getState().splitClipRange('c1', 2, 3)
+    const transcript = useEditorStore.getState().transcript
+    expect(transcript.find((cue) => cue.id === 'before')?.start).toBe(1)
+    expect(transcript.find((cue) => cue.id === 'after')?.start).toBe(4)
+    useEditorStore.getState().undo()
+    expect(useEditorStore.getState().transcript.find((cue) => cue.id === 'after')?.start).toBe(5)
+  })
+
   it('stores and reverses a marker at the playhead', () => {
     useEditorStore.getState().addMarker(5.25)
     expect(useEditorStore.getState().markers[0].time).toBe(5.25)

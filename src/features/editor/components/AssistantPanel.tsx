@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, Braces, Check, ChevronDown, ChevronRight, Eraser, ListChecks, LoaderCircle, LockKeyhole, PlayCircle, Send } from 'lucide-react'
+import { ArrowDown, AudioLines, Braces, Check, ChevronDown, ChevronRight, Eraser, ListChecks, LoaderCircle, LockKeyhole, PlayCircle, Send } from 'lucide-react'
 import { IconButton } from './controls'
 import { Badge } from '../../../shared/ui/badge'
 import { AudioGenerationPanel } from './AudioGenerationPanel'
@@ -19,6 +19,9 @@ import { sendAIChat, type AnalysisDepth, type ChatMessage } from '../services/ai
 import { applyAIOperations, extractAIProposal, formatOperationLabel } from '../services/ai-operations'
 import { toast } from '../../../shared/ui/toast-service'
 import { t } from '../../../shared/i18n/locale'
+import { TranscriptReview } from './TranscriptReview'
+import { transcribeTimelineLocally } from '../services/subtitle-generator'
+import type { SilenceSuggestion } from '../model'
 
 export type AssistantMode = 'create' | 'edit' | 'audio'
 type Props = {
@@ -187,6 +190,35 @@ function AssistantPanelSession({ open, onClose, projectName, projectId, activeMo
   const markers = useEditorStore((state) => state.markers)
   const playhead = useEditorStore((state) => state.playhead)
   const selectedClipId = useEditorStore((state) => state.selectedClipId)
+  const transcript = useEditorStore((state) => state.transcript)
+  const setTranscript = useEditorStore((state) => state.setTranscript)
+  const splitClipRange = useEditorStore((state) => state.splitClipRange)
+  const setPlayhead = useEditorStore((state) => state.setPlayhead)
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [transcriptBusy, setTranscriptBusy] = useState(false)
+  const [transcriptStatus, setTranscriptStatus] = useState('')
+  const silenceSuggestions = useEditorStore((state) => state.silenceSuggestions)
+  const setSilenceSuggestions = useEditorStore((state) => state.setSilenceSuggestions)
+
+  const runLocalTranscription = async () => {
+    setTranscriptBusy(true)
+    try {
+      const result = await transcribeTimelineLocally({ onProgress: setTranscriptStatus })
+      setTranscript(result.cues)
+      setSilenceSuggestions(result.pauses)
+      if (result.cues.length) toast.success(t('Transcripción lista', 'Transcript ready'), { description: `${result.cues.length} ${t('segmentos', 'segments')} · ${result.pauses.length} ${t('pausas sugeridas', 'suggested pauses')}` })
+      else toast.warning(t('No se detectó voz para transcribir', 'No speech was detected to transcribe'))
+    } catch (reason) {
+      toast.error(t('No se pudo analizar el video', 'Could not analyze the video'), { description: reason instanceof Error ? reason.message : String(reason) })
+    } finally { setTranscriptBusy(false); setTranscriptStatus('') }
+  }
+
+  const applySilenceCut = (suggestion: SilenceSuggestion) => {
+    const removed = splitClipRange(suggestion.clipId, suggestion.start, suggestion.end)
+    if (removed > 0) {
+      toast.success(t('Pausa eliminada', 'Pause removed'), { description: `${removed.toFixed(2)} s · ${t('Puedes deshacer con Ctrl+Z', 'Undo with Ctrl+Z')}` })
+    }
+  }
 
   useEffect(() => {
     const refresh = () => setRegistry(readProviderRegistry())
@@ -348,7 +380,8 @@ function AssistantPanelSession({ open, onClose, projectName, projectId, activeMo
     ]
   }, [mode])
 
-  return <aside className={`assistant-panel ${open ? '' : 'hidden'}`}>
+  return <aside className={`assistant-panel relative ${open ? '' : 'hidden'}`}>
+    {transcriptOpen && <TranscriptReview cues={transcript} pauses={silenceSuggestions} frameRate={sequence.frameRate} onClose={() => setTranscriptOpen(false)} onSeek={setPlayhead} onCut={applySilenceCut} onTranscribe={() => void runLocalTranscription()} busy={transcriptBusy} />}
     <div className="assistant-heading">
       <div className="assistant-badge"><IconNleAssistant size={14} /></div>
       <div className="assistant-heading-copy">
@@ -398,6 +431,7 @@ function AssistantPanelSession({ open, onClose, projectName, projectId, activeMo
         </button>
       </div>
     </div>
+    <div className="px-3 pt-2"><button type="button" onClick={() => setTranscriptOpen(true)} className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/15 bg-cyan-300/[0.05] px-2.5 py-2 text-[11px] font-semibold text-cyan-100/85 hover:bg-cyan-300/10"><AudioLines size={13} />{t('Transcripción y limpieza', 'Transcript & cleanup')}{transcript.length > 0 && <span className="rounded-full bg-cyan-200/10 px-1.5 py-0.5 text-[9px]">{transcript.length}</span>}</button>{transcriptBusy && transcriptStatus && <p className="mb-0 mt-1 truncate text-[10px] text-white/45" role="status">{transcriptStatus}</p>}{transcript.length > 0 && <button type="button" onClick={() => setTranscriptOpen(true)} className="mt-1 flex w-full items-center justify-center gap-1 text-[10px] text-white/40 hover:text-cyan-100"><IconNleCaptions size={11} />{t('Abrir transcripción guardada', 'Open saved transcript')}</button>}</div>
     <div className="chat-content" ref={feedRef} onScroll={updateScrollFollow}>
       {mode === 'audio' ? <AudioGenerationPanel /> : <>
         {!messages.length && !requesting && <div className="chat-welcome p-1">

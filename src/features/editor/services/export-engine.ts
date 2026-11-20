@@ -430,7 +430,7 @@ class MediabunnyAssetReader {
       }
 
       if (nextResult.done || !nextResult.value) {
-        // End of stream reached; keep last known sample
+        // Do not reuse a previous clip's frame when this iterator reaches the end.
         break
       }
 
@@ -449,7 +449,10 @@ class MediabunnyAssetReader {
       }
     }
 
-    return this.currentSample
+    return this.currentSample && targetTime >= this.currentSample.timestamp - 0.001 &&
+      targetTime < this.currentSample.timestamp + Math.max(this.currentSample.duration, 0.033) + 0.001
+      ? this.currentSample
+      : null
   }
 
   async closeIterator(): Promise<void> {
@@ -950,7 +953,10 @@ async function renderWithWebCodecs({
             const expectedSourceTime = clip.freezeTime !== undefined
               ? clip.freezeTime
               : Math.max(0, (clipTime - clip.start) * (clip.speed ?? 1.0))
-            const sample = await reader.getSample(expectedSourceTime)
+            const sample = await Promise.race([
+              reader.getSample(expectedSourceTime),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+            ])
             totalMediabunnyDecodeMs += performance.now() - tDecStart
             if (sample) {
               usedWebCodecsAssets.add(aId)
@@ -1186,6 +1192,19 @@ export async function renderSequence({
   onProgress?.({ stage: 'preparing', percent: 0, currentFrame: 0, totalFrames, message: 'Preparando medios y motor de render...' })
 
   if (signal?.aborted) throw new Error('Exportación cancelada.')
+
+  if (settings.format !== 'wav' && settings.preset !== 'audio-only') {
+    const hasRenderableContent = tracks.some((track) =>
+      !mutedTracks.includes(track.id) && track.clips.some((clip) =>
+        track.kind === 'video'
+          ? clip.kind !== 'adjustment' || clip.text !== undefined || clip.thumbnail === 'text-overlay'
+          : clip.kind === 'audio',
+      ),
+    )
+    if (!hasRenderableContent) {
+      throw new Error('No hay clips de vídeo, imagen, texto o audio en la línea de tiempo para exportar.')
+    }
+  }
 
   // Audio-only export branch
   if (settings.format === 'wav' || settings.preset === 'audio-only') {

@@ -174,3 +174,21 @@ export type MediaItem = {
 export type SequenceSettings = { width: number; height: number; frameRate: number }
 
 export type TimelineMarker = { id: string; time: number; label: string; color?: string }
+
+export type TranscriptCue = {
+  id: string
+  clipId: string
+  start: number
+  duration: number
+  text: string
+}
+
+export type SilenceSuggestion = {
+  id: string
+  clipId: string
+  start: number
+  end: number
+  duration: number
+  sourceStart?: number
+  sourceEnd?: number
+}

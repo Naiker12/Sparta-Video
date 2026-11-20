@@ -67,11 +67,6 @@ export function AppRoot() {
       })
 
       // 3. Flush on beforeunload
-      const handleBeforeUnload = () => {
-        void autosave.flush()
-      }
-      window.addEventListener('beforeunload', handleBeforeUnload)
-
       // 4. Listen for retry save event
       const handleRetry = () => {
         void autosave.performSave()
@@ -79,7 +74,6 @@ export function AppRoot() {
       window.addEventListener('sparta-project-save-retry', handleRetry)
 
       return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload)
         window.removeEventListener('sparta-project-save-retry', handleRetry)
         unsubscribeStore()
         void autosave.stop()
@@ -114,7 +108,12 @@ export function AppRoot() {
 
   const handleGoHome = async () => {
     if (autosaveRef.current) {
-      await autosaveRef.current.flush()
+      try {
+        await autosaveRef.current.flush()
+      } catch {
+        toast.error(t('No se pudieron guardar los últimos cambios', 'Could not save the latest changes'))
+        return
+      }
     }
     if (currentProjectId) {
       const state = getPersistable()
@@ -132,15 +131,20 @@ export function AppRoot() {
     format: '16:9' | '9:16' | '1:1' | '4:5' | '21:9'
     fps: number
   }) => {
+    const createToast = toast.loading(t('Creando proyecto…', 'Creating project…'))
     try {
       if (autosaveRef.current) {
         await autosaveRef.current.flush()
       }
 
       const project = await defaultProjectService.createProject(options)
+      toast.success(t('Proyecto creado y guardado', 'Project created and saved'), {
+        id: createToast,
+        description: project.state.projectName,
+      })
       await handleOpenProject(project.id)
     } catch {
-      toast.error(t('Error al crear nuevo proyecto', 'Error creating new project'))
+      toast.error(t('No se pudo guardar el proyecto', 'Could not save the project'), { id: createToast })
     }
   }
 

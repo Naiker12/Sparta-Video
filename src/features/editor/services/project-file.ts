@@ -51,6 +51,8 @@ export const spartaProjectFileV2Schema = z.object({
     snapToFrames: z.boolean().default(true),
     mutedTracks: z.array(z.string()).default([]),
     lockedTracks: z.array(z.string()).default([]),
+    transcript: z.array(z.object({ id: z.string(), clipId: z.string(), start: z.number().nonnegative(), duration: z.number().positive(), text: z.string() })).optional(),
+    silenceSuggestions: z.array(z.object({ id: z.string(), clipId: z.string(), start: z.number().nonnegative(), end: z.number().nonnegative(), duration: z.number().nonnegative(), sourceStart: z.number().optional(), sourceEnd: z.number().optional() })).optional(),
   }).refine((p) => !!(p.name || p.projectName), { message: 'Project name is required' }),
 })
 
@@ -77,6 +79,8 @@ export function exportProjectData(state?: EditorState | PersistedProjectState): 
       snapToFrames: current.snapToFrames,
       mutedTracks: current.mutedTracks,
       lockedTracks: current.lockedTracks,
+      transcript: 'transcript' in current ? current.transcript : [],
+      silenceSuggestions: 'silenceSuggestions' in current ? current.silenceSuggestions : [],
     },
   }
 }
@@ -147,6 +151,8 @@ export function loadProjectFromFile(fileData: SpartaProjectFile) {
     snapToFrames: p.snapToFrames ?? true,
     mutedTracks: p.mutedTracks ?? [],
     lockedTracks: p.lockedTracks ?? [],
+    transcript: (p as typeof p & { transcript?: PersistedProjectState['transcript'] }).transcript ?? [],
+    silenceSuggestions: (p as typeof p & { silenceSuggestions?: PersistedProjectState['silenceSuggestions'] }).silenceSuggestions ?? [],
   }
   useEditorStore.getState().loadProject(state)
 }

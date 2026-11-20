@@ -1,5 +1,8 @@
 import { z } from 'zod'
 
+const transcriptCueSchema = z.object({ id: z.string(), clipId: z.string(), start: z.number().nonnegative(), duration: z.number().positive(), text: z.string() })
+const silenceSuggestionSchema = z.object({ id: z.string(), clipId: z.string(), start: z.number().nonnegative(), end: z.number().nonnegative(), duration: z.number().nonnegative(), sourceStart: z.number().optional(), sourceEnd: z.number().optional() })
+
 export const SPARTA_PROJECT_FORMAT = 'sparta-video-project'
 export const SPARTA_PROJECT_VERSION_V1 = 1
 export const SPARTA_PROJECT_VERSION_V2 = 2
@@ -177,6 +180,8 @@ export const persistedProjectStateSchema = z.object({
   snapToFrames: z.boolean().default(true),
   mutedTracks: z.array(z.string()).default([]),
   lockedTracks: z.array(z.string()).default([]),
+  transcript: z.array(transcriptCueSchema).optional(),
+  silenceSuggestions: z.array(silenceSuggestionSchema).optional(),
 })
 
 export const projectWorkspaceSchema = z.object({
@@ -225,7 +230,14 @@ export const spartaProjectFileV1Schema = z.object({
     assets: z.array(mediaItemSchema),
     markers: z.array(markerSchema).optional(),
     snapToFrames: z.boolean().optional(),
+    transcript: z.array(transcriptCueSchema).optional(),
+    silenceSuggestions: z.array(silenceSuggestionSchema).optional(),
   }),
+})
+
+export const spartaFileProjectSchema = persistedProjectStateSchema.extend({
+  name: z.string().optional(),
+  projectName: z.string(),
 })
 
 export const spartaProjectFileV2Schema = z.object({
@@ -234,7 +246,7 @@ export const spartaProjectFileV2Schema = z.object({
   id: z.string(),
   createdAt: z.string(),
   updatedAt: z.string().optional(),
-  project: persistedProjectStateSchema,
+  project: spartaFileProjectSchema,
   workspace: projectWorkspaceSchema.optional(),
 })
 

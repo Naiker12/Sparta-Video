@@ -262,8 +262,6 @@ export function ExportDialog({
       onOpenChange={(next) => {
         if (next) {
           setSettings(getDefaultExportSettings(projectName, preset))
-          setIsExporting(false)
-          setProgress(null)
         } else if (isExporting) {
           handleCancelExport()
         }

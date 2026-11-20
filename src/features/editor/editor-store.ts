@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Clip, MediaItem, SequenceSettings, TimelineMarker, Track } from './model'
+import type { Clip, MediaItem, SequenceSettings, SilenceSuggestion, TimelineMarker, Track, TranscriptCue } from './model'
 import { parseDurationFromDetail } from './services/media-storage'
 import { getDefaultTextAnimation, getDefaultTextStyle, getTextPreset, TEXT_STYLE_PRESETS } from './services/text-presets'
 
@@ -20,7 +20,7 @@ export type SubtitleEntryInput = {
 
 export type ProjectSnapshot = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks' | 'selectedClipId' | 'selectedClipIds' | 'selectedMediaId'>
 export type EditorState = {
-  projectName: string; sequence: SequenceSettings; tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]
+  projectName: string; sequence: SequenceSettings; tracks: Track[]; assets: MediaItem[]; markers: TimelineMarker[]; transcript: TranscriptCue[]; silenceSuggestions: SilenceSuggestion[]
   selectedClipId: string; selectedClipIds: string[]; selectedMediaId: string | null; playhead: number; zoom: number; playing: boolean; snapToFrames: boolean
   activeTool: 'select' | 'razor'
   mutedTracks: string[]; lockedTracks: string[]; past: ProjectSnapshot[]; future: ProjectSnapshot[]
@@ -38,6 +38,9 @@ export type EditorState = {
   addMedia: (asset: MediaItem, at?: number, trackId?: string) => string
   addTextClip: (options?: AddTextClipOptions) => string
   addSubtitleSequence: (entries: SubtitleEntryInput[], options?: { replaceExisting?: boolean }) => number
+  setTranscript: (entries: TranscriptCue[]) => void
+  setSilenceSuggestions: (entries: SilenceSuggestion[]) => void
+  splitClipRange: (clipId: string, start: number, end: number) => number
   clearAllSubtitles: () => number
   applyPresetToAllSubtitles: (presetId: string) => number
   calibrateAllSubtitles: (sourceClipId: string) => number
@@ -52,7 +55,7 @@ export type EditorState = {
   toggleMute: (id: string) => void; toggleLock: (id: string) => void; undo: () => void; redo: () => void
   loadProject: (project: PersistedProjectState) => void; resetProject: () => void
 }
-export type PersistedProjectState = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks'>
+export type PersistedProjectState = Pick<EditorState, 'projectName' | 'sequence' | 'tracks' | 'assets' | 'markers' | 'snapToFrames' | 'mutedTracks' | 'lockedTracks'> & { transcript?: TranscriptCue[]; silenceSuggestions?: SilenceSuggestion[] }
 
 let nextClip = 10
 let nextMarker = 1
@@ -123,11 +126,13 @@ export const getPersistable = (state: EditorState = useEditorStore.getState()): 
   snapToFrames: state.snapToFrames,
   mutedTracks: [...state.mutedTracks],
   lockedTracks: [...state.lockedTracks],
+  transcript: state.transcript.map((cue) => ({ ...cue })),
+  silenceSuggestions: state.silenceSuggestions.map((suggestion) => ({ ...suggestion })),
 })
 
 export const useEditorStore = create<EditorState>()((set, get) => ({
   projectName: 'Sin título', sequence: { width: 1920, height: 1080, frameRate: 24 },
-  tracks: emptyTracks(), assets: [], markers: [], selectedClipId: '', selectedClipIds: [], selectedMediaId: null,
+  tracks: emptyTracks(), assets: [], markers: [], transcript: [], silenceSuggestions: [], selectedClipId: '', selectedClipIds: [], selectedMediaId: null,
   playhead: 0, zoom: 1, playing: false, snapToFrames: true, activeTool: 'select', mutedTracks: [], lockedTracks: [], past: [], future: [],
   setProjectName: (name) => set((state) => { const projectName = name.trim() || 'Sin título'; return projectName === state.projectName ? state : commit(state, { projectName }) }),
   setSequence: (sequence) => set((state) => {
@@ -544,6 +549,13 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     })
     return added
   },
+  setTranscript: (entries) => set({
+    transcript: entries
+      .filter((entry) => entry.text.trim() && Number.isFinite(entry.start) && entry.duration > 0)
+      .map((entry) => ({ ...entry, text: entry.text.trim() }))
+      .sort((a, b) => a.start - b.start),
+  }),
+  setSilenceSuggestions: (entries) => set({ silenceSuggestions: entries.map((entry) => ({ ...entry })) }),
   clearAllSubtitles: () => {
     let count = 0
     set((state) => {
@@ -864,6 +876,70 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     const tracks = copyTracks(state.tracks).map((item) => item.id === track.id ? { ...item, clips: item.clips.flatMap((candidate) => candidate.id === clipId ? [{ ...candidate, duration: offset }, right] : [candidate]) } : item)
     return { ...commit(state, { tracks }), selectedClipId: right.id }
   }),
+  splitClipRange: (clipId, start, end) => {
+    let removedDuration = 0
+    set((state) => {
+      const track = state.tracks.find((item) => item.clips.some((clip) => clip.id === clipId))
+      const clip = track?.clips.find((item) => item.id === clipId)
+      if (!track || !clip || state.lockedTracks.includes(track.id)) return state
+      const fps = state.sequence.frameRate
+      const from = Math.max(clip.start, Math.floor(start * fps) / fps)
+      const to = Math.min(clip.start + clip.duration, Math.ceil(end * fps) / fps)
+      if (to - from < 1 / fps) return state
+      if (state.tracks.some((item) => item.clips.some((candidate) => candidate.start < to && candidate.start + candidate.duration > from && state.lockedTracks.includes(item.id)))) return state
+      const pieces: Clip[] = []
+      if (from - clip.start >= 1 / fps) pieces.push({ ...clip, duration: from - clip.start, keyframes: clip.keyframes?.filter((frame) => frame.time < from - clip.start) })
+      if (clip.start + clip.duration - to >= 1 / fps) {
+        const rightId = `c${nextClip++}`
+        const sourceAdvance = (to - clip.start) * (clip.speed ?? 1)
+        const keyframes = clip.keyframes?.filter((frame) => frame.time >= to - clip.start).map((frame) => ({ ...frame, time: frame.time - (to - clip.start) }))
+        pieces.push({ ...clip, id: rightId, start: from, duration: clip.start + clip.duration - to, offset: (clip.offset ?? 0) + sourceAdvance, freezeTime: clip.freezeTime !== undefined ? clip.freezeTime + sourceAdvance : undefined, keyframes })
+      }
+      const tracks = copyTracks(state.tracks).map((item) => ({ ...item, clips: item.clips.flatMap((candidate) => {
+        if (item.id === track.id && candidate.id === clipId) return pieces
+        const removeDuration = to - from
+        if (candidate.start >= to) {
+          const delta = removeDuration
+          const keyframes = candidate.keyframes?.map((frame) => ({ ...frame, time: frame.time + delta }))
+          return [{ ...candidate, start: candidate.start - delta, keyframes }]
+        }
+        if (candidate.start < from && candidate.start + candidate.duration > to) {
+          const leftDuration = from - candidate.start
+          const rightDuration = candidate.start + candidate.duration - to
+          const rightId = `c${nextClip++}`
+          const rightKeyframes = candidate.keyframes?.filter((frame) => frame.time >= to - candidate.start).map((frame) => ({ ...frame, time: frame.time - removeDuration }))
+          return [
+            { ...candidate, duration: leftDuration, keyframes: candidate.keyframes?.filter((frame) => frame.time < from - candidate.start) },
+            { ...candidate, id: rightId, start: from, duration: rightDuration, offset: (candidate.offset ?? 0) + (to - candidate.start) * (candidate.speed ?? 1), keyframes: rightKeyframes },
+          ]
+        }
+        if (candidate.start < to && candidate.start + candidate.duration > to) {
+          return [{ ...candidate, duration: candidate.duration - removeDuration, offset: (candidate.offset ?? 0) + removeDuration * (candidate.speed ?? 1) }]
+        }
+        if (candidate.start < from && candidate.start + candidate.duration > from) return [{ ...candidate, duration: candidate.duration - removeDuration }]
+        return [candidate]
+      }) }))
+      removedDuration = to - from
+      const transcript = state.transcript.flatMap((cue) => {
+        if (cue.start + cue.duration <= from) return [cue]
+        if (cue.start >= to) return [{ ...cue, start: cue.start - removedDuration }]
+        if (cue.start < from && cue.start + cue.duration > to) return [{ ...cue, duration: cue.duration - removedDuration }]
+        if (cue.start < from) return [{ ...cue, duration: from - cue.start }]
+        if (cue.start + cue.duration > to) return [{ ...cue, start: from, duration: cue.start + cue.duration - to }]
+        return []
+      })
+      const silenceSuggestions = state.silenceSuggestions.flatMap((suggestion) => {
+        if (suggestion.id === `${clipId}-pause-${Math.round((from - clip.start) * 100)}` || (suggestion.clipId === clipId && suggestion.start >= from && suggestion.end <= to)) return []
+        if (suggestion.start >= to) return [{ ...suggestion, start: suggestion.start - removedDuration, end: suggestion.end - removedDuration }]
+        if (suggestion.start < from && suggestion.end > to) return [{ ...suggestion, end: suggestion.end - removedDuration, duration: suggestion.duration - removedDuration }]
+        if (suggestion.start < from && suggestion.end > from) return [{ ...suggestion, end: from, duration: from - suggestion.start }]
+        if (suggestion.start < to && suggestion.end > to) return [{ ...suggestion, start: from, end: suggestion.end - removedDuration, duration: suggestion.end - to }]
+        return [suggestion]
+      })
+      return { ...commit(state, { tracks }), transcript, silenceSuggestions, selectedClipId: pieces.at(-1)?.id ?? '' }
+    })
+    return removedDuration
+  },
   deleteClip: (clipId) => set((state) => {
     const owner = state.tracks.find((track) => track.clips.some((clip) => clip.id === clipId))
     if (!owner || state.lockedTracks.includes(owner.id)) return state
@@ -1013,6 +1089,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     tracks: copyTracks(project.tracks),
     assets: project.assets.map((asset) => ({ ...asset })),
     markers: copyMarkers(project.markers),
+    transcript: (project.transcript ?? []).map((cue) => ({ ...cue })),
+    silenceSuggestions: (project.silenceSuggestions ?? []).map((entry) => ({ ...entry })),
     snapToFrames: project.snapToFrames ?? true,
     mutedTracks: [...(project.mutedTracks ?? [])],
     lockedTracks: [...(project.lockedTracks ?? [])],
@@ -1029,6 +1107,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     tracks: emptyTracks(),
     assets: [],
     markers: [],
+    transcript: [],
+    silenceSuggestions: [],
     selectedClipId: '',
     selectedMediaId: null,
     playhead: 0,

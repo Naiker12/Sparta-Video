@@ -1,5 +1,6 @@
 import { useEditorStore, type SubtitleEntryInput } from '../editor-store'
 import type { Clip, MediaItem } from '../model'
+import type { SilenceSuggestion, TranscriptCue } from '../model'
 import { getSessionKey, readProviderRegistry, type ProviderProfile } from './ai-provider-registry'
 import { sendAIChat } from './ai-chat'
 import {
@@ -1017,4 +1018,52 @@ export async function generateSubtitlesFromTimelineVideo(options?: {
     durationSeconds: totalSeqDuration,
     mode: decodedAnyAudio ? 'waveform-vad' : 'script-sync',
   }
+}
+
+export async function transcribeTimelineLocally(options?: {
+  language?: SubtitleLanguage
+  onProgress?: (status: string) => void
+}): Promise<{ cues: TranscriptCue[]; pauses: SilenceSuggestion[] }> {
+  const language = options?.language ?? 'spanish'
+  const state = useEditorStore.getState()
+  const clips = state.tracks
+    .filter((track) => track.kind === 'video' && !state.mutedTracks.includes(track.id))
+    .flatMap((track) => track.clips.filter((clip) => clip.kind === 'video' && clip.text === undefined && clip.thumbnail !== 'text-overlay'))
+    .sort((a, b) => a.start - b.start)
+  if (!clips.length) throw new Error('Añade un clip de vídeo a la timeline para transcribirlo.')
+
+  const cues: TranscriptCue[] = []
+  const pauses: SilenceSuggestion[] = []
+  for (const clip of clips) {
+    const blob = clip.sourceAssetId ? await loadMediaBlob(clip.sourceAssetId).catch(() => null) : null
+    if (!blob) continue
+    options?.onProgress?.(`Analizando ${clip.title} localmente…`)
+    const decoded = await decodeMediaBlobAudio(blob)
+    if (!decoded) continue
+    const samples = decoded.samples.subarray(0, Math.min(decoded.samples.length, Math.floor(clip.duration * decoded.sampleRate)))
+    const clipStartSourceTime = clip.offset ?? 0
+    const clipSamples = clipStartSourceTime > 0
+      ? samples.subarray(Math.min(samples.length, Math.floor(clipStartSourceTime * decoded.sampleRate)))
+      : samples
+    const transcript = await tryLocalBrowserWhisperTranscription(clipSamples, decoded.sampleRate, 0, language, options?.onProgress)
+    for (const [index, cue] of (transcript ?? []).entries()) {
+      cues.push({ id: `${clip.id}-cue-${index}-${Math.round(cue.start * 100)}`, clipId: clip.id, start: clip.start + cue.start, duration: cue.duration, text: cue.text })
+    }
+    const speech = detectSpeechSegmentsFromSamples(clipSamples, decoded.sampleRate, 0)
+    const voiceSegments = transcript?.length
+      ? transcript.map((cue) => ({ start: cue.start, duration: cue.duration, energy: 0.5 }))
+      : speech
+    let cursor = 0
+    for (const segment of voiceSegments) {
+      const gapStart = cursor
+      const gapEnd = segment.start
+      const gapDuration = gapEnd - gapStart
+      if (gapDuration >= 0.8) pauses.push({ id: `${clip.id}-pause-${Math.round(gapStart * 100)}`, clipId: clip.id, start: clip.start + gapStart, end: clip.start + gapEnd, duration: gapDuration, sourceStart: gapStart + clipStartSourceTime, sourceEnd: gapEnd + clipStartSourceTime })
+      cursor = Math.max(cursor, segment.start + segment.duration)
+    }
+    const tail = clip.duration - cursor
+    if (tail >= 0.8) pauses.push({ id: `${clip.id}-pause-tail`, clipId: clip.id, start: clip.start + cursor, end: clip.start + clip.duration, duration: tail, sourceStart: cursor + clipStartSourceTime, sourceEnd: clipStartSourceTime + clip.duration })
+  }
+  options?.onProgress?.('Transcripción y análisis listos.')
+  return { cues, pauses }
 }

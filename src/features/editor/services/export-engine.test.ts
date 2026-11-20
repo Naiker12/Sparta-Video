@@ -85,6 +85,26 @@ describe('export engine', () => {
     ).rejects.toThrow(/cancelada/i)
   })
 
+  it('rejects video export when there are no timeline clips', async () => {
+    const settings: ExportSettings = {
+      preset: 'web-1080p',
+      format: 'mp4',
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      bitrateMbps: 8,
+      fileName: 'empty.mp4',
+      range: 'entire',
+    }
+
+    await expect(renderSequence({
+      tracks: [{ id: 'v1', name: 'Video 01', kind: 'video', clips: [] }],
+      assets: [],
+      sequenceDuration: 0,
+      settings,
+    })).rejects.toThrow(/No hay clips/i)
+  })
+
   it('reports progress stages correctly for audio-only export', async () => {
     const progressReports: Array<{ stage: string; percent: number }> = []
     const settings: ExportSettings = {

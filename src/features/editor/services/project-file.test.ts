@@ -18,6 +18,10 @@ describe('project-file portable format', () => {
   })
 
   it('exports current project state into a valid Sparta schema format', () => {
+    useEditorStore.setState({
+      transcript: [{ id: 'cue-1', clipId: 'c1', start: 2, duration: 1, text: 'Prueba' }],
+      silenceSuggestions: [{ id: 'pause-1', clipId: 'c1', start: 3, end: 4.2, duration: 1.2, sourceStart: 3, sourceEnd: 4.2 }],
+    })
     const data = exportProjectData()
     expect(data.format).toBe(SPARTA_PROJECT_FORMAT)
     expect(data.version).toBe(2)
@@ -27,6 +31,8 @@ describe('project-file portable format', () => {
     expect(data.project.tracks.length).toBeGreaterThan(0)
     expect(data.project.assets.length).toBeGreaterThan(0)
     expect(data.project.markers).toEqual([{ id: 'm1', time: 5, label: 'Intro' }])
+    expect(data.project.transcript).toHaveLength(1)
+    expect(data.project.silenceSuggestions).toHaveLength(1)
   })
 
   it('parses valid exported json and restores into editor store', () => {
@@ -48,6 +54,8 @@ describe('project-file portable format', () => {
     expect(state.markers).toEqual([{ id: 'm1', time: 5, label: 'Intro' }])
     expect(state.mutedTracks).toEqual(['a1'])
     expect(state.lockedTracks).toEqual(['v1'])
+    expect(state.transcript[0]?.text).toBe('Prueba')
+    expect(state.silenceSuggestions[0]?.duration).toBe(1.2)
   })
 
   it('rejects corrupt or invalid json files', () => {
